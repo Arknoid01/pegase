@@ -48,4 +48,14 @@ public class MemoryScorerTest {
         MemoryEntry old = new MemoryEntry("general", "test", 0.5, "2020-01-01");
         assertTrue(MemoryScorer.recencyBoost(recent.createdAt) > MemoryScorer.recencyBoost(old.createdAt));
     }
+
+    @Test
+    public void graphEntityBoost_linkedEntityScoresHigher() {
+        MemoryEntry linked = new MemoryEntry("projects", "Note Fableris", 0.7, "2026-01-01");
+        linked.entityIds.add("project_fableris");
+        double withGraph = MemoryScorer.compositeSemantic(
+                linked, 0.25f, null, Collections.singletonList("project_fableris"));
+        double without = MemoryScorer.compositeSemantic(linked, 0.25f, null, null);
+        assertTrue(withGraph > without);
+    }
 }

@@ -160,8 +160,9 @@ public final class ContextBuilder {
         int max = "project".equals(intent.intent) || "person".equals(intent.intent) ? 3 : 2;
 
         List<String> entityTerms = EntityResolver.termsForScoring(entities);
+        List<String> seedEntityIds = MemoryLinker.seedEntityIds(entities, 3);
         List<MemoryEntry> memories = repo.getRelevantMemoriesSemantic(
-                userMessage, entityTerms, max, minScore);
+                userMessage, entityTerms, seedEntityIds, max, minScore);
         if (memories.isEmpty()) return;
         sb.append("\n--- Souvenirs pertinents ---\n");
         for (MemoryEntry m : memories) {

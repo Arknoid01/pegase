@@ -21,16 +21,31 @@ public final class MemoryScorer {
         return relevance * 0.4 + entityBoost * 0.4 + recency * 0.05 + importance;
     }
 
-    /**
-     * Re-rank sémantique : cosine MiniLM + entités + récence + importance.
-     * {@code cosine} est attendu dans [0, 1].
-     */
     public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms) {
+        return compositeSemantic(entry, cosine, entityTerms, null);
+    }
+
+    /**
+     * Re-rank sémantique : cosine MiniLM + entités + graphe + récence + importance.
+     */
+    public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms,
+            List<String> seedEntityIds) {
         double entityBoost = entityRelevance(entry, entityTerms);
+        double graphBoost = graphEntityBoost(entry, seedEntityIds);
         double recency = recencyBoost(entry.createdAt);
         double importance = Math.min(1.0, entry.importance) * 0.10;
         double c = Math.max(0f, Math.min(1f, cosine));
-        return c * 0.55 + entityBoost * 0.25 + recency * 0.10 + importance;
+        return c * 0.50 + entityBoost * 0.22 + graphBoost * 0.13 + recency * 0.10 + importance;
+    }
+
+    static double graphEntityBoost(MemoryEntry entry, List<String> seedEntityIds) {
+        if (seedEntityIds == null || seedEntityIds.isEmpty() || entry.entityIds.isEmpty()) {
+            return 0;
+        }
+        for (String id : entry.entityIds) {
+            if (seedEntityIds.contains(id)) return MemoryGraph.GRAPH_LINK_BOOST;
+        }
+        return 0;
     }
 
     static double queryRelevance(MemoryEntry entry, String queryLower) {
