@@ -41,5 +41,8 @@ public final class PrefetchBootReceiver extends BroadcastReceiver {
                 com.pegasuscorp.orbe.FloatingOrbService.showCopilot(app);
             }
         } catch (Exception ignored) {}
+        try {
+            com.pegasuscorp.orbe.copilot.CopilotClient.get().sync(app);
+        } catch (Exception ignored) {}
     }
 }

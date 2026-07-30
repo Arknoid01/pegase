@@ -26,6 +26,8 @@ import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 
+import com.pegasuscorp.orbe.copilot.CopilotBubblePanel;
+import com.pegasuscorp.orbe.copilot.CopilotController;
 import com.pegasuscorp.orbe.copilot.CopilotPrefs;
 
 /**

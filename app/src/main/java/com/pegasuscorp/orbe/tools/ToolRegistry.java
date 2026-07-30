@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.tools;
 import com.pegasuscorp.orbe.tools.device.AlarmTool;
 import com.pegasuscorp.orbe.tools.device.CalculatorTool;
 import com.pegasuscorp.orbe.tools.device.CallTool;
+import com.pegasuscorp.orbe.tools.copilot.CopilotActionTool;
 import com.pegasuscorp.orbe.tools.device.ClipboardTool;
 import com.pegasuscorp.orbe.tools.device.ConnectivityTool;
 import com.pegasuscorp.orbe.tools.device.ContactsTool;
@@ -99,6 +100,7 @@ public class ToolRegistry {
             new VolumeTool(),
             new SettingsTool(),
             new ClipboardTool(),
+            new CopilotActionTool(),
             new ContactsTool(),
             new FilesTool()
     );

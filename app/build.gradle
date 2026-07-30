@@ -85,6 +85,8 @@ configurations.configureEach { config ->
 
     // ML Kit Digital Ink Recognition pour la recherche par tracé de lettre
     implementation 'com.google.mlkit:digital-ink-recognition:18.1.0'
+    // OCR écran copilote (extraction locale, pas de compréhension)
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 
     // Orion — aperçu code markdown + coloration (Markwon / Prism4j)
     implementation 'io.noties.markwon:core:4.6.2'

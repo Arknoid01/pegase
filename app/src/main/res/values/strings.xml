@@ -5,4 +5,5 @@
     <string name="shortcut_conversation_long">Ouvrir la discussion Pégase</string>
     <string name="shortcut_orion_short">Orion</string>
     <string name="shortcut_orion_long">Ouvrir Orion</string>
+    <string name="copilot_accessibility_description">Pégase copilote — actions locales dans les apps autorisées (ex. sous-titres YouTube) et lecture d\'écran pour l\'aide contextuelle. Aucune analyse hors apps que tu actives explicitement.</string>
 </resources>

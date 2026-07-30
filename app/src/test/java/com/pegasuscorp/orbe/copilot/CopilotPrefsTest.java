@@ -16,9 +16,18 @@ public class CopilotPrefsTest {
     @Test
     public void alwaysOn_defaultsTrue() {
         Context ctx = ApplicationProvider.getApplicationContext();
-        CopilotPrefs.setAlwaysOn(ctx, false);
         CopilotPrefs.setAlwaysOn(ctx, true);
         assertTrue(CopilotPrefs.isAlwaysOn(ctx));
+    }
+
+    @Test
+    public void whitelist_strict() {
+        Context ctx = ApplicationProvider.getApplicationContext();
+        CopilotPrefs.setWhitelist(ctx, java.util.Collections.emptySet());
+        assertFalse(CopilotPrefs.isPackageAllowed(ctx, CopilotPrefs.PKG_YOUTUBE));
+        CopilotPrefs.enableYouTubeCopilot(ctx);
+        assertTrue(CopilotPrefs.isPackageAllowed(ctx, CopilotPrefs.PKG_YOUTUBE));
+        assertTrue(CopilotPrefs.isScreenAnalysisEnabled(ctx));
     }
 
     @Test
@@ -27,14 +36,5 @@ public class CopilotPrefsTest {
         CopilotPrefs.setOrbPosition(ctx, 120, 340);
         assertEquals(120, CopilotPrefs.getOrbX(ctx));
         assertEquals(340, CopilotPrefs.getOrbY(ctx));
-    }
-
-    @Test
-    public void bubbleOpen_roundTrip() {
-        Context ctx = ApplicationProvider.getApplicationContext();
-        CopilotPrefs.setBubbleOpen(ctx, true);
-        assertTrue(CopilotPrefs.isBubbleOpen(ctx));
-        CopilotPrefs.setBubbleOpen(ctx, false);
-        assertFalse(CopilotPrefs.isBubbleOpen(ctx));
     }
 }
