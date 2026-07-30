@@ -263,8 +263,10 @@ public class MemoryRepository implements MemoryStore {
         int limit = Math.min(max, MAX_RELEVANT_MEMORIES);
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
         Map<String, Float> cosineByKey = new HashMap<>();
-        EntityGraphStore.EntityReach entityReach = EntityGraphStore.getInstance(appContext)
-                .expand(seedEntityIds != null ? seedEntityIds : Collections.emptyList(), 2);
+        EntityGraphStore entityGraph = EntityGraphStore.getInstance(appContext);
+        EntityGraphStore.EntityReach entityReach = entityGraph.expand(
+                seedEntityIds != null ? seedEntityIds : Collections.emptyList(), 2);
+        entityGraph.recordRetrievalUse(entityReach);
         try {
             float[] qv = EmbeddingEngine.get(appContext).embed(query == null ? "" : query);
             List<VectorStore.Hit> hits = vectors().search(qv, Math.max(limit * 3, 8), minScore);

@@ -28,6 +28,7 @@ public class EntityGraphStoreUnitTest {
                 EntityEdge.TYPE_RUNS_ON, 0.95);
         String label = EntityGraphStore.formatEdgeLabel(null, edge);
         assertTrue(label.contains("0.95"));
+        assertTrue(label.contains("(figé)"));
         assertTrue(label.contains("──"));
     }
 }

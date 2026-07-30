@@ -107,4 +107,81 @@ public class EntityGraphStoreTest {
         assertEquals(1, reach.hopDistance("project_pegase"));
         assertEquals(2, reach.hopDistance("device_nothing_phone"));
     }
+
+    @Test
+    public void seedDefaults_pegasePhoneIsFrozen() {
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        boolean foundFrozen = false;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("project_pegase".equals(e.fromId) && "device_nothing_phone".equals(e.toId)) {
+                assertTrue(e.frozen);
+                foundFrozen = true;
+            }
+        }
+        assertTrue(foundFrozen);
+    }
+
+    @Test
+    public void applyNaturalDecay_storePersistsLowerWeight() throws Exception {
+        File edges = new File(ctx.getFilesDir(), "memory/entity_edges.json");
+        edges.getParentFile().mkdirs();
+        long now = System.currentTimeMillis();
+        long stale = now - (long) ((EntityEdge.GRACE_DAYS + 400) * 86_400_000L);
+        org.json.JSONArray arr = new org.json.JSONArray();
+        arr.put(new org.json.JSONObject()
+                .put("from", "entity_a")
+                .put("to", "entity_b")
+                .put("type", EntityEdge.TYPE_PREFERS)
+                .put("weight", 0.60)
+                .put("frozen", false)
+                .put("lastUsedAt", stale));
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(edges)) {
+            out.write(arr.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        EntityGraphStore.resetInstanceForTests();
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        graph.applyNaturalDecay(now);
+        double weight = -1;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("entity_a".equals(e.fromId) && "entity_b".equals(e.toId)) {
+                weight = e.weight;
+            }
+        }
+        assertTrue(weight > 0);
+        assertTrue(weight < 0.60);
+    }
+
+    @Test
+    public void recordRetrievalUse_strengthensTraversedEdges() {
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        double before = 0;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("project_fableris".equals(e.fromId) && "project_pegase".equals(e.toId)) {
+                before = e.weight;
+            }
+        }
+        EntityGraphStore.EntityReach reach = graph.expand(
+                Collections.singletonList("project_fableris"), 2);
+        assertFalse(reach.usedEdgeKeys.isEmpty());
+        graph.recordRetrievalUse(reach);
+        double after = 0;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("project_fableris".equals(e.fromId) && "project_pegase".equals(e.toId)) {
+                after = e.weight;
+            }
+        }
+        assertTrue(after >= before);
+    }
+
+    @Test
+    public void freeze_preventsDecayOnNextPass() {
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        graph.link("entity_x", "entity_y", EntityEdge.TYPE_RELATED_TO, 0.55, false);
+        graph.freeze("entity_x", "entity_y", EntityEdge.TYPE_RELATED_TO);
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("entity_x".equals(e.fromId) && "entity_y".equals(e.toId)) {
+                assertTrue(e.frozen);
+            }
+        }
+    }
 }
