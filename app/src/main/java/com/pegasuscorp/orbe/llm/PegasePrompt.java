@@ -115,7 +115,7 @@ public final class PegasePrompt {
         return "Tu es Pégase, l'assistant personnel de Yannick.\n"
                 + "Tu le tutoies toujours.\n"
                 + "Personnalité : " + UserProfileStore.DEFAULT_ASSISTANT_PERSONALITY + "\n"
-                + buildOperationalRules("Yannick");
+                + buildOperationalRules("Yannick", false);
     }
 
     /**

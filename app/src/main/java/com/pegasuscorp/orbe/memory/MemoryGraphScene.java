@@ -56,7 +56,7 @@ public final class MemoryGraphScene {
         public final List<Node> nodes;
         public final List<Edge> edges;
 
-        Scene(List<Node> nodes, List<Edge> edges) {
+        public Scene(List<Node> nodes, List<Edge> edges) {
             this.nodes = nodes;
             this.edges = edges;
         }

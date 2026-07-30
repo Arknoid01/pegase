@@ -1,0 +1,36 @@
+﻿Pégase device test report - 2026-07-30T21:41:39.7142704+02:00
+Device: Nothing A063 (wireless ADB)
+Repo: main @ merged v2 stacks + compile fixes
+
+MERGE
+- All feature branches merged into main and pushed
+- Fixed AIDL import + merge compile errors
+
+INSTALL
+- APK assembleDebug OK (~154 MB)
+- Installed via adb push + pm install SUCCESS (2026-07-30 21:30)
+
+AUTOMATED RESULTS
+[PASS] MainActivity / PegaseInterface launch
+[PASS] Processes :voice + :copilot + main alive
+[PASS] VoiceService bound/running
+[PASS] CopilotService bound/running
+[PASS] FloatingOrbService observed running (SYSTEM_ALERT_WINDOW allow)
+[PASS] ShareIngestActivity launched with SEND text/plain
+[PASS] Deep link pegase://open/conversation
+[PASS] Notif listener already enabled
+[PASS] Accessibility Pegase enabled via settings put
+[PASS] Tools UI: Mode copilote row visible and tappable
+[PASS] Personality guide asset present in tree
+[PASS] No FATAL EXCEPTION for pegase in final check
+[INFO] Memory settings / Copilot settings opened via UI navigation
+[INFO] Chat input smoke (underscores due to adb input text limits)
+[INFO] Full YouTube CC / Chrome translate / WhatsApp notif need manual visual check
+
+MANUAL REMAINING (permissions-sensitive)
+1. In Mode copilote: grant overlay if needed, enable always-on, whitelist YouTube+Chrome
+2. YouTube: voice 'active les sous-titres'
+3. Chrome EN page: translation overlays
+4. Share meaningful text and say 'retiens ca'
+5. Memory graph 3D in Memoire reglages
+6. Timer/alarm via natural voice

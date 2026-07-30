@@ -17,6 +17,7 @@ import com.pegasuscorp.orbe.tools.device.OpenAppTool;
 import com.pegasuscorp.orbe.tools.device.OpenInterfaceTool;
 import com.pegasuscorp.orbe.tools.device.SettingsTool;
 import com.pegasuscorp.orbe.tools.device.ScreenCaptureTool;
+import com.pegasuscorp.orbe.tools.device.ShareTool;
 import com.pegasuscorp.orbe.tools.device.SmsTool;
 import com.pegasuscorp.orbe.tools.device.TimerTool;
 import com.pegasuscorp.orbe.tools.device.VolumeTool;

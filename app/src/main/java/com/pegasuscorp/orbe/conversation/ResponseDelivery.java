@@ -49,8 +49,9 @@ public final class ResponseDelivery {
                 delay = WORK_DELAY_MS;
             }
         }
+        final long speakDelay = delay;
         Runnable speakAnswer = () -> main.postDelayed(
-                () -> voiceManager.speak(text, onComplete), delay);
+                () -> voiceManager.speak(text, onComplete), speakDelay);
 
         if (shouldThinkAloud(text, voiceManager)) {
             String filler = pickThinkingPhrase(mood);

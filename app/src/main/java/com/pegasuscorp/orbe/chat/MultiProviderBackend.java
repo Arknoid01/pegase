@@ -387,52 +387,6 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
         });
     }
 
-    private void streamAgenticWithFallback(AgenticChain chain, ChatSendOptions opts,
-            StreamOnReply callback) {
-        io.execute(() -> {
-            Exception lastError = null;
-            String lastProvider = null;
-            List<LlmProvider> chainProviders = ProviderChain.build(appContext, true);
-            for (LlmProvider p : chainProviders) {
-                if (health.isUnhealthy(p)) continue;
-                String[][] models = ProviderChain.modelsFor(p);
-                for (int i = 0; i < models.length; i++) {
-                    String modelId = models[i][0];
-                    long t0 = System.currentTimeMillis();
-                    try {
-                        LlmProvider attempt = withModel(p, modelId);
-                        OpenAiCompatibleChatBackend backend =
-                                new OpenAiCompatibleChatBackend(appContext, attempt, modelId, 0);
-                        backend.streamAgenticContinuation(chain, optsFor(p, modelId, opts),
-                                callback);
-                        long latency = System.currentTimeMillis() - t0;
-                        health.markSuccess(p);
-                        lastTraceLabel = p.displayName + "/" + modelId;
-                        stageProviderTrace(p.id, modelId, latency);
-                        return;
-                    } catch (LlmRateLimitException e) {
-                        lastError = e;
-                        lastProvider = p.displayName;
-                        health.markRateLimit(p, e.retryAfterMs);
-                        Trace.providerRateLimit(p.id, e.retryAfterMs);
-                        break;
-                    } catch (Exception e) {
-                        lastError = e;
-                        lastProvider = p.displayName;
-                        if (i + 1 >= models.length) {
-                            health.markError(p);
-                            break;
-                        }
-                    }
-                }
-            }
-            String spoken = lastError != null
-                    ? ChatSpokenErrors.toUserMessage(lastProvider, lastError.getMessage())
-                    : ChatSpokenErrors.ALL_MODELS_FAILED_USER_MESSAGE;
-            main.post(() -> callback.onError(spoken));
-        });
-    }
-
     /**
      * Si le modèle a appelé un outil connu absent du filtre du tour,
      * élargit {@code allowedTools} une fois (même provider). Synthèse agentique

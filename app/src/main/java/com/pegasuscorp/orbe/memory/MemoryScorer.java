@@ -22,7 +22,8 @@ public final class MemoryScorer {
     }
 
     public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms) {
-        return compositeSemantic(entry, cosine, entityTerms, null);
+        return compositeSemantic(entry, cosine, entityTerms,
+                (EntityGraphStore.EntityReach) null);
     }
 
     public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms,

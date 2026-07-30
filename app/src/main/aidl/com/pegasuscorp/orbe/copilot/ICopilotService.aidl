@@ -1,5 +1,7 @@
 package com.pegasuscorp.orbe.copilot;
 
+import com.pegasuscorp.orbe.copilot.ICopilotCallback;
+
 /**
  * API analyse copilote exposée par {@link CopilotService} (processus {@code :copilot}).
  */

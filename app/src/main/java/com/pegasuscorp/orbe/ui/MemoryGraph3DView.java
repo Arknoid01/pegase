@@ -261,8 +261,8 @@ public class MemoryGraph3DView extends View {
             MemoryGraphScene.Node node = item.node;
             Projected p = item.projected;
             float radius = node.kind == MemoryGraphScene.NodeKind.ENTITY
-                    ? dp(5f + node.vitality * 3f) * p.scale
-                    : dp(3.5f + node.vitality * 2f) * p.scale;
+                    ? dp(5f + (float) node.vitality * 3f) * p.scale
+                    : dp(3.5f + (float) node.vitality * 2f) * p.scale;
             int core = nodeColor(node);
             glowPaint.setShader(new RadialGradient(
                     p.x, p.y, radius * 2.2f,

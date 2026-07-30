@@ -16,6 +16,8 @@ import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 
+import com.pegasuscorp.orbe.chat.OpenRouterVisionClient;
+
 import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

@@ -359,6 +359,10 @@ public final class CopilotController implements SessionObserver {
     }
 
     @Override
+    public void onToolResult(ToolResult result) {
+    }
+
+    @Override
     public void onError(String message) {
         if (bubbleSink == null) return;
         main.post(() -> bubbleSink.onError(message));

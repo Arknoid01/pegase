@@ -87,9 +87,9 @@ public final class A11yTreeExtractor {
             if (nodes == null) return "";
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < nodes.length(); i++) {
-                JSONObject n = nodes.optJSONObject(i);
-                if (n == null) continue;
-                String text = n.optString("text", "").trim();
+                JSONObject node = nodes.optJSONObject(i);
+                if (node == null) continue;
+                String text = node.optString("text", "").trim();
                 if (text.isEmpty()) continue;
                 if (sb.length() > 0) sb.append('\n');
                 sb.append(text);
@@ -108,7 +108,10 @@ public final class A11yTreeExtractor {
             NodeDepth item = queue.removeFirst();
             AccessibilityNodeInfo node = item.node;
             try {
-                appendNode(node, out);
+                try {
+                    appendNode(node, out);
+                } catch (Exception ignored) {
+                }
                 for (int i = 0; i < node.getChildCount(); i++) {
                     AccessibilityNodeInfo child = node.getChild(i);
                     if (child != null) {
