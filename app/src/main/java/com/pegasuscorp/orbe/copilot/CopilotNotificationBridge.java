@@ -27,6 +27,7 @@ public final class CopilotNotificationBridge {
         Intent i = new Intent(ACTION_IMPORTANT_NOTIF);
         i.setPackage(app.getPackageName());
         i.putExtra("package", item.packageName);
+        i.putExtra("appLabel", item.appLabel);
         i.putExtra("title", item.title);
         i.putExtra("text", item.text);
         i.putExtra("line", line);

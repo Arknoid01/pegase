@@ -4,12 +4,14 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
  * Pipeline d'analyse continue — déclenché par changement de contenu, pas par intervalle.
- * Priorité arbre a11y ; OCR en complément (futur). Filtre local avant tout envoi cloud.
+ * Priorité arbre a11y ; OCR en complément via {@link OcrFallback}. Filtre local avant cloud.
  */
 public final class CopilotAnalysisEngine {
 
@@ -19,6 +21,7 @@ public final class CopilotAnalysisEngine {
 
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final int MAX_HIGHLIGHTS = 12;
 
     private final Context appContext;
     private volatile boolean screenOn = true;
@@ -47,6 +50,7 @@ public final class CopilotAnalysisEngine {
             String text = joinText(nodes);
             if (text.isEmpty()) return;
             ScreenContextStore.update(ctx, packageName, text);
+            maybeShowElementHighlights(ctx, nodes);
             List<A11ySnapshot.Node> foreign = CopilotLocaleFilter.foreignBlocks(nodes);
             if (!foreign.isEmpty()) {
                 CloudSink sink = cloudSink;
@@ -55,6 +59,26 @@ public final class CopilotAnalysisEngine {
                 }
             }
         });
+    }
+
+    private static void maybeShowElementHighlights(Context ctx, List<A11ySnapshot.Node> nodes) {
+        if (!CopilotPrefs.isElementHighlightEnabled(ctx)) return;
+        List<ElementHighlightService.HighlightRect> rects = buildHighlightRects(nodes);
+        if (rects.isEmpty()) return;
+        MAIN.post(() -> ElementHighlightService.show(ctx, rects));
+    }
+
+    static List<ElementHighlightService.HighlightRect> buildHighlightRects(
+            List<A11ySnapshot.Node> nodes) {
+        List<ElementHighlightService.HighlightRect> out = new ArrayList<>();
+        if (nodes == null) return out;
+        for (A11ySnapshot.Node n : nodes) {
+            if (!n.clickable || !n.hasBounds()) continue;
+            out.add(new ElementHighlightService.HighlightRect(
+                    n.left, n.top, n.right, n.bottom, n.text));
+            if (out.size() >= MAX_HIGHLIGHTS) break;
+        }
+        return out;
     }
 
     private static String joinText(List<A11ySnapshot.Node> nodes) {

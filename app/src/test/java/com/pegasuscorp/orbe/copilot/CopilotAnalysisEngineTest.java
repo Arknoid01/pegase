@@ -28,4 +28,15 @@ public class CopilotAnalysisEngineTest {
         assertTrue(ShareIngestRouter.looksLikeRemember("pegase retiens ca"));
         assertTrue(ShareIngestRouter.looksLikeRemember("retenir ça"));
     }
+
+    @Test
+    public void buildHighlightRects_clickableOnly() {
+        java.util.List<A11ySnapshot.Node> nodes = new java.util.ArrayList<>();
+        nodes.add(new A11ySnapshot.Node("OK", true, 10, 20, 80, 60));
+        nodes.add(new A11ySnapshot.Node("Texte", false, 0, 0, 100, 40));
+        java.util.List<ElementHighlightService.HighlightRect> rects =
+                CopilotAnalysisEngine.buildHighlightRects(nodes);
+        assertEquals(1, rects.size());
+        assertEquals(10, rects.get(0).left);
+    }
 }

@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.copilot;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -13,6 +14,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.graphics.Insets;
@@ -52,11 +55,18 @@ public class CopilotSettingsActivity extends AppCompatActivity {
 
   private float density;
   private LinearLayout contentHost;
+  private ActivityResultLauncher<Intent> screenPickerLauncher;
+  private ActivityResultLauncher<Intent> notifPickerLauncher;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     density = getResources().getDisplayMetrics().density;
+
+    screenPickerLauncher = registerForActivityResult(
+        new ActivityResultContracts.StartActivityForResult(), r -> rebuild());
+    notifPickerLauncher = registerForActivityResult(
+        new ActivityResultContracts.StartActivityForResult(), r -> rebuild());
 
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
@@ -115,6 +125,10 @@ public class CopilotSettingsActivity extends AppCompatActivity {
       CopilotPrefs.setTranslationOverlayEnabled(this, on);
       if (!on) TranslationOverlayService.hide(this);
     });
+    addSwitch("Surlignage boutons (a11y)", CopilotPrefs.isElementHighlightEnabled(this), (on) -> {
+      CopilotPrefs.setElementHighlightEnabled(this, on);
+      if (!on) ElementHighlightService.hide(this);
+    });
     addSwitch("Alertes notifications ciblées", CopilotPrefs.isNotificationCopilotEnabled(this), (on) -> {
       CopilotPrefs.setNotificationCopilotEnabled(this, on);
     });
@@ -129,7 +143,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     addActionButton("Accès aux notifications", () -> NotificationAccess.openSettings(this));
 
     addSectionTitle("Apps — analyse d'écran");
-    addHint("Seules ces apps déclenchent lecture a11y / traduction.");
+    addHint("Seules ces apps déclenchent lecture a11y / traduction / OCR.");
     Set<String> screenWl = new HashSet<>(CopilotPrefs.getWhitelist(this));
     for (AppPreset p : PRESETS) {
       boolean on = screenWl.contains(p.packageName);
@@ -142,7 +156,16 @@ public class CopilotSettingsActivity extends AppCompatActivity {
           CopilotPrefs.setScreenAnalysisEnabled(this, true);
         }
       });
+      screenWl.remove(p.packageName);
     }
+    for (String pkg : screenWl) {
+      addCustomAppRow(pkg, true);
+    }
+    addActionButton("+ Ajouter une app installée", () -> {
+      Intent i = new Intent(this, CopilotAppPickerActivity.class);
+      i.putExtra(CopilotAppPickerActivity.EXTRA_TARGET, CopilotAppPickerActivity.TARGET_SCREEN);
+      screenPickerLauncher.launch(i);
+    });
 
     addSectionTitle("Apps — notifications copilote");
     addHint("Pégase t'alerte uniquement pour ces apps.");
@@ -156,7 +179,39 @@ public class CopilotSettingsActivity extends AppCompatActivity {
         CopilotPrefs.setNotificationWhitelist(this, wl);
         if (checked) CopilotPrefs.setNotificationCopilotEnabled(this, true);
       });
+      notifWl.remove(p.packageName);
     }
+    for (String pkg : notifWl) {
+      addCustomAppRow(pkg, false);
+    }
+    addActionButton("+ Ajouter une app (notifications)", () -> {
+      Intent i = new Intent(this, CopilotAppPickerActivity.class);
+      i.putExtra(CopilotAppPickerActivity.EXTRA_TARGET, CopilotAppPickerActivity.TARGET_NOTIF);
+      notifPickerLauncher.launch(i);
+    });
+  }
+
+  private void addCustomAppRow(String packageName, boolean screenList) {
+    String label = resolveLabel(packageName);
+    addSwitch(label + " ✕", true, (checked) -> {
+      if (!checked) {
+        if (screenList) {
+          CopilotPrefs.removeFromWhitelist(this, packageName);
+        } else {
+          CopilotPrefs.removeFromNotificationWhitelist(this, packageName);
+        }
+        rebuild();
+      }
+    });
+  }
+
+  private String resolveLabel(String packageName) {
+    try {
+      PackageManager pm = getPackageManager();
+      CharSequence cs = pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0));
+      if (cs != null && cs.length() > 0) return cs.toString();
+    } catch (Exception ignored) {}
+    return packageName;
   }
 
   private void addSectionTitle(String text) {

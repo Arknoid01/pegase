@@ -29,16 +29,50 @@ public final class A11yTreeExtractor {
             JSONObject doc = new JSONObject();
             doc.put("package", packageName != null ? packageName : "");
             doc.put("ts", System.currentTimeMillis());
+            doc.put("source", "a11y");
             JSONArray nodes = new JSONArray();
             collectNodes(root, nodes, 0);
             doc.put("nodes", nodes);
-            File dir = snapshotDir(ctx);
-            if (!dir.exists()) dir.mkdirs();
-            File out = new File(dir, "a11y_snapshot.json");
-            try (FileOutputStream fos = new FileOutputStream(out)) {
-                fos.write(doc.toString().getBytes(StandardCharsets.UTF_8));
-            }
+            writeDoc(ctx, doc);
         } catch (Exception ignored) {}
+    }
+
+    /** Fusionne des blocs OCR dans le snapshot quand l'arbre a11y est vide. */
+    public static void mergeOcrBlocks(android.content.Context ctx, String packageName,
+            java.util.List<ScreenTextExtractor.TextBlock> blocks) {
+        if (ctx == null || blocks == null || blocks.isEmpty()) return;
+        try {
+            JSONObject doc = new JSONObject();
+            doc.put("package", packageName != null ? packageName : "");
+            doc.put("ts", System.currentTimeMillis());
+            doc.put("source", "ocr");
+            JSONArray nodes = new JSONArray();
+            for (ScreenTextExtractor.TextBlock block : blocks) {
+                if (block == null || block.text.isEmpty()) continue;
+                JSONObject o = new JSONObject();
+                o.put("text", block.text.length() > MAX_TEXT_LEN
+                        ? block.text.substring(0, MAX_TEXT_LEN) + "…" : block.text);
+                o.put("class", "ocr");
+                o.put("clickable", false);
+                o.put("left", block.left);
+                o.put("top", block.top);
+                o.put("right", block.right);
+                o.put("bottom", block.bottom);
+                nodes.put(o);
+                if (nodes.length() >= MAX_NODES) break;
+            }
+            doc.put("nodes", nodes);
+            writeDoc(ctx, doc);
+        } catch (Exception ignored) {}
+    }
+
+    private static void writeDoc(android.content.Context ctx, JSONObject doc) throws Exception {
+        File dir = snapshotDir(ctx);
+        if (!dir.exists()) dir.mkdirs();
+        File out = new File(dir, "a11y_snapshot.json");
+        try (FileOutputStream fos = new FileOutputStream(out)) {
+            fos.write(doc.toString().getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     public static String extractPlainText(android.content.Context ctx) {

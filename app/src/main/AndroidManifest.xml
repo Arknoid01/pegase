@@ -362,10 +362,25 @@
                 android:value="copilot_translation_overlay" />
         </service>
 
+        <service
+            android:name=".copilot.ElementHighlightService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="copilot_element_highlight" />
+        </service>
+
         <activity
             android:name=".copilot.CopilotSettingsActivity"
             android:exported="false"
             android:label="Mode copilote"
+            android:theme="@style/Theme.Orbe" />
+
+        <activity
+            android:name=".copilot.CopilotAppPickerActivity"
+            android:exported="false"
+            android:label="Choisir une app"
             android:theme="@style/Theme.Orbe" />
 
         <service

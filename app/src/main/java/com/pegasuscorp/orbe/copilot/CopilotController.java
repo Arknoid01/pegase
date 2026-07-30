@@ -73,9 +73,11 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (intent == null) return;
+                String pkg = intent.getStringExtra("package");
+                String appLabel = intent.getStringExtra("appLabel");
                 String title = intent.getStringExtra("title");
                 String text = intent.getStringExtra("text");
-                String msg = buildNotifMessage(title, text);
+                String msg = CopilotNotificationSummarizer.summarize(pkg, appLabel, title, text);
                 if (bubbleSink != null && !TextUtils.isEmpty(msg)) {
                     bubbleSink.onAssistantMessage(msg);
                 }
@@ -87,15 +89,6 @@ public final class CopilotController implements SessionObserver {
         } else {
             appContext.registerReceiver(notifReceiver, filter);
         }
-    }
-
-    private static String buildNotifMessage(String title, String text) {
-        if (!TextUtils.isEmpty(title) && !TextUtils.isEmpty(text)) {
-            return "📩 " + title + " — " + text;
-        }
-        if (!TextUtils.isEmpty(title)) return "📩 " + title;
-        if (!TextUtils.isEmpty(text)) return "📩 " + text;
-        return "";
     }
 
     public void detach() {

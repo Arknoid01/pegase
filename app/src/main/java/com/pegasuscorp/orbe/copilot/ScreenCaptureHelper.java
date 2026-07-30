@@ -70,7 +70,7 @@ public final class ScreenCaptureHelper {
                     MAIN.post(callback::onNeedPermission);
                     return;
                 }
-                byte[] jpeg = captureBlocking(app);
+                byte[] jpeg = captureJpegBlocking(app);
                 if (jpeg == null || jpeg.length == 0) {
                     MAIN.post(() -> callback.onError("Capture vide."));
                     return;
@@ -81,6 +81,19 @@ public final class ScreenCaptureHelper {
                 MAIN.post(() -> callback.onError(msg));
             }
         });
+    }
+
+    /** Capture synchrone pour OCR (hors UI thread). */
+    public static Bitmap captureBitmapBlocking(Context context) {
+        Context app = context.getApplicationContext();
+        try {
+            if (!hasPermission()) return null;
+            ensureProjection(app);
+            if (projection == null) return null;
+            return captureBitmapInternal(app);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static void ensureProjection(Context app) {
@@ -99,7 +112,17 @@ public final class ScreenCaptureHelper {
         }
     }
 
-    private static byte[] captureBlocking(Context app) throws Exception {
+    private static byte[] captureJpegBlocking(Context app) throws Exception {
+        Bitmap bitmap = captureBitmapInternal(app);
+        if (bitmap == null) return null;
+        try {
+            return OpenRouterVisionClient.compressBitmapToJpeg(bitmap);
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
+    private static Bitmap captureBitmapInternal(Context app) throws Exception {
         WindowManager wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
         if (wm == null) return null;
         DisplayMetrics metrics = new DisplayMetrics();
@@ -129,8 +152,7 @@ public final class ScreenCaptureHelper {
             vd.release();
             reader.close();
         }
-        if (bitmap == null) return null;
-        return OpenRouterVisionClient.compressBitmapToJpeg(bitmap);
+        return bitmap;
     }
 
     private static Bitmap imageToBitmap(Image image, int w, int h) {

@@ -27,6 +27,7 @@ public final class CopilotPrefs {
     private static final String KEY_TRANSLATION_OVERLAY = "translation_overlay";
     private static final String KEY_NOTIF_ENABLED = "notif_copilot";
     private static final String KEY_NOTIF_WHITELIST = "notif_whitelist";
+    private static final String KEY_ELEMENT_HIGHLIGHT = "element_highlight";
 
     private CopilotPrefs() {}
 
@@ -96,6 +97,21 @@ public final class CopilotPrefs {
         Set<String> set = new HashSet<>(getNotificationWhitelist(ctx));
         set.add(packageName.trim());
         setNotificationWhitelist(ctx, set);
+    }
+
+    public static void removeFromNotificationWhitelist(Context ctx, String packageName) {
+        if (TextUtils.isEmpty(packageName)) return;
+        Set<String> set = new HashSet<>(getNotificationWhitelist(ctx));
+        set.remove(packageName.trim());
+        setNotificationWhitelist(ctx, set);
+    }
+
+    public static boolean isElementHighlightEnabled(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_ELEMENT_HIGHLIGHT, false);
+    }
+
+    public static void setElementHighlightEnabled(Context ctx, boolean on) {
+        prefs(ctx).edit().putBoolean(KEY_ELEMENT_HIGHLIGHT, on).apply();
     }
 
     public static boolean isNotificationPackageAllowed(Context ctx, String packageName) {

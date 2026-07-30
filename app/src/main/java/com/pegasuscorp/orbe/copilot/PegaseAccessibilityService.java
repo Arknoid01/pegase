@@ -10,6 +10,9 @@ import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.pegasuscorp.orbe.copilot.apps.YouTubeSubtitleAction;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Service d'accessibilité Pégase — actions locales hardcodées par app.
  * Analyse d'écran déclenchée par changement de contenu (pas d'intervalle fixe).
@@ -21,6 +24,8 @@ public class PegaseAccessibilityService extends AccessibilityService {
             "com.pegasuscorp.orbe.copilot.CONTENT_CHANGED";
 
     private static volatile PegaseAccessibilityService instance;
+
+    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private Runnable pendingNotify;
@@ -95,13 +100,24 @@ public class PegaseAccessibilityService extends AccessibilityService {
         pendingNotify = () -> {
             pendingNotify = null;
             lastNotifiedPackage = pkg;
-            A11yTreeExtractor.writeSnapshot(PegaseAccessibilityService.this,
-                    getRootInActiveWindow(), pkg);
-            Intent i = new Intent(ACTION_CONTENT_CHANGED);
-            i.setPackage(getPackageName());
-            i.putExtra("package", pkg);
-            sendBroadcast(i);
-            CopilotClient.notifyContentChanged(PegaseAccessibilityService.this, pkg);
+            IO.execute(() -> {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                try {
+                    A11yTreeExtractor.writeSnapshot(PegaseAccessibilityService.this, root, pkg);
+                    if (OcrFallback.needsFallback(PegaseAccessibilityService.this)) {
+                        OcrFallback.tryEnrich(PegaseAccessibilityService.this, pkg);
+                    }
+                } finally {
+                    if (root != null) root.recycle();
+                }
+                main.post(() -> {
+                    Intent i = new Intent(ACTION_CONTENT_CHANGED);
+                    i.setPackage(getPackageName());
+                    i.putExtra("package", pkg);
+                    sendBroadcast(i);
+                    CopilotClient.notifyContentChanged(PegaseAccessibilityService.this, pkg);
+                });
+            });
         };
         main.postDelayed(pendingNotify, 280L);
     }
