@@ -17,6 +17,18 @@ public class PersonalityGuideTest {
     }
 
     @Test
+    public void bannedPhrases_parsedFromMarkdown() {
+        String[] banned = PersonalityGuide.parseBannedFromBody(
+                "## Liste noire (ne jamais dire)\n"
+                + "- n'hésite pas\n"
+                + "- excellente question\n"
+                + "## Ton contextuel\n");
+        assertEquals(2, banned.length);
+        assertEquals("n'hésite pas", banned[0]);
+        assertEquals("excellente question", banned[1]);
+    }
+
+    @Test
     public void promptBlock_loadsAssetWithFewShots() {
         String block = PersonalityGuide.promptBlock(RuntimeEnvironment.getApplication());
         assertTrue(block.contains("Personnalité Pégase"));

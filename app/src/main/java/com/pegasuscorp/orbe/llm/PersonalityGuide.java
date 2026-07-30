@@ -7,6 +7,8 @@ import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -21,20 +23,17 @@ public final class PersonalityGuide {
     private static final int MAX_INJECT_CHARS = 6_000;
 
     private static volatile String cachedBody;
+    private static volatile String[] cachedBanned;
 
-    private static final String[] BANNED_PHRASES = {
+    /** Repli si le markdown n'a pas de section liste noire parseable. */
+    private static final String[] FALLBACK_BANNED = {
             "n'hésite pas",
-            "nhesite pas",
             "il est important de noter",
             "en tant qu'assistant",
-            "en tant qu assistant",
             "je suis là pour t'aider",
-            "je suis la pour t aider",
             "cela dépend de plusieurs facteurs",
-            "cela depend de plusieurs facteurs",
             "excellente question",
             "super question",
-            "n'hésitez pas",
     };
 
     private PersonalityGuide() {}
@@ -53,17 +52,93 @@ public final class PersonalityGuide {
     /** Détecte une tournure « assistant générique » — utile pour tests et diag. */
     public static boolean containsBannedPhrase(String text) {
         if (text == null || text.trim().isEmpty()) return false;
-        String fold = text.toLowerCase(Locale.ROOT)
-                .replace('\u2019', '\'')
-                .replace('’', '\'');
-        for (String banned : BANNED_PHRASES) {
+        String fold = foldForMatch(text);
+        for (String banned : bannedPhrases()) {
             if (fold.contains(banned)) return true;
         }
         return false;
     }
 
+    /**
+     * Retire les tournures bannies avant TTS / affichage oral.
+     * Ne remplace pas par une autre phrase — coupe le segment fautif.
+     */
+    public static String stripBannedPhrases(String text) {
+        if (text == null || text.trim().isEmpty()) return "";
+        String out = text;
+        for (String banned : bannedPhrases()) {
+            out = removeIgnoreCase(out, banned);
+        }
+        out = out.replaceAll("\\s+", " ").trim();
+        out = out.replaceAll("^[,.;:!?]+", "").trim();
+        out = out.replaceAll("[,.;:!?]+$", "").trim();
+        return out;
+    }
+
+    static String[] bannedPhrases() {
+        if (cachedBanned != null) return cachedBanned;
+        String body = cachedBody;
+        if (body == null || body.isEmpty()) {
+            cachedBanned = FALLBACK_BANNED;
+            return cachedBanned;
+        }
+        cachedBanned = parseBannedFromBody(body);
+        return cachedBanned;
+    }
+
+    static String[] parseBannedFromBody(String body) {
+        List<String> out = new ArrayList<>();
+        boolean inSection = false;
+        for (String line : body.split("\n")) {
+            String t = line.trim();
+            if (t.startsWith("## ") && foldForMatch(t).contains("liste noire")) {
+                inSection = true;
+                continue;
+            }
+            if (inSection && t.startsWith("## ")) break;
+            if (!inSection || !t.startsWith("- ")) continue;
+            String phrase = normalizeBannedBullet(t.substring(2));
+            if (!phrase.isEmpty()) out.add(phrase);
+        }
+        if (out.isEmpty()) return FALLBACK_BANNED;
+        return out.toArray(new String[0]);
+    }
+
+    private static String normalizeBannedBullet(String raw) {
+        if (raw == null) return "";
+        String s = raw.replace('«', ' ').replace('»', ' ')
+                .replace('…', ' ').replace('!', ' ').trim();
+        int paren = s.indexOf('(');
+        if (paren > 0) s = s.substring(0, paren).trim();
+        return foldForMatch(s).replaceAll("\\s+", " ").trim();
+    }
+
+    private static String foldForMatch(String text) {
+        return text.toLowerCase(Locale.ROOT)
+                .replace('\u2019', '\'')
+                .replace('’', '\'');
+    }
+
+    private static String removeIgnoreCase(String text, String needle) {
+        if (needle == null || needle.isEmpty()) return text;
+        String foldHay = foldForMatch(text);
+        String foldNeedle = foldForMatch(needle);
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            if (foldHay.regionMatches(i, foldNeedle, 0, foldNeedle.length())) {
+                i += foldNeedle.length();
+                continue;
+            }
+            out.append(text.charAt(i));
+            i++;
+        }
+        return out.toString();
+    }
+
     public static void clearCacheForTests() {
         cachedBody = null;
+        cachedBanned = null;
     }
 
     static String load(Context context) {
@@ -71,10 +146,12 @@ public final class PersonalityGuide {
         String fromDisk = readDisk(context);
         if (fromDisk != null && !fromDisk.trim().isEmpty()) {
             cachedBody = fromDisk;
+            bannedPhrases();
             return cachedBody;
         }
         String fromAsset = readAsset(context);
         cachedBody = fromAsset != null ? fromAsset : "";
+        bannedPhrases();
         return cachedBody;
     }
 
