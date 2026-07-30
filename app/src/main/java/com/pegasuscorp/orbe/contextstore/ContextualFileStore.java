@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.pegasuscorp.orbe.diag.CorrectionsStore;
 import com.pegasuscorp.orbe.fs.PegaseFileSystem;
+import com.pegasuscorp.orbe.llm.PersonalityGuide;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -97,6 +98,9 @@ public final class ContextualFileStore {
         keywords.put("memoire f1", "f1-fan-context.md");
         keywords.put("corrections", CorrectionsStore.FILENAME);
         keywords.put("correction", CorrectionsStore.FILENAME);
+        keywords.put("personnalite", PersonalityGuide.FILENAME);
+        keywords.put("personnalité", PersonalityGuide.FILENAME);
+        keywords.put("personality", PersonalityGuide.FILENAME);
     }
 
     /** Enregistre le mot-clé corrections → {@code files/diag/corrections.md}. */

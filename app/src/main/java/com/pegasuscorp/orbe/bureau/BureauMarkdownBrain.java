@@ -7,6 +7,7 @@ import android.util.Log;
 import com.pegasuscorp.orbe.contextstore.ContextSearchIndex;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.diag.DiagBehaviorIndex;
+import com.pegasuscorp.orbe.llm.PersonalityGuide;
 import com.pegasuscorp.orbe.memory.MemoryEntry;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.session.Channel;
@@ -255,8 +256,9 @@ public final class BureauMarkdownBrain {
         }
         String req = userRequest == null ? "" : userRequest.trim();
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Tu es Pégase, assistante du bureau Markdown d'Yannick (Orbe).\n")
-                .append("MODE FIL — conversation liée au plan ouvert.\n\n")
+        prompt.append("Tu es Pégase, assistante du bureau Markdown d'Yannick (Orbe).\n");
+        appendPersonalityBlock(prompt, ctx);
+        prompt.append("MODE FIL — conversation liée au plan ouvert.\n\n")
                 .append("=== DOCUMENT ACTUEL (contexte) ===\n")
                 .append(doc.isEmpty() ? "(vide)\n" : doc + "\n")
                 .append("\n=== MESSAGE ===\n")
@@ -272,8 +274,9 @@ public final class BureauMarkdownBrain {
 
     private static BuiltPrompt buildQuestionPrompt(Context ctx, String doc, String req) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Tu es Pégase, assistante du bureau Markdown d'Yannick (Orbe).\n")
-                .append("MODE QUESTION — réflexion, pas juste exécution.\n\n")
+        prompt.append("Tu es Pégase, assistante du bureau Markdown d'Yannick (Orbe).\n");
+        appendPersonalityBlock(prompt, ctx);
+        prompt.append("MODE QUESTION — réflexion, pas juste exécution.\n\n")
                 .append("=== DOCUMENT ACTUEL (contexte seul — ne pas le modifier) ===\n")
                 .append(doc.isEmpty() ? "(vide)\n" : doc + "\n")
                 .append("\n=== QUESTION ===\n")
@@ -306,6 +309,14 @@ public final class BureauMarkdownBrain {
         }
 
         return new BuiltPrompt(prompt.toString(), chunks, true);
+    }
+
+    private static void appendPersonalityBlock(StringBuilder prompt, Context ctx) {
+        if (prompt == null || ctx == null) return;
+        String block = PersonalityGuide.promptBlock(ctx);
+        if (block != null && !block.isEmpty()) {
+            prompt.append(block);
+        }
     }
 
     /**

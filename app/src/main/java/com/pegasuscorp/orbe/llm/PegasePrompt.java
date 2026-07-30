@@ -47,6 +47,7 @@ public final class PegasePrompt {
                 + situationLine(context)
                 + learningLine(context)
                 + projectObjectsLine(context)
+                + PersonalityGuide.promptBlock(context)
                 + buildSpeechRules(name, nativeFunctionCalling)
                 + toolsSection;
     }

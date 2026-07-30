@@ -6,6 +6,7 @@ import android.text.TextUtils;
 import com.pegasuscorp.orbe.contextstore.ContextSearchIndex;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.diag.Trace;
+import com.pegasuscorp.orbe.llm.PersonalityGuide;
 import com.pegasuscorp.orbe.orion.prompt.OrionMode;
 import com.pegasuscorp.orbe.orion.prompt.PromptCompiler;
 import com.pegasuscorp.orbe.orion.prompt.ResolvedTask;
@@ -149,7 +150,7 @@ public final class OrionPromptBuilder {
                 ? task.mode
                 : modeForProject;
         BuiltPrompt built = assemble(loaded, relevant, extra, userPrompt, history, projectCtx,
-                targetedFileBlock, riskBlock, retainedMode);
+                targetedFileBlock, riskBlock, retainedMode, ctx);
         emitPromptBreakdown(built);
         return built;
     }
@@ -329,33 +330,42 @@ public final class OrionPromptBuilder {
     /** Assemblage pur — tests sans ONNX / stores. */
     public static BuiltPrompt assemble(List<String> loaded,
             List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt) {
-        return assemble(loaded, relevant, extra, userPrompt, null, null);
+        return assemble(loaded, relevant, extra, userPrompt, null, null, null, null, null, null);
     }
 
     public static BuiltPrompt assemble(List<String> loaded,
             List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt,
             String history, String projectFiles) {
-        return assemble(loaded, relevant, extra, userPrompt, history, projectFiles, null, null);
+        return assemble(loaded, relevant, extra, userPrompt, history, projectFiles,
+                null, null, null, null);
     }
 
     static BuiltPrompt assemble(List<String> loaded,
             List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt,
             String history, String projectFiles, String targetedFileBlock) {
         return assemble(loaded, relevant, extra, userPrompt, history, projectFiles,
-                targetedFileBlock, null);
+                targetedFileBlock, null, null, null);
     }
 
     static BuiltPrompt assemble(List<String> loaded,
             List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt,
             String history, String projectFiles, String targetedFileBlock, String riskBlock) {
         return assemble(loaded, relevant, extra, userPrompt, history, projectFiles,
-                targetedFileBlock, riskBlock, null);
+                targetedFileBlock, riskBlock, null, null);
     }
 
     static BuiltPrompt assemble(List<String> loaded,
             List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt,
             String history, String projectFiles, String targetedFileBlock, String riskBlock,
             OrionMode forcedMode) {
+        return assemble(loaded, relevant, extra, userPrompt, history, projectFiles,
+                targetedFileBlock, riskBlock, forcedMode, null);
+    }
+
+    static BuiltPrompt assemble(List<String> loaded,
+            List<ContextSearchIndex.Hit> relevant, String extra, String userPrompt,
+            String history, String projectFiles, String targetedFileBlock, String riskBlock,
+            OrionMode forcedMode, Context ctx) {
         // detect() uniquement sur demande brute — jamais sur mission compilée
         OrionMode mode = forcedMode != null
                 ? forcedMode
@@ -391,7 +401,9 @@ public final class OrionPromptBuilder {
                 .append("Si on te demande d'écrire / modifier du code → produis des fichiers.\n")
                 .append("Ne change pas de sujet. Ne réinvente pas un autre projet.\n")
                 .append("Les sections ci-dessous sont du contexte : utilise-les seulement "
-                        + "si elles aident la demande.\n\n");
+                        + "si elles aident la demande.\n");
+        sb.append(PersonalityGuide.promptBlock(ctx));
+        sb.append('\n');
         systemChars += sb.length() - mark;
 
         if (!TextUtils.isEmpty(history)) {
