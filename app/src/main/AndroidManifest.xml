@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -206,6 +207,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".MemoryConstellationActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:label="Constellation" />
+
+        <activity
             android:name=".SpeechRulesSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe"
@@ -391,6 +398,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="floating_orb_overlay" />
         </service>
+
+        <service
+            android:name=".copilot.MediaProjectionCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <activity
             android:name=".copilot.ScreenCapturePermissionActivity"

@@ -8,11 +8,13 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.animation.ValueAnimator;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.Build;
 import android.os.IBinder;
@@ -20,9 +22,14 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.PopupMenu;
 import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import androidx.core.app.NotificationCompat;
 
@@ -221,11 +228,13 @@ public class FloatingOrbService extends Service {
             @Override
             public void onAssistantMessage(String text) {
                 if (bubblePanel != null) bubblePanel.addAssistantMessage(text);
+                setOrbActive(false);
             }
 
             @Override
             public void onAssistantPartial(String text) {
                 if (bubblePanel != null) bubblePanel.updateAssistantPartial(text);
+                setOrbActive(true);
             }
 
             @Override
@@ -236,11 +245,13 @@ public class FloatingOrbService extends Service {
             @Override
             public void onError(String message) {
                 if (bubblePanel != null) bubblePanel.showError(message);
+                setOrbActive(false);
             }
 
             @Override
             public void onSendingChanged(boolean sending) {
                 if (bubblePanel != null) bubblePanel.setSending(sending);
+                setOrbActive(sending);
             }
 
             @Override
@@ -304,6 +315,9 @@ public class FloatingOrbService extends Service {
         int size = orbSizePx();
         orbLp.width = size;
         orbLp.height = size;
+        if (orbView instanceof MiniOrbView) {
+            ((MiniOrbView) orbView).setDiscreet(currentMode == OverlayMode.COPILOT);
+        }
         orbView.requestLayout();
         if (currentMode == OverlayMode.COPILOT) {
             if (bubblePanel == null) setupCopilotBubble();
@@ -316,6 +330,12 @@ public class FloatingOrbService extends Service {
             applyCollapsedWindowSize();
         }
         updateWindowFocus();
+    }
+
+    private void setOrbActive(boolean active) {
+        if (orbView instanceof MiniOrbView) {
+            ((MiniOrbView) orbView).setActive(active);
+        }
     }
 
     private void applyExpandedWindowSize() {
@@ -480,41 +500,213 @@ public class FloatingOrbService extends Service {
         return currentMode;
     }
 
+    /**
+     * Petite orbe vivante : respiration, halo, étincelle en orbite ;
+     * accélère quand Pégase réfléchit ({@link #setActive}).
+     */
     private static class MiniOrbView extends View {
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final boolean discreet;
+        private final Paint haloPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint sparkPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF arcRect = new RectF();
+        private final List<ValueAnimator> animators = new ArrayList<>();
+
+        private boolean discreet;
+        private boolean active;
+        private float breath;
+        private float haloPhase;
+        private float orbitAngle;
+        private float thinkAngle;
 
         MiniOrbView(Context ctx, boolean discreet) {
             super(ctx);
             this.discreet = discreet;
             setBackgroundColor(Color.TRANSPARENT);
             setLayerType(LAYER_TYPE_SOFTWARE, null);
+            haloPaint.setStyle(Paint.Style.STROKE);
+            haloPaint.setColor(Color.parseColor("#35D0DD"));
+            sparkPaint.setColor(Color.parseColor("#D0FFFE"));
+            arcPaint.setStyle(Paint.Style.STROKE);
+            arcPaint.setStrokeCap(Paint.Cap.ROUND);
+            arcPaint.setColor(Color.parseColor("#B8FBF6"));
+        }
+
+        void setDiscreet(boolean discreet) {
+            if (this.discreet == discreet) return;
+            this.discreet = discreet;
+            rebuildStaticPaints();
+            if (isAttachedToWindow()) startLife();
+            invalidate();
+        }
+
+        void setActive(boolean active) {
+            if (this.active == active) return;
+            this.active = active;
+            invalidate();
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            startLife();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            stopLife();
+            super.onDetachedFromWindow();
         }
 
         @Override
         protected void onSizeChanged(int w, int h, int ow, int oh) {
-            float cx = w / 2f, cy = h / 2f, r = Math.min(w, h) * 0.42f;
-            int core = discreet ? Color.parseColor("#80D0FFFE") : Color.parseColor("#D0FFFE");
-            int mid = discreet ? Color.parseColor("#5035D0DD") : Color.parseColor("#35D0DD");
-            int edge = discreet ? Color.parseColor("#300B7D8F") : Color.parseColor("#0B7D8F");
-            paint.setShader(new RadialGradient(cx, cy, r,
-                    new int[]{core, mid, edge},
-                    new float[]{0f, 0.46f, 1f}, Shader.TileMode.CLAMP));
+            rebuildStaticPaints();
+        }
+
+        private void rebuildStaticPaints() {
+            int w = getWidth();
+            int h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float r = baseRadius(w, h);
             glowPaint.setColor(discreet ? Color.parseColor("#1835D0DD")
                     : Color.parseColor("#3035D0DD"));
             glowPaint.setMaskFilter(new android.graphics.BlurMaskFilter(
-                    r * (discreet ? 0.2f : 0.35f),
+                    r * (discreet ? 0.22f : 0.38f),
                     android.graphics.BlurMaskFilter.Blur.NORMAL));
+            updateOrbShader(w / 2f, h / 2f, r);
+        }
+
+        private float baseRadius(int w, int h) {
+            // Laisse de la place pour halo + pulse sans clipper le coin.
+            return Math.min(w, h) * (discreet ? 0.34f : 0.36f);
+        }
+
+        private void updateOrbShader(float cx, float cy, float r) {
+            float lift = breath * (active ? 0.22f : 0.12f);
+            int coreA = discreet ? (0x70 + (int) (lift * 0x50)) : (0xD0 + (int) (lift * 0x2F));
+            int midA = discreet ? (0x48 + (int) (lift * 0x40)) : 0xFF;
+            int edgeA = discreet ? (0x28 + (int) (lift * 0x28)) : 0xFF;
+            int core = Color.argb(Math.min(255, coreA), 0xD0, 0xFF, 0xFE);
+            int mid = Color.argb(Math.min(255, midA), 0x35, 0xD0, 0xDD);
+            int edge = Color.argb(Math.min(255, edgeA), 0x0B, 0x7D, 0x8F);
+            paint.setShader(new RadialGradient(cx, cy, Math.max(1f, r),
+                    new int[]{core, mid, edge},
+                    new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
+        }
+
+        private void startLife() {
+            stopLife();
+
+            ValueAnimator breathAnim = ValueAnimator.ofFloat(0f, 1f);
+            breathAnim.setDuration(discreet ? 3200 : 2600);
+            breathAnim.setRepeatMode(ValueAnimator.REVERSE);
+            breathAnim.setRepeatCount(ValueAnimator.INFINITE);
+            breathAnim.setInterpolator(new AccelerateDecelerateInterpolator());
+            breathAnim.addUpdateListener(v -> {
+                breath = (float) v.getAnimatedValue();
+                postInvalidateOnAnimation();
+            });
+            breathAnim.start();
+            animators.add(breathAnim);
+
+            ValueAnimator halo = ValueAnimator.ofFloat(0f, 1f);
+            halo.setDuration(discreet ? 2800 : 2200);
+            halo.setRepeatCount(ValueAnimator.INFINITE);
+            halo.setInterpolator(new LinearInterpolator());
+            halo.addUpdateListener(v -> {
+                haloPhase = (float) v.getAnimatedValue();
+                postInvalidateOnAnimation();
+            });
+            halo.start();
+            animators.add(halo);
+
+            ValueAnimator orbit = ValueAnimator.ofFloat(0f, 360f);
+            orbit.setDuration(discreet ? 5600 : 4200);
+            orbit.setRepeatCount(ValueAnimator.INFINITE);
+            orbit.setInterpolator(new LinearInterpolator());
+            orbit.addUpdateListener(v -> {
+                orbitAngle = (float) v.getAnimatedValue();
+                if (active) {
+                    thinkAngle = (thinkAngle + 4.5f) % 360f;
+                }
+                postInvalidateOnAnimation();
+            });
+            orbit.start();
+            animators.add(orbit);
+        }
+
+        private void stopLife() {
+            for (ValueAnimator a : animators) {
+                a.cancel();
+            }
+            animators.clear();
         }
 
         @Override
         protected void onDraw(Canvas c) {
-            float cx = getWidth() / 2f, cy = getHeight() / 2f;
-            float r = Math.min(getWidth(), getHeight()) * 0.42f;
-            if (!discreet) c.drawCircle(cx, cy, r * 1.3f, glowPaint);
+            int w = getWidth();
+            int h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float base = baseRadius(w, h);
+            float pulseAmp = active ? 0.11f : (discreet ? 0.055f : 0.08f);
+            float r = base * (1f + breath * pulseAmp);
+
+            // Halo respirant / onde qui s'étend
+            float wave = haloPhase;
+            float haloR = base * (1.15f + wave * (discreet ? 0.35f : 0.55f));
+            int haloAlpha = (int) ((1f - wave) * (discreet ? 70 : 110)
+                    * (active ? 1.35f : 1f));
+            if (haloAlpha > 4) {
+                haloPaint.setAlpha(Math.min(255, haloAlpha));
+                haloPaint.setStrokeWidth(base * (discreet ? 0.06f : 0.08f)
+                        * (1f + breath * 0.4f));
+                c.drawCircle(cx, cy, haloR, haloPaint);
+            }
+            // Second halo décalé (plus discret)
+            float wave2 = (haloPhase + 0.45f) % 1f;
+            float haloR2 = base * (1.05f + wave2 * (discreet ? 0.28f : 0.42f));
+            int haloAlpha2 = (int) ((1f - wave2) * (discreet ? 40 : 70));
+            if (haloAlpha2 > 4) {
+                haloPaint.setAlpha(haloAlpha2);
+                haloPaint.setStrokeWidth(base * 0.045f);
+                c.drawCircle(cx, cy, haloR2, haloPaint);
+            }
+
+            // Glow doux (voix) + léger en copilote
+            glowPaint.setAlpha(discreet
+                    ? (28 + (int) (breath * 22) + (active ? 18 : 0))
+                    : (48 + (int) (breath * 36)));
+            c.drawCircle(cx, cy, r * (discreet ? 1.18f : 1.32f), glowPaint);
+
+            updateOrbShader(cx, cy, r);
             c.drawCircle(cx, cy, r, paint);
+
+            // Étincelle en orbite — présence vivante
+            float orbitR = base * (discreet ? 0.92f : 1.05f);
+            double rad = Math.toRadians(orbitAngle);
+            float sx = cx + (float) Math.cos(rad) * orbitR;
+            float sy = cy + (float) Math.sin(rad) * orbitR * 0.72f;
+            float sparkR = base * (discreet ? 0.09f : 0.11f)
+                    * (0.75f + breath * 0.45f);
+            sparkPaint.setAlpha(discreet ? 160 : 210);
+            c.drawCircle(sx, sy, sparkR, sparkPaint);
+            sparkPaint.setAlpha(discreet ? 70 : 100);
+            c.drawCircle(sx, sy, sparkR * 1.8f, sparkPaint);
+
+            // Arc « réflexion » quand actif
+            if (active) {
+                float ar = r * 1.22f;
+                arcRect.set(cx - ar, cy - ar, cx + ar, cy + ar);
+                arcPaint.setStrokeWidth(base * 0.07f);
+                arcPaint.setAlpha(190);
+                c.drawArc(arcRect, thinkAngle, 100f, false, arcPaint);
+                arcPaint.setAlpha(70);
+                c.drawArc(arcRect, thinkAngle + 180f, 50f, false, arcPaint);
+            }
         }
     }
 

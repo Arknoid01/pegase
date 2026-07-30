@@ -35,6 +35,7 @@ import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.chat.OpenRouterVisionClient;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.diag.Trace;
+import com.pegasuscorp.orbe.fs.UriDisplayNames;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.session.PegaseSession;
 import com.pegasuscorp.orbe.session.SessionObserver;
@@ -746,13 +747,7 @@ public class DiscussionFragment extends Fragment {
     }
 
     private String uriDisplayName(Uri uri) {
-        String name = uri != null ? uri.getLastPathSegment() : null;
-        if (name == null || name.isEmpty()) return "fichier";
-        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf(':'));
-        if (slash >= 0 && slash < name.length() - 1) {
-            name = name.substring(slash + 1);
-        }
-        return name;
+        return UriDisplayNames.fromUri(getContext(), uri, "fichier");
     }
 
     private void pickChatMdFromPhone() {
@@ -792,12 +787,7 @@ public class DiscussionFragment extends Fragment {
     public void onChatPickMdResult(Uri uri) {
         if (uri == null || getContext() == null) return;
         try {
-            String name = uri.getLastPathSegment();
-            if (name == null || name.isEmpty()) name = "import.md";
-            int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf(':'));
-            if (slash >= 0 && slash < name.length() - 1) {
-                name = name.substring(slash + 1);
-            }
+            String name = UriDisplayNames.fromUri(requireContext(), uri, "import.md");
             if (!name.toLowerCase(Locale.ROOT).endsWith(".md")) {
                 name = name + ".md";
             }

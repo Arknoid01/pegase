@@ -9,6 +9,12 @@ import java.util.regex.Pattern;
  */
 public final class MathCalcTrigger {
 
+    /**
+     * Au-delà : collage / document (ex. .md), pas une expression.
+     * Un « marge » ou « 20-50 » dans un pavé ne doit pas court-circuiter le LLM.
+     */
+    static final int MAX_CHARS = 160;
+
     private static final Pattern HAS_DIGIT = Pattern.compile("\\d");
     /** Signes forts : peu d'ambiguïté avec dates / heures. */
     private static final Pattern STRONG_SIGN = Pattern.compile("[+*×÷=%]|\\bx\\b");
@@ -28,6 +34,8 @@ public final class MathCalcTrigger {
     public static boolean matches(String text) {
         if (text == null || text.trim().isEmpty()) return false;
         String t = text.trim();
+        if (t.length() > MAX_CHARS) return false;
+        if (looksLikeDocument(t)) return false;
         if (DATE_ONLY.matcher(t).matches()) return false;
         if (TIME_ONLY.matcher(t).matches()) return false;
         if (PHONEISH.matcher(t).matches()) return false;
@@ -40,5 +48,19 @@ public final class MathCalcTrigger {
         }
         if (STRONG_SIGN.matcher(t).find()) return true;
         return ARITH_PAIR.matcher(t).find();
+    }
+
+    /** Markdown / multi-lignes → laisser le LLM (ou le contexte joint). */
+    private static boolean looksLikeDocument(String t) {
+        if (t.startsWith("#")) return true;
+        if (t.contains("```")) return true;
+        int lines = 1;
+        for (int i = 0; i < t.length(); i++) {
+            if (t.charAt(i) == '\n') {
+                lines++;
+                if (lines > 3) return true;
+            }
+        }
+        return false;
     }
 }

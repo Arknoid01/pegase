@@ -1,12 +1,17 @@
 package com.pegasuscorp.orbe.copilot;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.*;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 34)
 public class CopilotTranslatorTest {
 
     @Test

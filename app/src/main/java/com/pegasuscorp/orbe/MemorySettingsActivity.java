@@ -150,9 +150,7 @@ public class MemorySettingsActivity extends AppCompatActivity {
         addActionButton("+ Ajouter un souvenir", this::showAddMemoryDialog);
 
         MemoryGraphScene.Scene graphScene = MemoryGraphScene.build(this);
-        if (!graphScene.isEmpty()) {
-            contentHost.addView(buildGraph3DCard(graphScene));
-        }
+        contentHost.addView(buildGraph3DCard(graphScene));
 
         List<String> atlasEdges = MemoryGraphLabels.atlasEdgesLines(this);
         if (!atlasEdges.isEmpty()) {
@@ -188,27 +186,99 @@ public class MemorySettingsActivity extends AppCompatActivity {
 
     private View buildGraph3DCard(MemoryGraphScene.Scene scene) {
         LinearLayout card = cardContainer();
-        TextView graphTitle = new TextView(this);
-        graphTitle.setText("Constellation mémoire · " + scene.nodes.size() + " nœud"
-                + (scene.nodes.size() > 1 ? "s" : "") + " · " + scene.edges.size() + " lien"
-                + (scene.edges.size() > 1 ? "s" : ""));
-        graphTitle.setTextColor(Color.parseColor("#35D0DD"));
-        graphTitle.setTextSize(13);
-        graphTitle.setTypeface(null, Typeface.BOLD);
-        card.addView(graphTitle);
 
-        TextView hint3d = new TextView(this);
-        hint3d.setText("Glisse pour tourner · cyan = entités · ambre = souvenirs");
-        hint3d.setTextColor(Color.parseColor("#66FFFFFF"));
-        hint3d.setTextSize(10);
-        hint3d.setPadding(0, dp(2), 0, dp(6));
-        card.addView(hint3d);
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+
+        TextView eyebrow = new TextView(this);
+        eyebrow.setText("CIEL INTÉRIEUR");
+        eyebrow.setTextColor(Color.parseColor("#66FFFFFF"));
+        eyebrow.setTextSize(10);
+        eyebrow.setLetterSpacing(0.18f);
+        eyebrow.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        headerRow.addView(eyebrow);
+
+        TextView graphTitle = new TextView(this);
+        graphTitle.setText("Sa constellation");
+        graphTitle.setTextColor(Color.WHITE);
+        graphTitle.setTextSize(20);
+        graphTitle.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        graphTitle.setPadding(0, dp(2), 0, 0);
+        headerRow.addView(graphTitle);
+
+        TextView fullscreenBtn = new TextView(this);
+        fullscreenBtn.setText("Plein écran");
+        fullscreenBtn.setTextColor(Color.parseColor("#35D0DD"));
+        fullscreenBtn.setTextSize(12);
+        fullscreenBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        fullscreenBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
+        fullscreenBtn.setGravity(Gravity.CENTER);
+        GradientDrawable fsBg = new GradientDrawable();
+        fsBg.setColor(Color.parseColor("#1A35D0DD"));
+        fsBg.setCornerRadius(dp(16));
+        fsBg.setStroke(dp(1), Color.parseColor("#5535D0DD"));
+        fullscreenBtn.setBackground(fsBg);
+        fullscreenBtn.setOnClickListener(v ->
+                startActivity(new Intent(this, MemoryConstellationActivity.class)));
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.addView(headerRow, headerLp);
+        topRow.addView(fullscreenBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(topRow);
+
+        TextView graphMeta = new TextView(this);
+        graphMeta.setText(scene.nodes.size() + " étoiles · " + scene.edges.size() + " synapses"
+                + " · cyan entités · ambre souvenirs");
+        graphMeta.setTextColor(Color.parseColor("#35D0DD"));
+        graphMeta.setTextSize(11);
+        graphMeta.setPadding(0, dp(6), 0, dp(8));
+        card.addView(graphMeta);
+
+        TextView focusLine = new TextView(this);
+        focusLine.setText("Touche une étoile pour l'entendre se nommer.");
+        focusLine.setTextColor(Color.parseColor("#88FFFFFF"));
+        focusLine.setTextSize(12);
+        focusLine.setTypeface(Typeface.create("sans-serif-light", Typeface.ITALIC));
+        focusLine.setPadding(0, 0, 0, dp(8));
+        card.addView(focusLine);
 
         MemoryGraph3DView graphView = new MemoryGraph3DView(this);
         graphView.setScene(scene);
+        graphView.setListener(new MemoryGraph3DView.Listener() {
+            @Override
+            public void onNodeFocused(MemoryGraphScene.Node node) {
+                String kind = node.kind == MemoryGraphScene.NodeKind.ENTITY ? "entité" : "souvenir";
+                focusLine.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+                focusLine.setTextColor(Color.parseColor("#CCFFFFFF"));
+                focusLine.setText("Focus · " + kind + " · " + node.label);
+            }
+
+            @Override
+            public void onFocusCleared() {
+                focusLine.setTypeface(Typeface.create("sans-serif-light", Typeface.ITALIC));
+                focusLine.setTextColor(Color.parseColor("#88FFFFFF"));
+                focusLine.setText("Touche une étoile pour l'entendre se nommer.");
+            }
+        });
+        // Clip arrondi pour que le ciel ne déborde pas de la carte
+        graphView.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, android.graphics.Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(14));
+            }
+        });
+        graphView.setClipToOutline(true);
+        // Tap long / double-tap zone: aussi ouvrir plein écran via bouton uniquement
+
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(240));
-        lp.bottomMargin = dp(4);
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(340));
+        lp.bottomMargin = dp(2);
         card.addView(graphView, lp);
         return card;
     }

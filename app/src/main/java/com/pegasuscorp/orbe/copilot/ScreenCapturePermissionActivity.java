@@ -60,7 +60,11 @@ public final class ScreenCapturePermissionActivity extends Activity {
         }
         boolean ok = resultCode == RESULT_OK && data != null;
         if (ok) {
+            // 1) mémoriser le consentement
             ScreenCaptureHelper.storePermissionResult(resultCode, data);
+            // 2) démarrer le FGS typé mediaProjection AVANT getMediaProjection
+            //    (getMediaProjection est appelé dans le service après startForeground)
+            MediaProjectionCaptureService.start(getApplicationContext(), resultCode, data);
         }
         finishWith(ok);
     }

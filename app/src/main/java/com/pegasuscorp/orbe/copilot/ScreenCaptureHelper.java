@@ -10,7 +10,6 @@ import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
-import android.media.projection.MediaProjectionManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
@@ -22,7 +21,11 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Capture d'écran via MediaProjection (consentement une fois par session). */
+/**
+ * Capture d'écran via {@link MediaProjection}.
+ * Sur Android 14+, la projection n'est créée que dans
+ * {@link MediaProjectionCaptureService} après {@code startForeground(mediaProjection)}.
+ */
 public final class ScreenCaptureHelper {
 
     public interface Callback {
@@ -36,27 +39,29 @@ public final class ScreenCaptureHelper {
 
     private static int resultCode = Activity.RESULT_CANCELED;
     private static Intent resultData;
-    private static MediaProjection projection;
 
     private ScreenCaptureHelper() {}
 
     public static void storePermissionResult(int code, Intent data) {
-        releaseProjection();
         resultCode = code;
-        resultData = data;
+        resultData = data != null ? new Intent(data) : null;
     }
 
     public static boolean hasPermission() {
         return resultData != null && resultCode == Activity.RESULT_OK;
     }
 
-    public static void releaseProjection() {
-        if (projection != null) {
-            try {
-                projection.stop();
-            } catch (Exception ignored) {}
-            projection = null;
+    /** Arrête le FGS mediaProjection (invalide la projection active). */
+    public static void releaseProjection(Context context) {
+        if (context != null) {
+            MediaProjectionCaptureService.stop(context);
         }
+    }
+
+    public static void clearPermission(Context context) {
+        resultCode = Activity.RESULT_CANCELED;
+        resultData = null;
+        releaseProjection(context);
     }
 
     public static void capture(Context context, Callback callback) {
@@ -67,17 +72,20 @@ public final class ScreenCaptureHelper {
                     MAIN.post(callback::onNeedPermission);
                     return;
                 }
-                ensureProjection(app);
+                MediaProjection projection = ensureProjection(app);
                 if (projection == null) {
                     MAIN.post(callback::onNeedPermission);
                     return;
                 }
-                byte[] jpeg = captureJpegBlocking(app);
+                byte[] jpeg = captureJpegBlocking(app, projection);
                 if (jpeg == null || jpeg.length == 0) {
                     MAIN.post(() -> callback.onError("Capture vide."));
                     return;
                 }
                 MAIN.post(() -> callback.onCaptured(jpeg));
+            } catch (SecurityException e) {
+                clearPermission(app);
+                MAIN.post(callback::onNeedPermission);
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : "Erreur capture";
                 MAIN.post(() -> callback.onError(msg));
@@ -90,32 +98,28 @@ public final class ScreenCaptureHelper {
         Context app = context.getApplicationContext();
         try {
             if (!hasPermission()) return null;
-            ensureProjection(app);
+            MediaProjection projection = ensureProjection(app);
             if (projection == null) return null;
-            return captureBitmapInternal(app);
+            return captureBitmapInternal(app, projection);
         } catch (Exception e) {
             return null;
         }
     }
 
-    private static void ensureProjection(Context app) {
-        if (projection != null) return;
-        MediaProjectionManager mpm = (MediaProjectionManager)
-                app.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (mpm == null || resultData == null) return;
-        projection = mpm.getMediaProjection(resultCode, resultData);
-        if (projection != null) {
-            projection.registerCallback(new MediaProjection.Callback() {
-                @Override
-                public void onStop() {
-                    projection = null;
-                }
-            }, MAIN);
-        }
+    /**
+     * Démarre le FGS typé mediaProjection si besoin, puis récupère la projection
+     * créée <b>après</b> {@code startForeground}.
+     */
+    private static MediaProjection ensureProjection(Context app) {
+        MediaProjection existing = MediaProjectionCaptureService.getProjection();
+        if (existing != null) return existing;
+        if (!hasPermission()) return null;
+        return MediaProjectionCaptureService.ensureProjection(app, resultCode, resultData);
     }
 
-    private static byte[] captureJpegBlocking(Context app) throws Exception {
-        Bitmap bitmap = captureBitmapInternal(app);
+    private static byte[] captureJpegBlocking(Context app, MediaProjection projection)
+            throws Exception {
+        Bitmap bitmap = captureBitmapInternal(app, projection);
         if (bitmap == null) return null;
         try {
             return OpenRouterVisionClient.compressBitmapToJpeg(bitmap);
@@ -124,9 +128,10 @@ public final class ScreenCaptureHelper {
         }
     }
 
-    private static Bitmap captureBitmapInternal(Context app) throws Exception {
+    private static Bitmap captureBitmapInternal(Context app, MediaProjection projection)
+            throws Exception {
         WindowManager wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
-        if (wm == null) return null;
+        if (wm == null || projection == null) return null;
         DisplayMetrics metrics = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(metrics);
         int w = metrics.widthPixels;

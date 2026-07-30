@@ -30,6 +30,7 @@ import com.pegasuscorp.orbe.OrionSettingsActivity;
 import com.pegasuscorp.orbe.chat.ChatBackend;
 import com.pegasuscorp.orbe.chat.LlmReply;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
+import com.pegasuscorp.orbe.fs.UriDisplayNames;
 import com.pegasuscorp.orbe.iface.PegaseInterfaceHost;
 import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.orion.prompt.ClarificationManager;
@@ -328,12 +329,7 @@ public final class OrionStreamView {
     public void onPickMdResult(Uri uri) {
         if (uri == null) return;
         try {
-            String name = uri.getLastPathSegment();
-            if (name == null || name.isEmpty()) name = "import.md";
-            int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf(':'));
-            if (slash >= 0 && slash < name.length() - 1) {
-                name = name.substring(slash + 1);
-            }
+            String name = UriDisplayNames.fromUri(activity, uri, "import.md");
             if (!name.toLowerCase(Locale.ROOT).endsWith(".md")) {
                 name = name + ".md";
             }

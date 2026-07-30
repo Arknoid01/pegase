@@ -51,6 +51,12 @@ android {
     androidResources {
         noCompress 'onnx'
     }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
 }
 
 // Unit tests JVM : ORT desktop (pas le .so Android de sherpa)
@@ -70,6 +76,8 @@ configurations.configureEach { config ->
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
     implementation libs.material
     testImplementation libs.junit
+    testImplementation libs.ext.junit
+    testImplementation libs.androidx.test.core
     testImplementation 'org.robolectric:robolectric:4.14.1'
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.ext.junit

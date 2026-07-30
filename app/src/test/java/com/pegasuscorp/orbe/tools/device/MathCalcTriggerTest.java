@@ -22,4 +22,19 @@ public class MathCalcTriggerTest {
         assertFalse(MathCalcTrigger.matches("06 12 34 56 78"));
         assertFalse(MathCalcTrigger.matches("Bonjour Pégase"));
     }
+
+    @Test
+    public void rejects_longDocumentsAndMarkdown() {
+        StringBuilder longDoc = new StringBuilder();
+        for (int i = 0; i < 40; i++) {
+            longDoc.append("Le navigateur a le plus de marge de progression ")
+                    .append(i).append(". ");
+        }
+        assertFalse(MathCalcTrigger.matches(longDoc.toString()));
+
+        assertFalse(MathCalcTrigger.matches(
+                "# Pégase v2\n\n## Les 5 axes\n\n- moins de bruit\n- 20-50h de corpus"));
+        assertFalse(MathCalcTrigger.matches(
+                "calcule 2+2\nencore une ligne\net une troisième\net une quatrième"));
+    }
 }

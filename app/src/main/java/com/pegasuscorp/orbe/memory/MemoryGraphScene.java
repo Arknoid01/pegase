@@ -116,7 +116,7 @@ public final class MemoryGraphScene {
             else memoryNodes.add(node);
         }
 
-        layoutSphere(entityNodes, 1.0f);
+        layoutSphere(entityNodes, 1.35f);
         layoutMemories(memoryNodes, nodesById, edges);
 
         return new Scene(new ArrayList<>(nodesById.values()), edges);
@@ -195,10 +195,10 @@ public final class MemoryGraphScene {
                 cy /= count;
                 cz /= count;
             }
-            float orbit = 0.22f + (idx % 3) * 0.05f;
-            float angle = idx * 1.7f;
+            float orbit = 0.42f + (idx % 5) * 0.09f;
+            float angle = idx * 2.15f;
             mem.x = cx + orbit * (float) Math.cos(angle);
-            mem.y = cy + orbit * 0.6f * (float) Math.sin(angle * 0.8f);
+            mem.y = cy + 0.15f + orbit * 0.75f * (float) Math.sin(angle * 0.9f);
             mem.z = cz + orbit * (float) Math.sin(angle);
             idx++;
         }
