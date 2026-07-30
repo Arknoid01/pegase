@@ -462,6 +462,41 @@ public final class IntentDetector {
                 || fold.contains("agenda")));
     }
 
+    /** Lecture agenda : « qu'est-ce que j'ai demain », « mon planning », etc. */
+    public static boolean looksLikeAgendaQuery(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        if (looksLikeAgendaCreate(fold)) return false;
+        boolean query = fold.contains("quoi")
+                || fold.contains("qu est ce")
+                || fold.contains("qu'est ce")
+                || fold.contains("quelles")
+                || fold.contains("quels")
+                || fold.contains("liste")
+                || fold.contains("montre")
+                || fold.contains("affiche")
+                || fold.contains("j ai")
+                || fold.contains("ai je")
+                || fold.contains("mon planning")
+                || fold.contains("ma journee")
+                || fold.contains("ma journée")
+                || fold.contains("programme");
+        boolean cal = fold.contains("agenda")
+                || fold.contains("calendrier")
+                || fold.contains("rendez")
+                || fold.contains("rdv")
+                || fold.contains("planning")
+                || fold.contains("journee")
+                || fold.contains("journée");
+        return query && cal;
+    }
+
+    private static boolean looksLikeAgendaCreate(String fold) {
+        return fold.contains("ajoute") || fold.contains("ajout ")
+                || fold.contains("mets ") || fold.contains("met ")
+                || fold.contains("cree") || fold.contains("crée")
+                || fold.contains("programme un") || fold.contains("nouveau");
+    }
+
     /** Session fichiers Orion : valider / lister / vider. */
     public static boolean looksLikeOrionFiles(String fold) {
         if (fold == null || fold.isEmpty()) return false;
