@@ -424,6 +424,20 @@ public final class Trace {
     }
 
     /**
+     * Callback LLM ignoré — tour utilisateur plus récent entre-temps.
+     * Explique un {@code provider_used} sans {@code llm_reply} associé.
+     */
+    public static void staleCallbackIgnored(long capturedGeneration, long currentGeneration) {
+        JSONObject o = base("stale_callback_ignored");
+        try {
+            o.put("captured_generation", capturedGeneration);
+            o.put("current_generation", currentGeneration);
+        } catch (Exception ignored) {
+        }
+        write(o);
+    }
+
+    /**
      * Hésitation / intention d'outil floue (fantôme, JSON malformé, etc.).
      * Event {@code type=tool_hesitation}.
      */

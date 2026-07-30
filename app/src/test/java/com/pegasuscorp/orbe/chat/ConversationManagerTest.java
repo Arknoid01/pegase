@@ -434,7 +434,8 @@ public class ConversationManagerTest {
     }
 
     @Test
-    public void staleLlmCallback_afterLocalToolReply_doesNotOverwriteHistory() {
+    public void staleLlmCallback_afterLocalToolReply_doesNotOverwriteHistory() throws Exception {
+        Trace.clear(RuntimeEnvironment.getApplication());
         conversation.enter();
         backend.deferSend = true;
         backend.nextError = "HTTP 429 rate limit exceeded";
@@ -459,6 +460,12 @@ public class ConversationManagerTest {
                 history.get(1).text);
         assertFalse(history.get(1).text.contains("Réessaie"));
         assertFalse(conversation.isUserTurnPending());
+
+        Trace.flushForTests();
+        String jsonl = new String(java.nio.file.Files.readAllBytes(Trace.file().toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(jsonl.contains("\"type\":\"stale_callback_ignored\"")
+                || jsonl.contains("\"type\": \"stale_callback_ignored\""));
     }
 
     @Test

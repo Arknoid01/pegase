@@ -563,7 +563,9 @@ public class ConversationManager {
     }
 
     private boolean isStaleCallback(long capturedGeneration) {
-        return capturedGeneration != sendGeneration;
+        if (capturedGeneration == sendGeneration) return false;
+        Trace.staleCallbackIgnored(capturedGeneration, sendGeneration);
+        return true;
     }
 
     /**

@@ -76,6 +76,13 @@ public final class ReasoningTurnCollector {
                 memoriesUsed.size() + atlasUsed.size() + contextsLoaded.size());
     }
 
+    /** Sujet du tour en cours (carte 🔍) — remplace le résumé de session archivé injecté. */
+    public void setSessionUsed(String topic) {
+        if (topic != null && !topic.trim().isEmpty()) {
+            sessionUsed = clip(topic.trim(), 100);
+        }
+    }
+
     public void setMemories(List<String> memories) {
         memoriesUsed.clear();
         if (memories != null) {

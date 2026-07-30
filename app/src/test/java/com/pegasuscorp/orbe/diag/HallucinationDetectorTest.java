@@ -1,5 +1,7 @@
 package com.pegasuscorp.orbe.diag;
 
+import com.pegasuscorp.orbe.memory.ContextSnapshot;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -68,5 +70,18 @@ public class HallucinationDetectorTest {
         ReasoningCard card = c.build("Salut !", "Groq/gpt-oss-20b", 200, 100);
         assertTrue(card.formatCheminement().contains("aucun outil"));
         assertTrue(card.formatPanel().contains("aucun"));
+    }
+
+    @Test
+    public void setSessionUsed_overridesArchivedSessionTopic() {
+        ReasoningTurnCollector c = new ReasoningTurnCollector("diag");
+        ContextSnapshot snap = new ContextSnapshot(
+                "", "diag", null, null,
+                java.util.Arrays.asList("Identité"),
+                null, "Briefing du matin");
+        c.applySnapshot(snap);
+        c.setSessionUsed("Tu as eut des problèmes ?");
+        ReasoningCard card = c.build("RAS.", "local", 0, 0);
+        assertEquals("Tu as eut des problèmes ?", card.sessionUsed);
     }
 }
