@@ -28,7 +28,7 @@ public final class CalendarTool implements Tool {
 
     @Override
     public String description() {
-        return "calendar(...) — alias de agenda(...). Préférer tool agenda.";
+        return "calendar(...) — alias complet de agenda (add, today, tomorrow, week, delete, open).";
     }
 
     @Override

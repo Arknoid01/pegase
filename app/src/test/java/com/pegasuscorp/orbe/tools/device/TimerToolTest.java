@@ -118,6 +118,12 @@ public class TimerToolTest {
     }
 
     @Test
+    public void resolveSeconds_durationString() throws Exception {
+        JSONObject p = new JSONObject().put("duration", "dans 10 minutes");
+        assertEquals(600, TimerTool.resolveSeconds(p));
+    }
+
+    @Test
     public void formatMinutesLabel_rounds() {
         assertEquals("5 min", TimerTool.formatMinutesLabel(300));
         assertEquals("1 min", TimerTool.formatMinutesLabel(45));

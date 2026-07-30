@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.memory;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.util.Log;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
@@ -22,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -34,6 +37,9 @@ import java.util.concurrent.Executors;
 public class MemoryRepository implements MemoryStore {
 
     private static final String TAG = "MemoryRepository";
+    private static final String PREFS = "memory_repository";
+    private static final String KEY_LAST_DECAY_MS = "last_decay_ms";
+    private static final long DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000L;
     private static final int MAX_TURNS = ConversationHistorySanitizer.MAX_STORED_TURNS;
     private static final int MAX_SESSION_SUMMARIES = 12;
     private static final int MAX_RELEVANT_MEMORIES = 5;
@@ -67,6 +73,8 @@ public class MemoryRepository implements MemoryStore {
         turnsFile = new File(memoryDir, "recent_turns.json");
         loadAll();
         seedDefaultsIfEmpty();
+        backfillGraphLinks();
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (autoMigrate) {
             MemoryRagMigrator.migrateAsync(appContext, this);
         }
@@ -215,6 +223,7 @@ public class MemoryRepository implements MemoryStore {
             sessionSummaries.remove(0);
         }
         saveSessions();
+        MemoryConsolidator.promoteSessionFacts(appContext, summary);
     }
 
     public List<MemoryEntry> getRelevantMemories(String query, int max) {
@@ -223,12 +232,13 @@ public class MemoryRepository implements MemoryStore {
 
     public List<MemoryEntry> getRelevantMemories(String query, List<String> entityTerms,
             int max, double minScore) {
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (permanentMemories.isEmpty()) return Collections.emptyList();
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
         List<ScoredMemory> scored = new ArrayList<>();
         for (MemoryEntry entry : permanentMemories) {
             if (!isInjectable(entry)) continue;
-            double s = score(entry, q, entityTerms);
+            double s = MemoryScorer.keywordScore(entry, q, entityTerms);
             if (s >= minScore) scored.add(new ScoredMemory(entry, s));
         }
         scored.sort((a, b) -> Double.compare(b.score, a.score));
@@ -237,6 +247,7 @@ public class MemoryRepository implements MemoryStore {
         for (int i = 0; i < scored.size() && out.size() < limit; i++) {
             out.add(scored.get(i).entry);
         }
+        recordMemoryRetrievalUse(out);
         return out;
     }
 
@@ -250,33 +261,113 @@ public class MemoryRepository implements MemoryStore {
 
     public List<MemoryEntry> getRelevantMemoriesSemantic(String query, List<String> entityTerms,
             int max, float minScore) {
+        return getRelevantMemoriesSemantic(query, entityTerms, null, max, minScore);
+    }
+
+    public List<MemoryEntry> getRelevantMemoriesSemantic(String query, List<String> entityTerms,
+            List<String> seedEntityIds, int max, float minScore) {
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (permanentMemories.isEmpty()) return Collections.emptyList();
         int limit = Math.min(max, MAX_RELEVANT_MEMORIES);
+        String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
+        Map<String, Float> cosineByKey = new HashMap<>();
+        EntityGraphStore entityGraph = EntityGraphStore.getInstance(appContext);
+        EntityGraphStore.EntityReach entityReach = entityGraph.expand(
+                seedEntityIds != null ? seedEntityIds : Collections.emptyList(), 2);
+        entityGraph.recordRetrievalUse(entityReach);
         try {
             float[] qv = EmbeddingEngine.get(appContext).embed(query == null ? "" : query);
             List<VectorStore.Hit> hits = vectors().search(qv, Math.max(limit * 3, 8), minScore);
             Map<String, MemoryEntry> byKey = indexByKey();
-            List<MemoryEntry> out = new ArrayList<>();
+            List<ScoredMemory> scored = new ArrayList<>();
             for (VectorStore.Hit hit : hits) {
+                cosineByKey.put(hit.memoryKey, hit.score);
                 MemoryEntry entry = byKey.get(hit.memoryKey);
                 if (entry != null && isInjectable(entry)) {
-                    out.add(entry);
-                    if (out.size() >= limit) break;
+                    double composite = MemoryScorer.compositeSemantic(
+                            entry, hit.score, entityTerms, entityReach);
+                    scored.add(new ScoredMemory(entry, composite));
                 }
             }
-            if (!out.isEmpty()) {
-                maybeBoostEntities(out, entityTerms, limit);
-                return out;
+            if (!scored.isEmpty()) {
+                scored.sort((a, b) -> Double.compare(b.score, a.score));
+                List<MemoryEntry> ranked = new ArrayList<>();
+                for (ScoredMemory sm : scored) ranked.add(sm.entry);
+                return finalizeGraphRanked(ranked, q, entityTerms, entityReach, limit,
+                        cosineByKey);
             }
         } catch (Exception e) {
             Log.w(TAG, "Recherche sémantique indisponible, fallback mots-clés", e);
         }
-        // Échelle mots-clés ≠ cosine : seuil classique.
         return getRelevantMemories(query, entityTerms, limit, 0.58);
+    }
+
+    private List<MemoryEntry> finalizeGraphRanked(List<MemoryEntry> ranked, String queryLower,
+            List<String> entityTerms, EntityGraphStore.EntityReach entityReach, int limit,
+            Map<String, Float> cosineByKey) {
+        List<MemoryEntry> expanded = MemoryGraph.expandCandidates(
+                ranked, permanentMemories, entityReach.allWithin(2),
+                Math.max(limit * 2, limit + 1));
+        List<ScoredMemory> rescored = new ArrayList<>();
+        for (MemoryEntry entry : expanded) {
+            float cosine = cosineByKey.containsKey(entry.memoryKey())
+                    ? cosineByKey.get(entry.memoryKey()) : 0f;
+            double score = cosine > 0
+                    ? MemoryScorer.compositeSemantic(entry, cosine, entityTerms, entityReach)
+                    : MemoryScorer.keywordScore(entry, queryLower, entityTerms)
+                            + MemoryScorer.graphEntityBoost(entry, entityReach);
+            rescored.add(new ScoredMemory(entry, score));
+        }
+        rescored.sort((a, b) -> Double.compare(b.score, a.score));
+        List<MemoryEntry> out = new ArrayList<>();
+        for (int i = 0; i < rescored.size() && out.size() < limit; i++) {
+            out.add(rescored.get(i).entry);
+        }
+        recordMemoryRetrievalUse(out);
+        return out;
+    }
+
+    void applyNaturalDecay(long nowMs) {
+        boolean changed = false;
+        for (MemoryEntry entry : permanentMemories) {
+            if (entry.applyDecay(nowMs)) changed = true;
+        }
+        if (changed) savePermanent();
+        prefs().edit().putLong(KEY_LAST_DECAY_MS, nowMs).apply();
+    }
+
+    private void applyNaturalDecayIfDue(long nowMs) {
+        long last = prefs().getLong(KEY_LAST_DECAY_MS, 0L);
+        if (nowMs - last < DECAY_INTERVAL_MS) return;
+        applyNaturalDecay(nowMs);
+    }
+
+    private void recordMemoryRetrievalUse(List<MemoryEntry> used) {
+        if (used == null || used.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Set<String> keys = new HashSet<>();
+        for (MemoryEntry entry : used) {
+            if (entry != null) keys.add(entry.memoryKey());
+        }
+        boolean changed = false;
+        for (MemoryEntry entry : permanentMemories) {
+            if (!keys.contains(entry.memoryKey())) continue;
+            entry.touchRetrieval(now);
+            changed = true;
+        }
+        if (changed) savePermanent();
+    }
+
+    private SharedPreferences prefs() {
+        return appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     public void addPermanentMemory(MemoryEntry entry) {
         if (entry == null) return;
+        MemoryLinker.autoLink(appContext, entry);
+        for (MemoryEntry existing : permanentMemories) {
+            MemoryGraph.linkSharedEntities(entry, existing);
+        }
         permanentMemories.add(entry);
         savePermanent();
         indexMemoryAsync(entry);
@@ -293,11 +384,43 @@ public class MemoryRepository implements MemoryStore {
         return new ArrayList<>(permanentMemories);
     }
 
+    /**
+     * Souvenirs liés (graphe mémoire) — clés partagées ou entités communes.
+     */
+    public List<MemoryEntry> getLinkedMemories(MemoryEntry entry) {
+        if (entry == null) return Collections.emptyList();
+        String key = entry.memoryKey();
+        List<MemoryEntry> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        seen.add(key);
+        for (MemoryEntry other : permanentMemories) {
+            if (other == null || !isInjectable(other)) continue;
+            String otherKey = other.memoryKey();
+            if (seen.contains(otherKey)) continue;
+            boolean linked = entry.relatedMemoryKeys.contains(otherKey)
+                    || other.relatedMemoryKeys.contains(key);
+            if (!linked) {
+                for (String id : entry.entityIds) {
+                    if (other.entityIds.contains(id)) {
+                        linked = true;
+                        break;
+                    }
+                }
+            }
+            if (linked) {
+                seen.add(otherKey);
+                out.add(other);
+            }
+        }
+        out.sort((a, b) -> Double.compare(b.effectiveImportance(), a.effectiveImportance()));
+        return out;
+    }
+
     /** Souvenirs permanents triés par importance (pour affichage Discussion). */
     public List<MemoryEntry> getTopPermanentMemories(int max) {
         if (max <= 0 || permanentMemories.isEmpty()) return Collections.emptyList();
         List<MemoryEntry> sorted = new ArrayList<>(permanentMemories);
-        sorted.sort((a, b) -> Double.compare(b.importance, a.importance));
+        sorted.sort((a, b) -> Double.compare(b.effectiveImportance(), a.effectiveImportance()));
         if (sorted.size() <= max) return sorted;
         return new ArrayList<>(sorted.subList(0, max));
     }
@@ -305,6 +428,11 @@ public class MemoryRepository implements MemoryStore {
     public void updatePermanentMemoryAt(int index, MemoryEntry entry) {
         if (entry == null || index < 0 || index >= permanentMemories.size()) return;
         MemoryEntry old = permanentMemories.get(index);
+        MemoryLinker.autoLink(appContext, entry);
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            if (i == index) continue;
+            MemoryGraph.linkSharedEntities(entry, permanentMemories.get(i));
+        }
         permanentMemories.set(index, entry);
         savePermanent();
         deleteVectorAsync(old);
@@ -456,64 +584,6 @@ public class MemoryRepository implements MemoryStore {
         });
     }
 
-    /**
-     * Si des termes d'entité matchent un souvenir hors top-K, on le remonte (hybride léger).
-     */
-    private void maybeBoostEntities(List<MemoryEntry> out, List<String> entityTerms, int limit) {
-        if (entityTerms == null || entityTerms.isEmpty() || out.size() >= limit) return;
-        for (MemoryEntry entry : permanentMemories) {
-            if (!isInjectable(entry) || out.contains(entry)) continue;
-            if (entityRelevance(entry, entityTerms) >= 0.75) {
-                out.add(0, entry);
-                while (out.size() > limit) out.remove(out.size() - 1);
-                break;
-            }
-        }
-    }
-
-    private double score(MemoryEntry entry, String query, List<String> entityTerms) {
-        double relevance = queryRelevance(entry, query);
-        double entityBoost = entityRelevance(entry, entityTerms);
-        double recency = recencyBoost(entry.createdAt);
-        double importance = entry.importance * 0.15;
-        return relevance * 0.4 + entityBoost * 0.4 + recency * 0.05 + importance;
-    }
-
-    private static double queryRelevance(MemoryEntry entry, String query) {
-        if (query.isEmpty() || entry.content == null) return 0.1;
-        String c = entry.content.toLowerCase(Locale.ROOT);
-        double score = 0.1;
-        for (String word : query.split("\\s+")) {
-            if (word.length() > 3 && c.contains(word)) score += 0.22;
-        }
-        return Math.min(1.0, score);
-    }
-
-    private static double entityRelevance(MemoryEntry entry, List<String> entityTerms) {
-        if (entityTerms == null || entityTerms.isEmpty() || entry.content == null) return 0;
-        String c = entry.content.toLowerCase(Locale.ROOT);
-        String cat = entry.category != null ? entry.category.toLowerCase(Locale.ROOT) : "";
-        double best = 0;
-        for (String term : entityTerms) {
-            if (term == null || term.isEmpty()) continue;
-            String t = term.toLowerCase(Locale.ROOT);
-            if (c.contains(t)) best = Math.max(best, 0.95);
-            else if (cat.contains(t)) best = Math.max(best, 0.75);
-        }
-        return best;
-    }
-
-    private static double recencyBoost(String createdAt) {
-        if (createdAt == null || createdAt.isEmpty()) return 0;
-        try {
-            long created = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).parse(createdAt).getTime();
-            long days = (System.currentTimeMillis() - created) / (24L * 60 * 60 * 1000);
-            if (days <= 7) return 0.2;
-            if (days <= 30) return 0.1;
-        } catch (Exception ignored) {}
-        return 0;
-    }
-
     private static final class ScoredMemory {
         final MemoryEntry entry;
         final double score;
@@ -524,23 +594,54 @@ public class MemoryRepository implements MemoryStore {
         }
     }
 
-    private double score(MemoryEntry entry, String query) {
-        return score(entry, query, null);
-    }
-
     private void seedDefaultsIfEmpty() {
         if (!permanentMemories.isEmpty()) return;
-        permanentMemories.add(new MemoryEntry(
+        MemoryEntry pegase = new MemoryEntry(
                 "project",
                 "Yannick développe Pégase, un assistant vocal Android intégré au launcher Orbe.",
                 0.95,
-                today()));
-        permanentMemories.add(new MemoryEntry(
+                today());
+        pegase.frozen = true;
+        MemoryEntry fableris = new MemoryEntry(
                 "project",
                 "Yannick travaille sur Fableris, un city builder nommé Fableris.",
                 0.9,
-                today()));
+                today());
+        fableris.frozen = true;
+        permanentMemories.add(pegase);
+        permanentMemories.add(fableris);
+        for (MemoryEntry e : permanentMemories) {
+            MemoryLinker.autoLink(appContext, e);
+        }
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            for (int j = i + 1; j < permanentMemories.size(); j++) {
+                MemoryGraph.linkSharedEntities(permanentMemories.get(i), permanentMemories.get(j));
+            }
+        }
         savePermanent();
+    }
+
+    private void backfillGraphLinks() {
+        boolean changed = false;
+        for (MemoryEntry e : permanentMemories) {
+            int before = e.entityIds.size();
+            if (before == 0) {
+                MemoryLinker.autoLink(appContext, e);
+                if (!e.entityIds.isEmpty()) changed = true;
+            }
+        }
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            for (int j = i + 1; j < permanentMemories.size(); j++) {
+                MemoryEntry a = permanentMemories.get(i);
+                MemoryEntry b = permanentMemories.get(j);
+                int relBefore = a.relatedMemoryKeys.size() + b.relatedMemoryKeys.size();
+                MemoryGraph.linkSharedEntities(a, b);
+                if (a.relatedMemoryKeys.size() + b.relatedMemoryKeys.size() > relBefore) {
+                    changed = true;
+                }
+            }
+        }
+        if (changed) savePermanent();
     }
 
     private void loadAll() {

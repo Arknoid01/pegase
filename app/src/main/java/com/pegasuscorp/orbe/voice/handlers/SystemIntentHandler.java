@@ -42,6 +42,11 @@ public final class SystemIntentHandler implements IntentHandler {
             if (device != null) return device;
         }
 
+        if (looksLikeTimer(fold)) {
+            RoutedIntent timer = routeTimer(context, text, fold);
+            if (timer != null) return timer;
+        }
+
         if (looksLikeAlarm(fold)) {
             RoutedIntent alarm = routeAlarm(context, text, fold);
             if (alarm != null) return alarm;
@@ -222,7 +227,61 @@ public final class SystemIntentHandler implements IntentHandler {
         }
     }
 
+    static boolean looksLikeTimer(String fold) {
+        return fold.contains("minuteur") || fold.contains("chrono")
+                || fold.contains("compte a rebours") || fold.contains("compte à rebours");
+    }
+
+    static RoutedIntent routeTimer(Context context, String text, String fold) {
+        if (fold.contains("liste") || fold.contains("montre") || fold.contains("affiche")
+                || fold.contains("mes minuteurs") || fold.contains("voir")) {
+            try {
+                return VoiceIntentSupport.routed(context, text,
+                        VoiceIntentSupport.toolJson("timer", new JSONObject().put("action", "list")),
+                        "minuteur", 0.92);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        try {
+            JSONObject p = new JSONObject().put("action", "start");
+            Matcher rel = Pattern.compile(
+                    "(?i)dans\\s+(\\d+)\\s*(minute|minutes|min|heure|heures|h|seconde|secondes|sec)")
+                    .matcher(text);
+            if (rel.find()) {
+                p.put("duration", rel.group());
+            } else {
+                Matcher min = Pattern.compile("(?i)(\\d+)\\s*(minute|minutes|min)").matcher(text);
+                if (min.find()) {
+                    p.put("minutes", Integer.parseInt(min.group(1)));
+                } else {
+                    Matcher sec = Pattern.compile("(?i)(\\d+)\\s*(seconde|secondes|sec)").matcher(text);
+                    if (sec.find()) {
+                        p.put("seconds", Integer.parseInt(sec.group(1)));
+                    } else {
+                        return null;
+                    }
+                }
+            }
+            String label = extractTimerLabel(text);
+            if (!label.isEmpty()) p.put("label", label);
+            return VoiceIntentSupport.routed(context, text,
+                    VoiceIntentSupport.toolJson("timer", p), "minuteur", 0.92);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String extractTimerLabel(String text) {
+        if (text == null) return "";
+        Matcher m = Pattern.compile("(?i)(?:pour|appelle[ -]le|nomme[ -]le)\\s+(.+?)(?:\\s*$|\\s*[.!?])")
+                .matcher(text);
+        if (m.find()) return m.group(1).trim();
+        return "";
+    }
+
     static boolean looksLikeAlarm(String fold) {
+        if (fold.contains("minuteur") || fold.contains("chrono")) return false;
         return fold.contains("reveille") || fold.contains("réveille")
                 || fold.contains("alarme") || fold.contains("reveil")
                 || fold.contains("mes reveils") || fold.contains("mes alarmes");

@@ -49,6 +49,11 @@ public final class LifeIntentHandler implements IntentHandler {
             }
         }
 
+        if (looksLikeAgendaQuery(fold)) {
+            RoutedIntent query = routeAgendaQuery(context, text, fold);
+            if (query != null) return query;
+        }
+
         if (looksLikeAgenda(fold)) {
             RoutedIntent agenda = routeAgenda(context, text, fold);
             if (agenda != null) return agenda;
@@ -166,6 +171,24 @@ public final class LifeIntentHandler implements IntentHandler {
 
     static boolean looksLikeAgenda(String fold) {
         return com.pegasuscorp.orbe.memory.IntentDetector.looksLikeAgenda(fold);
+    }
+
+    static boolean looksLikeAgendaQuery(String fold) {
+        return com.pegasuscorp.orbe.memory.IntentDetector.looksLikeAgendaQuery(fold);
+    }
+
+    static RoutedIntent routeAgendaQuery(Context context, String text, String fold) {
+        try {
+            String action = "today";
+            if (fold.contains("demain")) action = "tomorrow";
+            else if (fold.contains("semaine") || fold.contains("cette semaine")) action = "week";
+            else if (fold.contains("liste") || fold.contains("planning")) action = "list";
+            return VoiceIntentSupport.routed(context, text,
+                    VoiceIntentSupport.toolJson("agenda", new JSONObject().put("action", action)),
+                    "agenda", 0.93);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     static RoutedIntent routeAgenda(Context context, String text, String fold) {

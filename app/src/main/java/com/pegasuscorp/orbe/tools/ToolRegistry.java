@@ -273,13 +273,17 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.ALARM)) {
             sb.append("  Réveil    → {\"tool\":\"alarm\",\"params\":{\"action\":\"add\","
                     + "\"hour\":10,\"minute\":0,\"label\":\"Chauffer les plats\"}} "
-                    + "✅ ; list → ouvre Horloge\n");
+                    + "✅ ; list / recent\n");
+        }
+        if (tags.contains(ToolTag.TIMER)) {
+            sb.append("  Minuteur  → {\"tool\":\"timer\",\"params\":{\"action\":\"start\","
+                    + "\"duration\":\"5 minutes\",\"label\":\"Pizza\"}} "
+                    + "✅ ; list / recent\n");
         }
         if (tags.contains(ToolTag.AGENDA) || tags.contains(ToolTag.CALENDAR)) {
-            sb.append("  Agenda    → {\"tool\":\"agenda\",\"params\":{\"title\":\"Buffet de midi\","
-                    + "\"start\":\"demain 11:30\",\"reminder\":30}} "
-                    + "(« mets dans l'agenda », « rendez-vous », « réunion » — "
-                    + "≠ alarm)\n");
+            sb.append("  Agenda    → add : {\"tool\":\"agenda\",\"params\":{\"title\":\"Buffet\","
+                    + "\"start\":\"demain 11:30\"}} ; "
+                    + "today / tomorrow / week / delete ; silent:true si permission\n");
         }
         if (tags.contains(ToolTag.DEVICE)) {
             sb.append("  Téléphone → {\"tool\":\"device\",\"params\":{\"action\":\"battery\"}} "

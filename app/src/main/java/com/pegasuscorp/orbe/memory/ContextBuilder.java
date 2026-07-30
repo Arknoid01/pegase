@@ -144,7 +144,31 @@ public final class ContextBuilder {
         String summary = latest.summary;
         if (summary.length() > 220) summary = summary.substring(0, 217) + "…";
         sb.append(summary).append("\n");
+        appendSessionDecisions(sb, latest);
+        appendSessionPending(sb, latest);
         return !topic.isEmpty() ? topic : clip(summary, 80);
+    }
+
+    private static void appendSessionDecisions(StringBuilder sb, SessionSummary latest) {
+        if (latest.decisions.isEmpty()) return;
+        sb.append("Décisions : ");
+        int limit = Math.min(3, latest.decisions.size());
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) sb.append(" ; ");
+            sb.append(clip(latest.decisions.get(i), 100));
+        }
+        sb.append("\n");
+    }
+
+    private static void appendSessionPending(StringBuilder sb, SessionSummary latest) {
+        if (latest.pendingTopics.isEmpty()) return;
+        sb.append("En attente : ");
+        int limit = Math.min(3, latest.pendingTopics.size());
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) sb.append(" ; ");
+            sb.append(clip(latest.pendingTopics.get(i), 100));
+        }
+        sb.append("\n");
     }
 
     private static void appendMemories(StringBuilder sb, MemoryRepository repo,
@@ -160,8 +184,9 @@ public final class ContextBuilder {
         int max = "project".equals(intent.intent) || "person".equals(intent.intent) ? 3 : 2;
 
         List<String> entityTerms = EntityResolver.termsForScoring(entities);
+        List<String> seedEntityIds = MemoryLinker.seedEntityIds(entities, 3);
         List<MemoryEntry> memories = repo.getRelevantMemoriesSemantic(
-                userMessage, entityTerms, max, minScore);
+                userMessage, entityTerms, seedEntityIds, max, minScore);
         if (memories.isEmpty()) return;
         sb.append("\n--- Souvenirs pertinents ---\n");
         for (MemoryEntry m : memories) {
