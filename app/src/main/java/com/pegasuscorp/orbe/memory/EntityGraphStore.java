@@ -14,21 +14,26 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Graphe d'entités atlas — arêtes typées persistées dans {@code entity_edges.json}.
+ * Graphe d'entités atlas — arêtes typées et pondérées dans {@code entity_edges.json}.
  */
 public final class EntityGraphStore {
+
+    private static final double STRENGTHEN_DELTA = 0.05;
 
     public static final class EntityReach {
         public final Set<String> hop0 = new LinkedHashSet<>();
         public final Set<String> hop1 = new LinkedHashSet<>();
         public final Set<String> hop2 = new LinkedHashSet<>();
+        /** Force de chemin maximale [0, 1] depuis une graine jusqu'à l'entité. */
+        public final Map<String, Double> strength = new HashMap<>();
 
         public Set<String> allWithin(int maxHops) {
             Set<String> out = new LinkedHashSet<>(hop0);
@@ -43,6 +48,21 @@ public final class EntityGraphStore {
             if (hop1.contains(entityId)) return 1;
             if (hop2.contains(entityId)) return 2;
             return -1;
+        }
+
+        public double strengthFor(String entityId) {
+            if (entityId == null) return 0;
+            return strength.getOrDefault(entityId, 0.0);
+        }
+    }
+
+    private static final class WeightedNeighbor {
+        final String id;
+        final double weight;
+
+        WeightedNeighbor(String id, double weight) {
+            this.id = id;
+            this.weight = weight;
         }
     }
 
@@ -82,13 +102,25 @@ public final class EntityGraphStore {
     }
 
     public void link(String fromId, String toId, String type) {
+        link(fromId, toId, type, EntityEdge.defaultWeight(type));
+    }
+
+    public void link(String fromId, String toId, String type, double weight) {
         if (fromId == null || toId == null || fromId.isEmpty() || toId.isEmpty()) return;
         if (fromId.equals(toId)) return;
-        EntityEdge edge = new EntityEdge(fromId, toId, type);
-        for (EntityEdge existing : edges) {
-            if (existing.undirectedKey().equals(edge.undirectedKey())) return;
+        EntityEdge candidate = new EntityEdge(fromId, toId, type, weight);
+        for (int i = 0; i < edges.size(); i++) {
+            EntityEdge existing = edges.get(i);
+            if (!existing.undirectedKey().equals(candidate.undirectedKey())) continue;
+            double strengthened = Math.min(1.0, existing.weight + STRENGTHEN_DELTA);
+            double merged = Math.max(existing.weight, Math.max(weight, strengthened));
+            if (merged > existing.weight + 0.0001) {
+                edges.set(i, new EntityEdge(existing.fromId, existing.toId, existing.type, merged));
+                save();
+            }
+            return;
         }
-        edges.add(edge);
+        edges.add(candidate);
         save();
     }
 
@@ -103,27 +135,49 @@ public final class EntityGraphStore {
         return out;
     }
 
-    /** Expansion multi-hop depuis les graines (0 = graine, 1 = voisin, 2 = voisin du voisin). */
+    private List<WeightedNeighbor> weightedNeighbors(String entityId) {
+        List<WeightedNeighbor> out = new ArrayList<>();
+        if (entityId == null) return out;
+        for (EntityEdge e : edges) {
+            if (entityId.equals(e.fromId)) {
+                out.add(new WeightedNeighbor(e.toId, e.weight));
+            } else if (entityId.equals(e.toId)) {
+                out.add(new WeightedNeighbor(e.fromId, e.weight));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Expansion multi-hop pondérée : force = produit des poids le long du meilleur chemin.
+     */
     public EntityReach expand(Collection<String> seeds, int maxHops) {
         EntityReach reach = new EntityReach();
         if (seeds == null || seeds.isEmpty() || maxHops < 0) return reach;
-        Set<String> visited = new HashSet<>();
-        List<String> frontier = new ArrayList<>();
+
+        Map<String, Double> best = new HashMap<>();
+        Set<String> frontier = new HashSet<>();
         for (String seed : seeds) {
             if (seed == null || seed.isEmpty()) continue;
-            if (visited.add(seed)) {
-                reach.hop0.add(seed);
-                frontier.add(seed);
-            }
+            reach.hop0.add(seed);
+            best.put(seed, 1.0);
+            reach.strength.put(seed, 1.0);
+            frontier.add(seed);
         }
+
         for (int hop = 1; hop <= maxHops && !frontier.isEmpty(); hop++) {
-            List<String> next = new ArrayList<>();
+            Set<String> next = new HashSet<>();
             for (String id : frontier) {
-                for (String neighbor : neighbors(id)) {
-                    if (!visited.add(neighbor)) continue;
-                    next.add(neighbor);
-                    if (hop == 1) reach.hop1.add(neighbor);
-                    else if (hop == 2) reach.hop2.add(neighbor);
+                double base = best.getOrDefault(id, 0.0);
+                if (base <= 0) continue;
+                for (WeightedNeighbor nb : weightedNeighbors(id)) {
+                    double pathStrength = base * nb.weight;
+                    if (pathStrength <= best.getOrDefault(nb.id, 0.0)) continue;
+                    best.put(nb.id, pathStrength);
+                    reach.strength.put(nb.id, pathStrength);
+                    next.add(nb.id);
+                    if (hop == 1) reach.hop1.add(nb.id);
+                    else if (hop == 2) reach.hop2.add(nb.id);
                 }
             }
             frontier = next;
@@ -131,13 +185,10 @@ public final class EntityGraphStore {
         return reach;
     }
 
-    /**
-     * Infère des arêtes depuis un souvenir multi-entités.
-     * Projet + appareil → {@code runs_on} ; sinon {@code related_to}.
-     */
     public void inferFromMemory(Context context, MemoryEntry entry) {
         if (entry == null || entry.entityIds.size() < 2) return;
         EntityStore atlas = EntityStore.getInstance(context);
+        double importanceFactor = 0.7 + 0.3 * Math.min(1.0, Math.max(0.0, entry.importance));
         for (int i = 0; i < entry.entityIds.size(); i++) {
             for (int j = i + 1; j < entry.entityIds.size(); j++) {
                 String a = entry.entityIds.get(i);
@@ -145,7 +196,8 @@ public final class EntityGraphStore {
                 Entity ea = atlas.findById(a);
                 Entity eb = atlas.findById(b);
                 String type = inferEdgeType(ea, eb);
-                link(a, b, type);
+                double weight = EntityEdge.defaultWeight(type) * importanceFactor;
+                link(a, b, type, weight);
             }
         }
     }
@@ -172,12 +224,12 @@ public final class EntityGraphStore {
 
     private void seedDefaultsIfEmpty() {
         if (!edges.isEmpty()) return;
-        link("project_pegase", "device_nothing_phone", EntityEdge.TYPE_RUNS_ON);
-        link("project_fableris", "project_pegase", EntityEdge.TYPE_RELATED_TO);
+        link("project_pegase", "device_nothing_phone", EntityEdge.TYPE_RUNS_ON, 0.95);
+        link("project_fableris", "project_pegase", EntityEdge.TYPE_RELATED_TO, 0.70);
         save();
     }
 
-    private void load() {
+    private void seedDefaultsIfEmpty() {
         edges.clear();
         if (!edgesFile.exists()) return;
         try (BufferedReader br = new BufferedReader(new InputStreamReader(
@@ -205,14 +257,14 @@ public final class EntityGraphStore {
         } catch (Exception ignored) {}
     }
 
-    /** Libellé court pour l'UI Mémoire. */
+    /** Libellé UI : {@code Pégase ──0.95── Orion}. */
     public static String formatEdgeLabel(EntityStore atlas, EntityEdge edge) {
         if (edge == null) return "";
         Entity from = atlas != null ? atlas.findById(edge.fromId) : null;
         Entity to = atlas != null ? atlas.findById(edge.toId) : null;
         String a = from != null ? from.name : edge.fromId;
         String b = to != null ? to.name : edge.toId;
-        return a + " " + EntityEdge.labelFr(edge.type) + " " + b;
+        return a + " ──" + EntityEdge.formatWeight(edge.weight) + "── " + b;
     }
 
     public static String formatEntityName(EntityStore atlas, String entityId) {

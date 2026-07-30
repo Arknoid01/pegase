@@ -22,10 +22,14 @@ public final class MemoryGraphLabels {
             String id = entry.entityIds.get(i);
             sb.append(EntityGraphStore.formatEntityName(atlas, id));
             List<EntityEdge> entityEdges = graph.edgesForEntity(id);
-            if (!entityEdges.isEmpty() && i == 0) {
-                sb.append(" (").append(entityEdges.size()).append(" lien");
-                if (entityEdges.size() > 1) sb.append('s');
-                sb.append(" atlas)");
+            if (i == 0 && !entityEdges.isEmpty()) {
+                double maxWeight = 0;
+                for (EntityEdge edge : entityEdges) {
+                    maxWeight = Math.max(maxWeight, edge.weight);
+                }
+                if (maxWeight > 0) {
+                    sb.append(" (──").append(EntityEdge.formatWeight(maxWeight)).append("──)");
+                }
             }
         }
         return sb.toString();

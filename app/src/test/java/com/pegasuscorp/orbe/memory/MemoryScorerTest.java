@@ -61,17 +61,17 @@ public class MemoryScorerTest {
     }
 
     @Test
-    public void graphEntityBoost_hop2_lowerThanDirect() {
+    public void graphEntityBoost_scalesWithPathStrength() {
         MemoryEntry linked = new MemoryEntry("projects", "Note téléphone", 0.7, "2026-01-01");
         linked.entityIds.add("device_nothing_phone");
-        EntityGraphStore.EntityReach reach = new EntityGraphStore.EntityReach();
-        reach.hop0.add("project_fableris");
-        reach.hop2.add("device_nothing_phone");
-        double hop2 = MemoryScorer.graphEntityBoost(linked, reach);
-        reach.hop2.clear();
-        reach.hop0.add("device_nothing_phone");
-        double direct = MemoryScorer.graphEntityBoost(linked, reach);
-        assertTrue(direct > hop2);
-        assertEquals(MemoryGraph.GRAPH_LINK_BOOST_HOP2, hop2, 0.001);
+        EntityGraphStore.EntityReach weak = new EntityGraphStore.EntityReach();
+        weak.strength.put("device_nothing_phone", 0.18);
+        EntityGraphStore.EntityReach strong = new EntityGraphStore.EntityReach();
+        strong.strength.put("device_nothing_phone", 0.95);
+        double weakBoost = MemoryScorer.graphEntityBoost(linked, weak);
+        double strongBoost = MemoryScorer.graphEntityBoost(linked, strong);
+        assertTrue(strongBoost > weakBoost);
+        assertEquals(0.18 * MemoryGraph.GRAPH_LINK_BOOST_MAX, weakBoost, 0.001);
+        assertEquals(0.95 * MemoryGraph.GRAPH_LINK_BOOST_MAX, strongBoost, 0.001);
     }
 }

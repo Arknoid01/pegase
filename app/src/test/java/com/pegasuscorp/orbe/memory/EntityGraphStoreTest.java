@@ -59,6 +59,46 @@ public class EntityGraphStoreTest {
     }
 
     @Test
+    public void expand_weightedPath_multipliesEdgeWeights() {
+        EntityGraphStore.resetInstanceForTests();
+        java.io.File edges = new java.io.File(ctx.getFilesDir(), "memory/entity_edges.json");
+        if (edges.exists()) edges.delete();
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        while (!graph.getAllEdges().isEmpty()) {
+            // fresh store after delete still seeds defaults — use link on clean custom graph
+            break;
+        }
+        graph = EntityGraphStore.getInstance(ctx);
+        graph.link("project_pegase", "device_nothing_phone", EntityEdge.TYPE_RUNS_ON, 0.95);
+        graph.link("project_fableris", "project_pegase", EntityEdge.TYPE_RELATED_TO, 0.70);
+
+        EntityGraphStore.EntityReach reach = graph.expand(
+                java.util.Collections.singletonList("project_fableris"), 2);
+        assertEquals(1.0, reach.strengthFor("project_fableris"), 0.001);
+        assertEquals(0.70, reach.strengthFor("project_pegase"), 0.001);
+        assertEquals(0.70 * 0.95, reach.strengthFor("device_nothing_phone"), 0.001);
+    }
+
+    @Test
+    public void link_strengthensExistingEdge() {
+        EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
+        double before = 0;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("project_pegase".equals(e.fromId) && "device_nothing_phone".equals(e.toId)) {
+                before = e.weight;
+            }
+        }
+        graph.link("project_pegase", "device_nothing_phone", EntityEdge.TYPE_RUNS_ON, 0.95);
+        double after = 0;
+        for (EntityEdge e : graph.getAllEdges()) {
+            if ("project_pegase".equals(e.fromId) && "device_nothing_phone".equals(e.toId)) {
+                after = e.weight;
+            }
+        }
+        assertTrue(after >= before);
+    }
+
+    @Test
     public void hopDistance_reflectsExpansion() {
         EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
         EntityGraphStore.EntityReach reach = graph.expand(

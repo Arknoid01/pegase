@@ -30,7 +30,10 @@ public final class MemoryScorer {
         EntityGraphStore.EntityReach reach = null;
         if (seedEntityIds != null && !seedEntityIds.isEmpty()) {
             reach = new EntityGraphStore.EntityReach();
-            reach.hop0.addAll(seedEntityIds);
+            for (String id : seedEntityIds) {
+                reach.hop0.add(id);
+                reach.strength.put(id, 1.0);
+            }
         }
         return compositeSemantic(entry, cosine, entityTerms, reach);
     }
@@ -50,20 +53,20 @@ public final class MemoryScorer {
 
     static double graphEntityBoost(MemoryEntry entry, EntityGraphStore.EntityReach reach) {
         if (reach == null || entry.entityIds.isEmpty()) return 0;
-        int bestHop = Integer.MAX_VALUE;
+        double bestStrength = 0;
         for (String id : entry.entityIds) {
-            int hop = reach.hopDistance(id);
-            if (hop >= 0 && hop < bestHop) bestHop = hop;
+            bestStrength = Math.max(bestStrength, reach.strengthFor(id));
         }
-        if (bestHop == 0) return MemoryGraph.GRAPH_LINK_BOOST;
-        if (bestHop == 1 || bestHop == 2) return MemoryGraph.GRAPH_LINK_BOOST_HOP2;
-        return 0;
+        return bestStrength * MemoryGraph.GRAPH_LINK_BOOST_MAX;
     }
 
     static double graphEntityBoost(MemoryEntry entry, List<String> seedEntityIds) {
         if (seedEntityIds == null || seedEntityIds.isEmpty()) return 0;
         EntityGraphStore.EntityReach reach = new EntityGraphStore.EntityReach();
-        reach.hop0.addAll(seedEntityIds);
+        for (String id : seedEntityIds) {
+            reach.hop0.add(id);
+            reach.strength.put(id, 1.0);
+        }
         return graphEntityBoost(entry, reach);
     }
 

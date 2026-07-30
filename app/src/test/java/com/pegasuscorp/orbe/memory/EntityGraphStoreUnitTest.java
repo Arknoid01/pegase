@@ -21,4 +21,13 @@ public class EntityGraphStoreUnitTest {
         Entity project = new Entity("p1", Entity.TYPE_PROJECT, "Fableris", null, null);
         assertEquals(EntityEdge.TYPE_WORKS_ON, EntityGraphStore.inferEdgeType(person, project));
     }
+
+    @Test
+    public void formatEdgeLabel_includesWeight() {
+        EntityEdge edge = new EntityEdge("project_pegase", "device_nothing_phone",
+                EntityEdge.TYPE_RUNS_ON, 0.95);
+        String label = EntityGraphStore.formatEdgeLabel(null, edge);
+        assertTrue(label.contains("0.95"));
+        assertTrue(label.contains("──"));
+    }
 }

@@ -10,8 +10,7 @@ import java.util.Set;
  */
 public final class MemoryGraph {
 
-    static final double GRAPH_LINK_BOOST = 0.18;
-    static final double GRAPH_LINK_BOOST_HOP2 = 0.10;
+    static final double GRAPH_LINK_BOOST_MAX = 0.20;
 
     private MemoryGraph() {}
 
