@@ -30,12 +30,12 @@ public final class ConversationHistorySanitizer {
     public static String forAssistant(String text) {
         if (text == null) return "";
         if (ChatSpokenErrors.isHistoryPoison(text)) {
-            return ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
+            return "";
         }
         String out = ToolDispatcher.cleanForDisplay(text);
         out = PegasePrompt.sanitizeForDisplay(out);
         if (ChatSpokenErrors.isHistoryPoison(out)) {
-            return ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
+            return "";
         }
         if (out.length() > MAX_ASSISTANT_CHARS) {
             out = out.substring(0, MAX_ASSISTANT_CHARS - 1).trim() + "…";
@@ -70,6 +70,7 @@ public final class ConversationHistorySanitizer {
         for (ChatBackend.Turn turn : turns) {
             if (turn == null) continue;
             if (turn.system) continue; // hints éphémères — pas en mémoire longue
+            if (!turn.fromUser && ChatSpokenErrors.isHistoryPoison(turn.text)) continue;
             String stored = forStorage(turn.fromUser, turn.text);
             if (stored.isEmpty()) continue;
             ChatBackend.Turn cleaned = new ChatBackend.Turn(turn.fromUser, stored);
@@ -86,6 +87,21 @@ public final class ConversationHistorySanitizer {
         }
         while (out.size() > MAX_STORED_TURNS) {
             out.remove(0);
+        }
+        return out;
+    }
+
+    /**
+     * Retire les tours assistant « quota / erreur transitoire » déjà en mémoire.
+     * Utilisé avant envoi LLM et au chargement session.
+     */
+    public static List<ChatBackend.Turn> stripPoisonTurns(List<ChatBackend.Turn> turns) {
+        if (turns == null || turns.isEmpty()) return new ArrayList<>();
+        List<ChatBackend.Turn> out = new ArrayList<>();
+        for (ChatBackend.Turn t : turns) {
+            if (t == null) continue;
+            if (!t.fromUser && ChatSpokenErrors.isHistoryPoison(t.text)) continue;
+            out.add(t);
         }
         return out;
     }

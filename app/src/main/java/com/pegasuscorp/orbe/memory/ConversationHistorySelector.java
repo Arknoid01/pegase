@@ -3,7 +3,6 @@ package com.pegasuscorp.orbe.memory;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
-import com.pegasuscorp.orbe.chat.ChatSpokenErrors;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,7 +23,7 @@ public final class ConversationHistorySelector {
         if (fullHistory == null || fullHistory.isEmpty()) {
             return Collections.emptyList();
         }
-        List<ChatBackend.Turn> cleaned = withoutPoison(fullHistory);
+        List<ChatBackend.Turn> cleaned = ConversationHistorySanitizer.stripPoisonTurns(fullHistory);
         if (cleaned.isEmpty()) return Collections.emptyList();
         int recentStart = Math.max(0, cleaned.size() - RECENT_TURN_LIMIT);
         List<ChatBackend.Turn> recent = new ArrayList<>(
@@ -38,17 +37,6 @@ public final class ConversationHistorySelector {
 
         List<ChatBackend.Turn> out = new ArrayList<>(extras);
         out.addAll(recent);
-        return out;
-    }
-
-    /** Retire les tours assistant « quota / rate limit » qui font halluciner le modèle. */
-    static List<ChatBackend.Turn> withoutPoison(List<ChatBackend.Turn> turns) {
-        List<ChatBackend.Turn> out = new ArrayList<>();
-        for (ChatBackend.Turn t : turns) {
-            if (t == null) continue;
-            if (!t.fromUser && ChatSpokenErrors.isHistoryPoison(t.text)) continue;
-            out.add(t);
-        }
         return out;
     }
 

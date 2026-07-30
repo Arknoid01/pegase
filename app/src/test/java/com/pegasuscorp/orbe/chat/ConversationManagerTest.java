@@ -113,10 +113,10 @@ public class ConversationManagerTest {
                 || err.get().contains("saturé")
                 || err.get().contains("minute"));
         List<ChatBackend.Turn> history = conversation.historySnapshot();
-        assertEquals(2, history.size());
-        assertEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
-        assertFalse(history.get(1).text.toLowerCase().contains("groq"));
-        assertFalse(history.get(1).text.toLowerCase().contains("quota"));
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).fromUser);
+        assertEquals("Test", history.get(0).text);
+        assertFalse(conversation.isUserTurnPending());
     }
 
     @Test
@@ -521,6 +521,46 @@ public class ConversationManagerTest {
         assertEquals(2, history.size());
         assertEquals("Pas d'erreur notable aujourd'hui.", history.get(1).text);
         assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
+    }
+
+    @Test
+    public void stripPoisonOnNextSend_removesStaleTransientError() {
+        conversation.enter();
+        backend.nextError = "HTTP 429 rate limit exceeded";
+        conversation.send("Briefing", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("expected error"); }
+            @Override public void onError(String error) { /* shown to user */ }
+        });
+        assertEquals(1, conversation.historySnapshot().size());
+
+        backend.nextError = null;
+        backend.nextReply = "OK";
+        awaitReply(conversation, "Tu as eut des problèmes ?");
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(4, history.size());
+        assertEquals("Tu as eut des problèmes ?", history.get(2).text);
+        assertEquals("OK", history.get(3).text);
+        for (ChatBackend.Turn t : history) {
+            assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, t.text);
+        }
+    }
+
+    @Test
+    public void enter_stripsPoisonLoadedFromMemory() {
+        memory.setRecentTurns(Arrays.asList(
+                new ChatBackend.Turn(true, "Salut"),
+                new ChatBackend.Turn(false, ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR),
+                new ChatBackend.Turn(true, "Ça va ?"),
+                new ChatBackend.Turn(false, "Oui")));
+
+        conversation.enter();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(3, history.size());
+        assertEquals("Salut", history.get(0).text);
+        assertEquals("Ça va ?", history.get(1).text);
+        assertEquals("Oui", history.get(2).text);
     }
 
     private static void awaitReply(ConversationManager conversation, String message) {

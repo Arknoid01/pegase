@@ -31,10 +31,9 @@ public class ConversationHistorySanitizerTest {
     }
 
     @Test
-    public void forAssistant_replacesGroqQuotaPoison() {
+    public void forAssistant_dropsGroqQuotaPoison() {
         String poison = "Limite de requêtes Groq atteinte (quota API). Attends une minute.";
-        assertEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR,
-                ConversationHistorySanitizer.forAssistant(poison));
+        assertEquals("", ConversationHistorySanitizer.forAssistant(poison));
         assertTrue(ChatSpokenErrors.isHistoryPoison(poison));
     }
 
@@ -47,9 +46,22 @@ public class ConversationHistorySanitizerTest {
                 new ChatBackend.Turn(true, "Ça va ?"),
                 new ChatBackend.Turn(false, "Oui."));
         List<ChatBackend.Turn> out = ConversationHistorySanitizer.normalize(in);
-        assertEquals(4, out.size());
-        assertEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, out.get(1).text);
-        assertFalse(out.get(1).text.toLowerCase().contains("groq"));
+        assertEquals(3, out.size());
+        assertEquals("Salut", out.get(0).text);
+        assertEquals("Ça va ?", out.get(1).text);
+        assertEquals("Oui", out.get(2).text);
+    }
+
+    @Test
+    public void stripPoisonTurns_removesTransientAssistantReplies() {
+        List<ChatBackend.Turn> in = Arrays.asList(
+                new ChatBackend.Turn(true, "Salut"),
+                new ChatBackend.Turn(false, ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR),
+                new ChatBackend.Turn(false, "Réponse valide"));
+        List<ChatBackend.Turn> out = ConversationHistorySanitizer.stripPoisonTurns(in);
+        assertEquals(2, out.size());
+        assertEquals("Salut", out.get(0).text);
+        assertEquals("Réponse valide", out.get(1).text);
     }
 
     @Test

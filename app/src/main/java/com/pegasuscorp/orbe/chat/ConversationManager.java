@@ -101,7 +101,8 @@ public class ConversationManager {
         List<ChatBackend.Turn> cleaned =
                 ConversationHistorySanitizer.normalizeKeepingTrailingUser(memory.getRecentTurns());
         history.addAll(cleaned);
-        memory.setRecentTurns(cleaned);
+        stripPoisonFromHistory();
+        memory.setRecentTurns(new ArrayList<>(history));
         if (!history.isEmpty() && history.get(history.size() - 1).fromUser) {
             userTurnPending = true;
             lastUserText = history.get(history.size() - 1).text;
@@ -112,6 +113,7 @@ public class ConversationManager {
     public boolean exit() {
         boolean hadSession = active && !sessionTurns.isEmpty();
         if (hadSession) {
+            stripPoisonFromHistory();
             // Archivage : ne pas laisser de tour user orphelin pour le prochain LLM.
             memory.setRecentTurns(ConversationHistorySanitizer.normalize(history));
             if (appContext != null) {
@@ -138,6 +140,7 @@ public class ConversationManager {
      */
     public void send(String payload, String displayText, ChatBackend.OnReply callback,
             ChatSendOptions options) {
+        stripPoisonFromHistory();
         String userText = displayText != null ? displayText : payload;
         if (userTurnPending && !history.isEmpty() && history.get(history.size() - 1).fromUser) {
             replaceLastUserTurn(userText);
@@ -262,6 +265,7 @@ public class ConversationManager {
 
     public void addUserMessage(String userMessage) {
         if (userMessage == null || userMessage.trim().isEmpty()) return;
+        stripPoisonFromHistory();
         lastUserText = userMessage.trim();
         toolSucceededThisTurn = false;
         bumpSendGeneration();
@@ -300,18 +304,19 @@ public class ConversationManager {
         discardProviderTrace();
         Trace.error("llm", rawError);
         if (!userTurnPending) return;
-        // Ne jamais stocker « quota Groq » / rate limit : ça pollue les tours suivants.
-        String text;
+        // Erreurs transitoires : affichées via onError, jamais stockées en historique.
         if (ChatSpokenErrors.isRateLimit(rawError)
                 || ChatSpokenErrors.isHistoryPoison(rawError)
                 || ChatSpokenErrors.isHistoryPoison(userMessage)) {
-            text = ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
-        } else {
-            text = ChatSpokenErrors.toHistoryMessage(
-                    userMessage != null && !userMessage.trim().isEmpty() ? userMessage : rawError);
+            userTurnPending = false;
+            return;
         }
-        if (text == null || text.trim().isEmpty()) {
-            text = ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
+        String text = ChatSpokenErrors.toHistoryMessage(
+                userMessage != null && !userMessage.trim().isEmpty() ? userMessage : rawError);
+        if (text == null || text.trim().isEmpty()
+                || ChatSpokenErrors.isHistoryPoison(text)) {
+            userTurnPending = false;
+            return;
         }
         addTurn(false, text);
         userTurnPending = false;
@@ -582,6 +587,19 @@ public class ConversationManager {
         if (backend instanceof ProviderTraceSink) {
             ((ProviderTraceSink) backend).discardPendingProviderTrace();
         }
+    }
+
+    /** Retire quota / erreurs transitoires déjà présents en mémoire session. */
+    private void stripPoisonFromHistory() {
+        List<ChatBackend.Turn> cleaned = ConversationHistorySanitizer.stripPoisonTurns(history);
+        if (cleaned.size() == history.size()) return;
+        history.clear();
+        history.addAll(cleaned);
+        List<ChatBackend.Turn> cleanedSession =
+                ConversationHistorySanitizer.stripPoisonTurns(sessionTurns);
+        sessionTurns.clear();
+        sessionTurns.addAll(cleanedSession);
+        memory.setRecentTurns(new ArrayList<>(cleaned));
     }
 
     /**
