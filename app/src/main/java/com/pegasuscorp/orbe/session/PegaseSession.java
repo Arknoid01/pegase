@@ -85,8 +85,12 @@ public class PegaseSession {
     private ChatSendOptions activeAgenticOptions;
     private long activeRequestId;
     private int agenticStepIndex;
+    /** Invalide les callbacks agentiques après {@link #clearAgenticState()}. */
+    private long agenticOperationGeneration;
     /** Collecte outils / sources pour la ReasoningCard du tour. */
     private ReasoningTurnCollector turnReasoning;
+    /** Intent du tour — une seule analyse + un seul {@code routing_match} par message user. */
+    private ContextIntent currentTurnIntent;
 
     /**
      * FileLocation du dernier {@link #rewriteOrionPrompt} (phase plan).
@@ -738,7 +742,6 @@ public class PegaseSession {
         String detail = BriefTool.composeBriefDetail(appContext);
         if (detail == null || detail.trim().isEmpty()) return false;
         conv.addUserMessage(userText.trim());
-        beginTurnReasoning(userText.trim());
         if (turnReasoning != null) {
             turnReasoning.noteToolStart("brief", new JSONObject());
             turnReasoning.noteToolEnd("brief", true, 0, "cache local — plus de détail");
@@ -783,7 +786,6 @@ public class PegaseSession {
         if (IntentDetector.looksLikeDiagToolUsageQuestion(fold)) {
             String answer = answerDiagToolUsageFromTrace();
             conv.addUserMessage(userText.trim());
-            beginTurnReasoning(userText.trim());
             if (turnReasoning != null) {
                 turnReasoning.noteToolStart("diag", new JSONObject());
                 turnReasoning.noteToolEnd("diag", true, 0, "lecture trace locale");
@@ -970,7 +972,10 @@ public class PegaseSession {
 
     private ChatSendOptions buildSendOptions(String userMessage) {
         Channel channel = sessionContext.channel;
-        ContextIntent intent = ContextAnalyzer.analyze(appContext, userMessage);
+        ContextIntent intent = currentTurnIntent;
+        if (intent == null) {
+            intent = ContextAnalyzer.analyze(appContext, userMessage);
+        }
         if (!useNativeFunctionCalling()) {
             return ChatSendOptions.legacy(channel).withIntent(intent);
         }
@@ -1225,6 +1230,7 @@ public class PegaseSession {
             return;
         }
         // Carte avant notify : l'UI refresh Discussion dans onReply et doit déjà trouver la carte.
+        markTurnLlmSynthesis(conv);
         publishReasoningForReply(text);
         notifyReply(obs, text, false);
     }
@@ -1493,20 +1499,28 @@ public class PegaseSession {
         }
         agenticStepIndex++;
         notifyLlmStart(obs);
+        final long agenticGeneration = agenticOperationGeneration;
         conv.sendAgenticStep(activeAgenticChain, stepOpts, new ChatBackend.OnReply() {
             @Override
             public void onLlmReply(LlmReply reply) {
-                main.post(() -> handleAgenticStepReply(conv, reply, obs));
+                main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                    handleAgenticStepReply(conv, reply, obs);
+                });
             }
 
             @Override
             public void onReply(String text) {
-                main.post(() -> finalizeAgentic(conv, obs, text));
+                main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                    finalizeAgentic(conv, obs, text);
+                });
             }
 
             @Override
             public void onError(String error) {
                 main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
                     if (isToolChoiceConflict(error)) {
                         Trace.error("agentic", "tool_choice_conflict: " + error);
                         finalizeAgentic(conv, obs, activeAgenticChain != null
@@ -1591,22 +1605,28 @@ public class PegaseSession {
             notifyError(obs, "Je n'ai pas pu formuler la réponse.");
             return;
         }
-        if (conv.isUserTurnPending()) {
-            conv.recordToolReply(out);
-        }
+        conv.recordToolReply(out);
+        markTurnLlmSynthesis(conv);
         publishReasoningForReply(out);
         notifyReply(obs, out, false);
     }
 
+    private void markTurnLlmSynthesis(ConversationManager conv) {
+        if (turnReasoning == null || conv == null) return;
+        turnReasoning.markLlmSynthesis(
+                conv.lastLlmBackend(), conv.lastLlmLatencyMs(), conv.lastPromptChars());
+    }
+
     private void beginTurnReasoning(String userMessage) {
         String msg = userMessage != null ? userMessage : "";
-        ContextIntent intent = ContextAnalyzer.analyze(appContext, msg);
-        turnReasoning = new ReasoningTurnCollector(intent.intent);
+        currentTurnIntent = ContextAnalyzer.analyze(appContext, msg, true);
+        turnReasoning = new ReasoningTurnCollector(currentTurnIntent.intent);
         if (appContext == null) return;
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
-            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, intent);
+            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, currentTurnIntent);
             turnReasoning.applySnapshot(snap);
+            turnReasoning.setSessionUsed(msg);
         } catch (Exception ignored) {
         }
     }
@@ -1634,6 +1654,11 @@ public class PegaseSession {
         }
         Trace.reasoningCard(card);
         turnReasoning = null;
+        currentTurnIntent = null;
+    }
+
+    private boolean isAgenticGenerationCurrent(long captured) {
+        return captured == agenticOperationGeneration;
     }
 
     private void clearPendingToolCall() {
@@ -1642,6 +1667,7 @@ public class PegaseSession {
     }
 
     private void clearAgenticState() {
+        agenticOperationGeneration++;
         clearPendingToolCall();
         activeAgenticChain = null;
         activeAgenticOptions = null;

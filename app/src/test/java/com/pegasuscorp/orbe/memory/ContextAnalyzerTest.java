@@ -1,5 +1,7 @@
 package com.pegasuscorp.orbe.memory;
 
+import com.pegasuscorp.orbe.diag.Trace;
+import com.pegasuscorp.orbe.routing.UserExamplesStore;
 import com.pegasuscorp.orbe.tools.ToolTag;
 import com.pegasuscorp.orbe.voice.SpeechInputNormalizer;
 
@@ -10,6 +12,8 @@ import org.robolectric.RuntimeEnvironment;
 
 import android.content.Context;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.EnumSet;
 
 import static org.junit.Assert.*;
@@ -253,5 +257,23 @@ public class ContextAnalyzerTest {
         String fold = SpeechInputNormalizer.fold("Résultat du match de ce soir ?")
                 .replace('\'', ' ');
         assertTrue(IntentDetector.needsFreshData(fold));
+    }
+
+    @Test
+    public void analyze_traceRouting_emitsRoutingMatchOnce() throws Exception {
+        Context ctx = RuntimeEnvironment.getApplication();
+        Trace.init(ctx);
+        Trace.clear(ctx);
+        UserExamplesStore.getInstance(ctx).addExample("tu as eut des problemes", "diag");
+        ContextAnalyzer.analyze(ctx, "t'as eu des soucis ?", true);
+        ContextAnalyzer.analyze(ctx, "t'as eu des soucis ?", false);
+        ContextAnalyzer.analyze(ctx, "t'as eu des soucis ?", false);
+        Trace.flushForTests();
+        String jsonl = new String(Files.readAllBytes(Trace.file().toPath()), StandardCharsets.UTF_8);
+        int count = 0;
+        for (String line : jsonl.split("\n")) {
+            if (line.contains("routing_match")) count++;
+        }
+        assertEquals(1, count);
     }
 }

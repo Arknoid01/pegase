@@ -741,7 +741,8 @@ public final class PegaseInterfaceData {
                 if (line.isEmpty()) continue;
                 out.add(new ChatMessageUi(true, userLabel, line, time));
             } else {
-                String line = com.pegasuscorp.orbe.tools.ToolDispatcher.cleanForDisplay(t.text);
+                String line = com.pegasuscorp.orbe.memory.ConversationHistorySanitizer
+                        .forDisplayAssistant(t.text);
                 if (line == null || line.trim().isEmpty()) continue;
                 String cleaned = line.trim();
                 com.pegasuscorp.orbe.diag.ReasoningCard card =

@@ -113,10 +113,10 @@ public class ConversationManagerTest {
                 || err.get().contains("saturé")
                 || err.get().contains("minute"));
         List<ChatBackend.Turn> history = conversation.historySnapshot();
-        assertEquals(2, history.size());
-        assertEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
-        assertFalse(history.get(1).text.toLowerCase().contains("groq"));
-        assertFalse(history.get(1).text.toLowerCase().contains("quota"));
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).fromUser);
+        assertEquals("Test", history.get(0).text);
+        assertFalse(conversation.isUserTurnPending());
     }
 
     @Test
@@ -431,6 +431,160 @@ public class ConversationManagerTest {
         assertEquals("Réponse bureau", out);
         assertEquals(0, conversation.historySnapshot().size());
         assertTrue(backend.lastHistory.isEmpty());
+    }
+
+    @Test
+    public void staleLlmCallback_afterLocalToolReply_doesNotOverwriteHistory() throws Exception {
+        Trace.clear(RuntimeEnvironment.getApplication());
+        conversation.enter();
+        backend.deferSend = true;
+        backend.nextError = "HTTP 429 rate limit exceeded";
+
+        conversation.send("Première question lente", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale success"); }
+            @Override public void onError(String error) { fail("stale error: " + error); }
+        });
+
+        conversation.addUserMessage("Tu as eut des problèmes ?");
+        conversation.recordToolReply("6h30 · groq/openai/gpt-oss-120b → next : bilan diag local.");
+
+        backend.deferSend = false;
+        backend.flushDeferredSend();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(2, history.size());
+        assertTrue(history.get(0).fromUser);
+        assertEquals("Tu as eut des problèmes ?", history.get(0).text);
+        assertFalse(history.get(1).fromUser);
+        assertEquals("6h30 · groq/openai/gpt-oss-120b → next : bilan diag local.",
+                history.get(1).text);
+        assertFalse(history.get(1).text.contains("Réessaie"));
+        assertFalse(conversation.isUserTurnPending());
+
+        Trace.flushForTests();
+        String jsonl = new String(java.nio.file.Files.readAllBytes(Trace.file().toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(jsonl.contains("\"type\":\"stale_callback_ignored\"")
+                || jsonl.contains("\"type\": \"stale_callback_ignored\""));
+        assertTrue(backend.providerTraceDiscarded);
+        assertFalse(backend.providerTraceConsumed);
+    }
+
+    @Test
+    public void staleLlmCallback_doesNotConsumeProviderTrace() {
+        conversation.enter();
+        backend.deferSend = true;
+        backend.nextReply = "Réponse obsolète";
+
+        conversation.send("Première question", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale"); }
+            @Override public void onError(String error) { fail("stale"); }
+        });
+
+        conversation.addUserMessage("Deuxième question");
+        conversation.recordToolReply("Réponse locale.");
+
+        backend.deferSend = false;
+        backend.flushDeferredSend();
+
+        assertTrue(backend.providerTraceDiscarded);
+        assertFalse(backend.providerTraceConsumed);
+    }
+
+    @Test
+    public void staleAgenticError_afterLocalToolReply_doesNotPoisonHistory() {
+        conversation.enter();
+        conversation.addUserMessage("Quel temps ?");
+        conversation.recordToolSuccessHint("weather", "18°C, soleil");
+
+        backend.nextError = "HTTP 429 rate limit exceeded";
+        backend.deferAgentic = true;
+        AgenticChain chain = new AgenticChain(conversation.historySnapshot(),
+                conversation.getLastUserText());
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather",
+                        new org.json.JSONObject()),
+                "18°C", "18°C");
+
+        conversation.sendAgenticStep(chain, ChatSendOptions.agenticStep(
+                ChatSendOptions.legacy().allowedTools, false), new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale agentic success"); }
+            @Override public void onError(String error) { fail("stale agentic error: " + error); }
+        });
+
+        conversation.addUserMessage("Tu as eut des problèmes ?");
+        conversation.recordToolReply("Pas d'erreur notable aujourd'hui.");
+
+        backend.deferAgentic = false;
+        backend.flushDeferredAgentic();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(2, history.size());
+        assertEquals("Pas d'erreur notable aujourd'hui.", history.get(1).text);
+        assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
+    }
+
+    @Test
+    public void stripPoisonOnNextSend_removesStaleTransientError() {
+        conversation.enter();
+        backend.nextError = "HTTP 429 rate limit exceeded";
+        conversation.send("Briefing", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("expected error"); }
+            @Override public void onError(String error) { /* shown to user */ }
+        });
+        assertEquals(1, conversation.historySnapshot().size());
+
+        backend.nextError = null;
+        backend.nextReply = "OK";
+        awaitReply(conversation, "Tu as eut des problèmes ?");
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(4, history.size());
+        assertEquals("Tu as eut des problèmes ?", history.get(2).text);
+        assertEquals("OK", history.get(3).text);
+        for (ChatBackend.Turn t : history) {
+            assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, t.text);
+        }
+    }
+
+    @Test
+    public void enter_stripsPoisonLoadedFromMemory() {
+        memory.setRecentTurns(Arrays.asList(
+                new ChatBackend.Turn(true, "Salut"),
+                new ChatBackend.Turn(false, ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR),
+                new ChatBackend.Turn(true, "Ça va ?"),
+                new ChatBackend.Turn(false, "Oui")));
+
+        conversation.enter();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(3, history.size());
+        assertEquals("Salut", history.get(0).text);
+        assertEquals("Ça va ?", history.get(1).text);
+        assertEquals("Oui", history.get(2).text);
+    }
+
+    @Test
+    public void longAssistantReply_preservedInNextSend() {
+        StringBuilder longReply = new StringBuilder(
+                "Mais attention, le maté, c'est aussi de la caféine ; ");
+        while (longReply.length() < 900) {
+            longReply.append("nuance importante sur la consommation. ");
+        }
+        longReply.append("survol possible si tu en abuses.");
+        backend.nextReply = longReply.toString();
+
+        conversation.enter();
+        awaitReply(conversation, "C'est quoi le maté ?");
+        assertTrue(conversation.historySnapshot().get(1).text.length() > 500);
+        assertTrue(conversation.historySnapshot().get(1).text.contains("survol"));
+
+        backend.nextReply = "ok";
+        awaitReply(conversation, "Et la caféine dedans ?");
+
+        ChatBackend.Turn priorAssistant = conversation.historySnapshot().get(1);
+        assertTrue(priorAssistant.text.contains("survol"));
+        assertTrue(backend.lastHistory.get(1).text.contains("survol"));
+        assertTrue(backend.lastHistory.get(1).text.length() > 500);
     }
 
     private static void awaitReply(ConversationManager conversation, String message) {

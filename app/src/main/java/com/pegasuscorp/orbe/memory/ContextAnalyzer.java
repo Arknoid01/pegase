@@ -23,6 +23,14 @@ public final class ContextAnalyzer {
     private ContextAnalyzer() {}
 
     public static ContextIntent analyze(Context context, String userMessage) {
+        return analyze(context, userMessage, false);
+    }
+
+    /**
+     * @param traceRouting si true, émet {@code routing_match} une fois (tour user).
+     */
+    public static ContextIntent analyze(Context context, String userMessage,
+            boolean traceRouting) {
         EntityResolver.Resolution entities = EntityResolver.resolve(context, userMessage);
         String fold = SpeechInputNormalizer.fold(userMessage).replace('\'', ' ');
 
@@ -41,8 +49,10 @@ public final class ContextAnalyzer {
         boolean requiresFresh;
 
         if (exampleMatch != null) {
-            Trace.routingMatch(userMessage, exampleMatch.tool, exampleMatch.score,
-                    "user_example", exampleMatch.exact);
+            if (traceRouting) {
+                Trace.routingMatch(userMessage, exampleMatch.tool, exampleMatch.score,
+                        "user_example", exampleMatch.exact);
+            }
             if ("none".equals(exampleMatch.tool)) {
                 intent = "general";
                 allowedTools = EnumSet.copyOf(BASE_TOOLS);

@@ -15,10 +15,9 @@ public final class ConversationHistorySanitizer {
     public static final int MAX_STORED_TURNS = 14;
 
     /**
-     * Longueur max d'une réponse assistant en historique / affichage.
-     * 420 coupait les histoires — budget texte large (voix reste limitée par TTS / max_tokens).
+     * Plafond optionnel pour l'affichage UI (bulles, bandeaux) — jamais pour le prompt LLM.
      */
-    public static final int MAX_ASSISTANT_CHARS = 8_000;
+    public static final int MAX_DISPLAY_ASSISTANT_CHARS = 8_000;
 
     private ConversationHistorySanitizer() {}
 
@@ -27,18 +26,32 @@ public final class ConversationHistorySanitizer {
         return text.replaceAll("\\s+", " ").trim();
     }
 
+    /**
+     * Nettoie une réponse assistant pour stockage et réinjection au LLM — sans troncature.
+     * (La limite de contexte est gérée par {@link ConversationHistorySelector}, pas ici.)
+     */
     public static String forAssistant(String text) {
+        return cleanAssistant(text);
+    }
+
+    /** Variante tronquée pour l'affichage seulement (bulles Discussion, aperçus). */
+    public static String forDisplayAssistant(String text) {
+        String out = cleanAssistant(text);
+        if (out.length() > MAX_DISPLAY_ASSISTANT_CHARS) {
+            out = out.substring(0, MAX_DISPLAY_ASSISTANT_CHARS - 1).trim() + "…";
+        }
+        return out;
+    }
+
+    private static String cleanAssistant(String text) {
         if (text == null) return "";
         if (ChatSpokenErrors.isHistoryPoison(text)) {
-            return ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
+            return "";
         }
         String out = ToolDispatcher.cleanForDisplay(text);
         out = PegasePrompt.sanitizeForDisplay(out);
         if (ChatSpokenErrors.isHistoryPoison(out)) {
-            return ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR;
-        }
-        if (out.length() > MAX_ASSISTANT_CHARS) {
-            out = out.substring(0, MAX_ASSISTANT_CHARS - 1).trim() + "…";
+            return "";
         }
         return out;
     }
@@ -70,6 +83,7 @@ public final class ConversationHistorySanitizer {
         for (ChatBackend.Turn turn : turns) {
             if (turn == null) continue;
             if (turn.system) continue; // hints éphémères — pas en mémoire longue
+            if (!turn.fromUser && ChatSpokenErrors.isHistoryPoison(turn.text)) continue;
             String stored = forStorage(turn.fromUser, turn.text);
             if (stored.isEmpty()) continue;
             ChatBackend.Turn cleaned = new ChatBackend.Turn(turn.fromUser, stored);
@@ -86,6 +100,21 @@ public final class ConversationHistorySanitizer {
         }
         while (out.size() > MAX_STORED_TURNS) {
             out.remove(0);
+        }
+        return out;
+    }
+
+    /**
+     * Retire les tours assistant « quota / erreur transitoire » déjà en mémoire.
+     * Utilisé avant envoi LLM et au chargement session.
+     */
+    public static List<ChatBackend.Turn> stripPoisonTurns(List<ChatBackend.Turn> turns) {
+        if (turns == null || turns.isEmpty()) return new ArrayList<>();
+        List<ChatBackend.Turn> out = new ArrayList<>();
+        for (ChatBackend.Turn t : turns) {
+            if (t == null) continue;
+            if (!t.fromUser && ChatSpokenErrors.isHistoryPoison(t.text)) continue;
+            out.add(t);
         }
         return out;
     }
