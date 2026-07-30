@@ -433,6 +433,66 @@ public class ConversationManagerTest {
         assertTrue(backend.lastHistory.isEmpty());
     }
 
+    @Test
+    public void staleLlmCallback_afterLocalToolReply_doesNotOverwriteHistory() {
+        conversation.enter();
+        backend.deferSend = true;
+        backend.nextError = "HTTP 429 rate limit exceeded";
+
+        conversation.send("Première question lente", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale success"); }
+            @Override public void onError(String error) { fail("stale error: " + error); }
+        });
+
+        conversation.addUserMessage("Tu as eut des problèmes ?");
+        conversation.recordToolReply("6h30 · groq/openai/gpt-oss-120b → next : bilan diag local.");
+
+        backend.deferSend = false;
+        backend.flushDeferredSend();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(2, history.size());
+        assertTrue(history.get(0).fromUser);
+        assertEquals("Tu as eut des problèmes ?", history.get(0).text);
+        assertFalse(history.get(1).fromUser);
+        assertEquals("6h30 · groq/openai/gpt-oss-120b → next : bilan diag local.",
+                history.get(1).text);
+        assertFalse(history.get(1).text.contains("Réessaie"));
+        assertFalse(conversation.isUserTurnPending());
+    }
+
+    @Test
+    public void staleAgenticError_afterLocalToolReply_doesNotPoisonHistory() {
+        conversation.enter();
+        conversation.addUserMessage("Quel temps ?");
+        conversation.recordToolSuccessHint("weather", "18°C, soleil");
+
+        backend.nextError = "HTTP 429 rate limit exceeded";
+        backend.deferAgentic = true;
+        AgenticChain chain = new AgenticChain(conversation.historySnapshot(),
+                conversation.getLastUserText());
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather",
+                        new org.json.JSONObject()),
+                "18°C", "18°C");
+
+        conversation.sendAgenticStep(chain, ChatSendOptions.agenticStep(
+                ChatSendOptions.legacy().allowedTools, false), new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale agentic success"); }
+            @Override public void onError(String error) { fail("stale agentic error: " + error); }
+        });
+
+        conversation.addUserMessage("Tu as eut des problèmes ?");
+        conversation.recordToolReply("Pas d'erreur notable aujourd'hui.");
+
+        backend.deferAgentic = false;
+        backend.flushDeferredAgentic();
+
+        List<ChatBackend.Turn> history = conversation.historySnapshot();
+        assertEquals(2, history.size());
+        assertEquals("Pas d'erreur notable aujourd'hui.", history.get(1).text);
+        assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
+    }
+
     private static void awaitReply(ConversationManager conversation, String message) {
         AtomicReference<String> reply = new AtomicReference<>();
         conversation.send(message, new ChatBackend.OnReply() {

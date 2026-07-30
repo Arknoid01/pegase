@@ -62,6 +62,12 @@ public class ConversationManager {
     /** Outil réussi dans ce tour (ex. memory) — la prose de synthèse n'est pas un fantôme. */
     private boolean toolSucceededThisTurn;
 
+    /**
+     * Incrémenté à chaque nouveau tour utilisateur ({@link #send}, {@link #addUserMessage}…).
+     * Les callbacks LLM en vol d'un tour précédent sont ignorés.
+     */
+    private long sendGeneration;
+
     public ConversationManager(Context context, ChatBackend backend) {
         this(backend, MemoryRepository.getInstance(context.getApplicationContext()),
                 context.getApplicationContext());
@@ -142,6 +148,7 @@ public class ConversationManager {
         }
         userTurnPending = true;
         lastUserText = userText;
+        final long callbackGeneration = bumpSendGeneration();
 
         ChatBackend.OnReply wrapped;
         if (callback instanceof ChatBackend.StreamOnReply) {
@@ -154,11 +161,13 @@ public class ConversationManager {
 
                 @Override
                 public void onReply(String text) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     streamCb.onReply(recordAssistantReply(text));
                 }
 
                 @Override
                 public void onLlmReply(LlmReply reply) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     if (reply.hasNativeToolCalls()) {
                         recordNativeToolAssistant(reply);
                         streamCb.onLlmReply(reply);
@@ -170,6 +179,7 @@ public class ConversationManager {
 
                 @Override
                 public void onError(String error) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     if (ChatSpokenErrors.isToolChoiceConflict(error)) {
                         streamCb.onError(error);
                         return;
@@ -183,11 +193,13 @@ public class ConversationManager {
             wrapped = new ChatBackend.OnReply() {
                 @Override
                 public void onReply(String text) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     callback.onReply(recordAssistantReply(text));
                 }
 
                 @Override
                 public void onLlmReply(LlmReply reply) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     if (reply.hasNativeToolCalls()) {
                         recordNativeToolAssistant(reply);
                         callback.onLlmReply(reply);
@@ -199,6 +211,7 @@ public class ConversationManager {
 
                 @Override
                 public void onError(String error) {
+                    if (isStaleCallback(callbackGeneration)) return;
                     if (ChatSpokenErrors.isToolChoiceConflict(error)) {
                         callback.onError(error);
                         return;
@@ -250,6 +263,7 @@ public class ConversationManager {
         if (userMessage == null || userMessage.trim().isEmpty()) return;
         lastUserText = userMessage.trim();
         toolSucceededThisTurn = false;
+        bumpSendGeneration();
         addTurn(true, userMessage);
         userTurnPending = true;
     }
@@ -422,7 +436,10 @@ public class ConversationManager {
 
     public void recordToolReply(String spokenReply) {
         String cleaned = ConversationHistorySanitizer.forAssistant(spokenReply);
-        if (cleaned.isEmpty()) return;
+        if (cleaned.isEmpty()) {
+            userTurnPending = false;
+            return;
+        }
 
         toolSucceededThisTurn = true;
         replaceOrAppendAssistant(history, cleaned);
@@ -446,6 +463,7 @@ public class ConversationManager {
     /** Tour utilisateur sans appel LLM (réponse à une confirm/choix outil). */
     public void recordUserMessage(String text) {
         if (text == null || text.trim().isEmpty()) return;
+        bumpSendGeneration();
         addTurn(true, text.trim());
         userTurnPending = true;
     }
@@ -481,9 +499,11 @@ public class ConversationManager {
     public void sendAgenticStep(AgenticChain chain, ChatSendOptions options,
             ChatBackend.OnReply callback) {
         ChatSendOptions opts = options != null ? options : ChatSendOptions.legacy();
+        final long callbackGeneration = sendGeneration;
         ChatBackend.OnReply wrapped = new ChatBackend.OnReply() {
             @Override
             public void onLlmReply(LlmReply reply) {
+                if (isStaleCallback(callbackGeneration)) return;
                 if (reply.hasNativeToolCalls()) {
                     callback.onLlmReply(reply);
                     return;
@@ -496,11 +516,13 @@ public class ConversationManager {
 
             @Override
             public void onReply(String text) {
+                if (isStaleCallback(callbackGeneration)) return;
                 callback.onReply(recordAssistantReply(text));
             }
 
             @Override
             public void onError(String error) {
+                if (isStaleCallback(callbackGeneration)) return;
                 // Passer l'erreur brute si tool_choice conflict — PegaseSession récupère le dernier outil
                 if (ChatSpokenErrors.isToolChoiceConflict(error)) {
                     callback.onError(error);
@@ -534,6 +556,14 @@ public class ConversationManager {
 
     public boolean isUserTurnPending() {
         return userTurnPending;
+    }
+
+    private long bumpSendGeneration() {
+        return ++sendGeneration;
+    }
+
+    private boolean isStaleCallback(long capturedGeneration) {
+        return capturedGeneration != sendGeneration;
     }
 
     /**

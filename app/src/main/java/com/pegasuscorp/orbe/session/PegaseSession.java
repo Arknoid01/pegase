@@ -1591,9 +1591,7 @@ public class PegaseSession {
             notifyError(obs, "Je n'ai pas pu formuler la réponse.");
             return;
         }
-        if (conv.isUserTurnPending()) {
-            conv.recordToolReply(out);
-        }
+        conv.recordToolReply(out);
         publishReasoningForReply(out);
         notifyReply(obs, out, false);
     }
