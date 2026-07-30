@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Backend synchrone pour tests — pas de thread, pas de réseau. */
-public final class FakeChatBackend implements ChatBackend {
+public final class FakeChatBackend implements ChatBackend, ProviderTraceSink {
 
     public String nextReply = "D'accord.";
     public String nextSynthesisReply = "Voilà, c'est fait.";
@@ -30,6 +30,9 @@ public final class FakeChatBackend implements ChatBackend {
     public ChatSendOptions lastOptions = ChatSendOptions.legacy();
     public AgenticChain lastAgenticChain;
     public ChatSendOptions lastAgenticOptions;
+    public boolean pendingProviderTrace;
+    public boolean providerTraceConsumed;
+    public boolean providerTraceDiscarded;
 
     @Override
     public boolean supportsStreaming() {
@@ -65,6 +68,7 @@ public final class FakeChatBackend implements ChatBackend {
     }
 
     private void deliverSend(OnReply callback) {
+        stageProviderTraceForTest();
         if (nextError != null) {
             callback.onError(nextError);
             return;
@@ -110,6 +114,7 @@ public final class FakeChatBackend implements ChatBackend {
     }
 
     private void deliverAgentic(OnReply callback) {
+        stageProviderTraceForTest();
         if (nextError != null) {
             callback.onError(nextError);
             return;
@@ -120,5 +125,23 @@ public final class FakeChatBackend implements ChatBackend {
             return;
         }
         callback.onLlmReply(LlmReply.text(nextSynthesisReply));
+    }
+
+    private void stageProviderTraceForTest() {
+        pendingProviderTrace = true;
+        providerTraceConsumed = false;
+        providerTraceDiscarded = false;
+    }
+
+    @Override
+    public void consumePendingProviderTrace() {
+        if (pendingProviderTrace) providerTraceConsumed = true;
+        pendingProviderTrace = false;
+    }
+
+    @Override
+    public void discardPendingProviderTrace() {
+        if (pendingProviderTrace) providerTraceDiscarded = true;
+        pendingProviderTrace = false;
     }
 }

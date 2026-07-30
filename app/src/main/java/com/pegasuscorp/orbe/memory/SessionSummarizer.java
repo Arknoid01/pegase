@@ -4,6 +4,8 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
 import com.pegasuscorp.orbe.chat.ChatBackendFactory;
+import com.pegasuscorp.orbe.chat.ProviderTraceSink;
+import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.llm.ModelStore;
 
 import org.json.JSONObject;
@@ -42,9 +44,13 @@ public final class SessionSummarizer {
                 + transcript;
 
         ChatBackend backend = ChatBackendFactory.create(context);
+        final int promptChars = prompt.length();
         backend.send(java.util.Collections.emptyList(), prompt, new ChatBackend.OnReply() {
             @Override
             public void onReply(String text) {
+                consumeProviderTrace(backend);
+                Trace.llmReply(text != null ? text : "", backend.traceBackendLabel(),
+                        0L, false, false, false, promptChars, true, "session_summary");
                 SessionSummary summary = parseSummary(text);
                 if (summary == null) {
                     summary = fallbackSummary(context, sessionTurns);
@@ -54,10 +60,24 @@ public final class SessionSummarizer {
 
             @Override
             public void onError(String error) {
+                discardProviderTrace(backend);
+                Trace.error("session_summary", error != null ? error : "unknown");
                 MemoryRepository.getInstance(context)
                         .addSessionSummary(fallbackSummary(context, sessionTurns));
             }
         });
+    }
+
+    private static void consumeProviderTrace(ChatBackend backend) {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).consumePendingProviderTrace();
+        }
+    }
+
+    private static void discardProviderTrace(ChatBackend backend) {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).discardPendingProviderTrace();
+        }
     }
 
     private static SessionSummary parseSummary(String text) {

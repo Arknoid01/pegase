@@ -466,6 +466,29 @@ public class ConversationManagerTest {
                 java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(jsonl.contains("\"type\":\"stale_callback_ignored\"")
                 || jsonl.contains("\"type\": \"stale_callback_ignored\""));
+        assertTrue(backend.providerTraceDiscarded);
+        assertFalse(backend.providerTraceConsumed);
+    }
+
+    @Test
+    public void staleLlmCallback_doesNotConsumeProviderTrace() {
+        conversation.enter();
+        backend.deferSend = true;
+        backend.nextReply = "Réponse obsolète";
+
+        conversation.send("Première question", new ChatBackend.OnReply() {
+            @Override public void onReply(String text) { fail("stale"); }
+            @Override public void onError(String error) { fail("stale"); }
+        });
+
+        conversation.addUserMessage("Deuxième question");
+        conversation.recordToolReply("Réponse locale.");
+
+        backend.deferSend = false;
+        backend.flushDeferredSend();
+
+        assertTrue(backend.providerTraceDiscarded);
+        assertFalse(backend.providerTraceConsumed);
     }
 
     @Test

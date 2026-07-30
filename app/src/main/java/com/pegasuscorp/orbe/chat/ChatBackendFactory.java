@@ -9,13 +9,29 @@ import com.pegasuscorp.orbe.llm.ModelStore;
  */
 public final class ChatBackendFactory {
 
+    private static volatile ChatBackend sharedCloudBackend;
+
     private ChatBackendFactory() {}
 
     public static ChatBackend create(Context context) {
-        if (ModelStore.useLocalLlm(context)) {
-            return new LocalLlmChatBackend(context);
+        Context app = context.getApplicationContext();
+        if (ModelStore.useLocalLlm(app)) {
+            return new LocalLlmChatBackend(app);
         }
-        // Rotation Groq → Cerebras → OpenRouter (Gemini hors chaîne)
-        return new MultiProviderBackend(context);
+        // Un seul MultiProviderBackend — file IO partagée, pas de HTTP parallèles fantômes
+        // (SessionSummarizer, F1NewsSummarizer, discussion…).
+        if (sharedCloudBackend == null) {
+            synchronized (ChatBackendFactory.class) {
+                if (sharedCloudBackend == null) {
+                    sharedCloudBackend = new MultiProviderBackend(app);
+                }
+            }
+        }
+        return sharedCloudBackend;
+    }
+
+    /** Tests unitaires — réinitialise le singleton cloud. */
+    public static void resetForTests() {
+        sharedCloudBackend = null;
     }
 }

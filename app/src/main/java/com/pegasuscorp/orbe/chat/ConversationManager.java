@@ -231,6 +231,7 @@ public class ConversationManager {
     }
 
     private void recordNativeToolAssistant(LlmReply reply) {
+        consumeProviderTrace();
         int count = reply.toolCalls != null ? reply.toolCalls.size() : 0;
         noteLlmMeta(backend.traceBackendLabel(), System.currentTimeMillis() - lastSendAtMs);
         Trace.llmReply("[native tool_calls:" + count + "]", lastLlmBackend,
@@ -270,6 +271,7 @@ public class ConversationManager {
 
     /** @return texte à afficher / parler (peut différer du brut si filtre anti-fantôme). */
     private String recordAssistantReply(String text) {
+        consumeProviderTrace();
         boolean toolCall = ToolDispatcher.isToolCall(text);
         noteLlmMeta(backend.traceBackendLabel(), System.currentTimeMillis() - lastSendAtMs);
         Trace.llmReply(text, lastLlmBackend,
@@ -295,6 +297,7 @@ public class ConversationManager {
     }
 
     private void recordAssistantError(String rawError, String userMessage) {
+        discardProviderTrace();
         Trace.error("llm", rawError);
         if (!userTurnPending) return;
         // Ne jamais stocker « quota Groq » / rate limit : ça pollue les tours suivants.
@@ -564,8 +567,21 @@ public class ConversationManager {
 
     private boolean isStaleCallback(long capturedGeneration) {
         if (capturedGeneration == sendGeneration) return false;
+        discardProviderTrace();
         Trace.staleCallbackIgnored(capturedGeneration, sendGeneration);
         return true;
+    }
+
+    private void consumeProviderTrace() {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).consumePendingProviderTrace();
+        }
+    }
+
+    private void discardProviderTrace() {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).discardPendingProviderTrace();
+        }
     }
 
     /**
@@ -616,6 +632,7 @@ public class ConversationManager {
             @Override
             public void onLlmReply(LlmReply reply) {
                 String text = reply.content != null ? reply.content : "";
+                consumeProviderTrace();
                 noteLlmMeta(backend.traceBackendLabel(),
                         System.currentTimeMillis() - lastSendAtMs);
                 Trace.llmReply(text, lastLlmBackend,
@@ -626,6 +643,7 @@ public class ConversationManager {
 
             @Override
             public void onReply(String text) {
+                consumeProviderTrace();
                 noteLlmMeta(backend.traceBackendLabel(),
                         System.currentTimeMillis() - lastSendAtMs);
                 Trace.llmReply(text, lastLlmBackend,
@@ -636,6 +654,7 @@ public class ConversationManager {
 
             @Override
             public void onError(String error) {
+                discardProviderTrace();
                 String userMsg = ChatSpokenErrors.toUserMessage(error);
                 Trace.llmReply("[error] " + error, backend.traceBackendLabel(),
                         System.currentTimeMillis() - lastSendAtMs, false,

@@ -85,6 +85,8 @@ public class PegaseSession {
     private ChatSendOptions activeAgenticOptions;
     private long activeRequestId;
     private int agenticStepIndex;
+    /** Invalide les callbacks agentiques après {@link #clearAgenticState()}. */
+    private long agenticOperationGeneration;
     /** Collecte outils / sources pour la ReasoningCard du tour. */
     private ReasoningTurnCollector turnReasoning;
 
@@ -1493,20 +1495,28 @@ public class PegaseSession {
         }
         agenticStepIndex++;
         notifyLlmStart(obs);
+        final long agenticGeneration = agenticOperationGeneration;
         conv.sendAgenticStep(activeAgenticChain, stepOpts, new ChatBackend.OnReply() {
             @Override
             public void onLlmReply(LlmReply reply) {
-                main.post(() -> handleAgenticStepReply(conv, reply, obs));
+                main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                    handleAgenticStepReply(conv, reply, obs);
+                });
             }
 
             @Override
             public void onReply(String text) {
-                main.post(() -> finalizeAgentic(conv, obs, text));
+                main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                    finalizeAgentic(conv, obs, text);
+                });
             }
 
             @Override
             public void onError(String error) {
                 main.post(() -> {
+                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
                     if (isToolChoiceConflict(error)) {
                         Trace.error("agentic", "tool_choice_conflict: " + error);
                         finalizeAgentic(conv, obs, activeAgenticChain != null
@@ -1635,12 +1645,17 @@ public class PegaseSession {
         turnReasoning = null;
     }
 
+    private boolean isAgenticGenerationCurrent(long captured) {
+        return captured == agenticOperationGeneration;
+    }
+
     private void clearPendingToolCall() {
         pendingAssistantToolReply = null;
         pendingNativeToolCall = null;
     }
 
     private void clearAgenticState() {
+        agenticOperationGeneration++;
         clearPendingToolCall();
         activeAgenticChain = null;
         activeAgenticOptions = null;

@@ -6,6 +6,7 @@ import android.os.Looper;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
 import com.pegasuscorp.orbe.chat.ChatBackendFactory;
+import com.pegasuscorp.orbe.chat.ProviderTraceSink;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -126,16 +127,30 @@ public final class MemoryEditor {
         backend.send(java.util.Collections.emptyList(), prompt, new ChatBackend.OnReply() {
             @Override
             public void onReply(String text) {
+                consumeProviderTrace(backend);
                 MemoryEditResult result = applyLlmPlan(text);
                 main.post(() -> callback.onResult(result));
             }
 
             @Override
             public void onError(String error) {
+                discardProviderTrace(backend);
                 main.post(() -> callback.onResult(
                         MemoryEditResult.failed("Je n'ai pas pu modifier la mémoire.")));
             }
         });
+    }
+
+    private static void consumeProviderTrace(ChatBackend backend) {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).consumePendingProviderTrace();
+        }
+    }
+
+    private static void discardProviderTrace(ChatBackend backend) {
+        if (backend instanceof ProviderTraceSink) {
+            ((ProviderTraceSink) backend).discardPendingProviderTrace();
+        }
     }
 
     private MemoryEditResult applyLlmPlan(String raw) {

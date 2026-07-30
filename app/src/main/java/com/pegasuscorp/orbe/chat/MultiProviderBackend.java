@@ -22,7 +22,7 @@ import java.util.concurrent.TimeoutException;
  * Rotation Groq → Cerebras → OpenRouter (Gemini exclu).
  * Timeout agressif + cool-down santé.
  */
-public final class MultiProviderBackend implements ChatBackend {
+public final class MultiProviderBackend implements ChatBackend, ProviderTraceSink {
 
     private static final String TAG = "MultiProvider";
 
@@ -31,6 +31,10 @@ public final class MultiProviderBackend implements ChatBackend {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile String lastTraceLabel;
+    private final Object pendingTraceLock = new Object();
+    private String pendingProviderId;
+    private String pendingModelId;
+    private long pendingLatencyMs;
 
     private static volatile boolean lastCallUsedFallback = false;
     private static volatile Boolean fallbackOverrideForTests = null;
@@ -52,6 +56,41 @@ public final class MultiProviderBackend implements ChatBackend {
     public static void setOnFallbackBackendForTests(Boolean value) {
         fallbackOverrideForTests = value;
         if (value == null) lastCallUsedFallback = false;
+    }
+
+    private void stageProviderTrace(String providerId, String modelId, long latencyMs) {
+        synchronized (pendingTraceLock) {
+            pendingProviderId = providerId;
+            pendingModelId = modelId;
+            pendingLatencyMs = latencyMs;
+        }
+    }
+
+    @Override
+    public void consumePendingProviderTrace() {
+        String provider;
+        String model;
+        long latency;
+        synchronized (pendingTraceLock) {
+            provider = pendingProviderId;
+            model = pendingModelId;
+            latency = pendingLatencyMs;
+            pendingProviderId = null;
+            pendingModelId = null;
+            pendingLatencyMs = 0L;
+        }
+        if (provider != null && model != null) {
+            Trace.providerUsed(provider, model, latency);
+        }
+    }
+
+    @Override
+    public void discardPendingProviderTrace() {
+        synchronized (pendingTraceLock) {
+            pendingProviderId = null;
+            pendingModelId = null;
+            pendingLatencyMs = 0L;
+        }
     }
 
     @Override
@@ -132,7 +171,7 @@ public final class MultiProviderBackend implements ChatBackend {
                             lastTraceLabel = p.displayName + "/" + modelId;
                             lastCallUsedFallback = !firstAttempt
                                     || !modelId.equals(chain.get(0).modelId);
-                            Trace.providerUsed(p.id, modelId, latency);
+                            stageProviderTrace(p.id, modelId, latency);
                             main.post(() -> callback.onLlmReply(reply));
                             return;
                         }
@@ -233,7 +272,7 @@ public final class MultiProviderBackend implements ChatBackend {
                         health.markSuccess(p);
                         lastTraceLabel = p.displayName + "/" + modelId;
                         lastCallUsedFallback = !firstAttempt;
-                        Trace.providerUsed(p.id, modelId, latency);
+                        stageProviderTrace(p.id, modelId, latency);
                         main.post(() -> {
                             if (reply != null && reply.hasNativeToolCalls()) {
                                 callback.onLlmReply(reply);
