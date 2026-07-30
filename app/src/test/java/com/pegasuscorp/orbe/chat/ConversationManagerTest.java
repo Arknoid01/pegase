@@ -563,6 +563,30 @@ public class ConversationManagerTest {
         assertEquals("Oui", history.get(2).text);
     }
 
+    @Test
+    public void longAssistantReply_preservedInNextSend() {
+        StringBuilder longReply = new StringBuilder(
+                "Mais attention, le maté, c'est aussi de la caféine ; ");
+        while (longReply.length() < 900) {
+            longReply.append("nuance importante sur la consommation. ");
+        }
+        longReply.append("survol possible si tu en abuses.");
+        backend.nextReply = longReply.toString();
+
+        conversation.enter();
+        awaitReply(conversation, "C'est quoi le maté ?");
+        assertTrue(conversation.historySnapshot().get(1).text.length() > 500);
+        assertTrue(conversation.historySnapshot().get(1).text.contains("survol"));
+
+        backend.nextReply = "ok";
+        awaitReply(conversation, "Et la caféine dedans ?");
+
+        ChatBackend.Turn priorAssistant = conversation.historySnapshot().get(1);
+        assertTrue(priorAssistant.text.contains("survol"));
+        assertTrue(backend.lastHistory.get(1).text.contains("survol"));
+        assertTrue(backend.lastHistory.get(1).text.length() > 500);
+    }
+
     private static void awaitReply(ConversationManager conversation, String message) {
         AtomicReference<String> reply = new AtomicReference<>();
         conversation.send(message, new ChatBackend.OnReply() {

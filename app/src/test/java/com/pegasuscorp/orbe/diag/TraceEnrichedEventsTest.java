@@ -26,6 +26,37 @@ public class TraceEnrichedEventsTest {
     }
 
     @Test
+    public void historySnapshot_preservesFullTurnText() throws Exception {
+        StringBuilder longAssistant = new StringBuilder("Mais attention, le maté ");
+        while (longAssistant.length() < 650) {
+            longAssistant.append("et la caféine ");
+        }
+        longAssistant.append("survol possible.");
+        java.util.List<com.pegasuscorp.orbe.chat.ChatBackend.Turn> history = java.util.Arrays.asList(
+                new com.pegasuscorp.orbe.chat.ChatBackend.Turn(true, "C'est quoi le maté ?"),
+                new com.pegasuscorp.orbe.chat.ChatBackend.Turn(false, longAssistant.toString()));
+        Trace.historySnapshot(history, "before_send");
+        Trace.flushForTests();
+        String jsonl = new String(Files.readAllBytes(Trace.file().toPath()), StandardCharsets.UTF_8);
+        assertTrue(jsonl.contains("survol possible."));
+        assertFalse(jsonl.contains(longAssistant.substring(0, 400) + "…"));
+    }
+
+    @Test
+    public void llmReply_preservesFullText() throws Exception {
+        StringBuilder longReply = new StringBuilder("Réponse longue ");
+        while (longReply.length() < 650) {
+            longReply.append("détail ");
+        }
+        longReply.append("fin.");
+        Trace.llmReply(longReply.toString(), "Groq/test", 100, false, false, false, 500);
+        Trace.flushForTests();
+        String jsonl = new String(Files.readAllBytes(Trace.file().toPath()), StandardCharsets.UTF_8);
+        assertTrue(jsonl.contains("fin."));
+        assertFalse(jsonl.contains(longReply.substring(0, 400) + "…"));
+    }
+
+    @Test
     public void toolHesitation_truncatesUserMsgTo100() throws Exception {
         String longMsg = new String(new char[150]).replace('\0', 'a');
         Trace.toolHesitation("notepad", "phantom_action", "detail", longMsg);

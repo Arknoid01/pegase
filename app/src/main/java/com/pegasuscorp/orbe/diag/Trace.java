@@ -312,7 +312,7 @@ public final class Trace {
             boolean ephemeral, String channel, int contextChunks, int memoriesUsed,
             List<String> webSources) {
         JSONObject o = base("llm_reply");
-        put(o, "text", rawText);
+        putUnbounded(o, "text", rawText);
         put(o, "backend", backend);
         put(o, "latency_ms", latencyMs);
         put(o, "streamed", streamed);
@@ -670,7 +670,8 @@ public final class Trace {
             for (ChatBackend.Turn t : history) {
                 JSONObject turn = new JSONObject();
                 put(turn, "role", t.fromUser ? "user" : "assistant");
-                put(turn, "text", t.text);
+                // Texte intégral : ce snapshot reflète ce qui part au LLM (pas PREVIEW_CHARS).
+                putUnbounded(turn, "text", t.text);
                 arr.put(turn);
             }
         }
@@ -744,6 +745,18 @@ public final class Trace {
                 return;
             }
             o.put(key, value);
+        } catch (Exception ignored) {}
+    }
+
+    /** Comme {@link #put} mais sans plafond PREVIEW_CHARS — historique LLM, llm_reply, etc. */
+    private static void putUnbounded(JSONObject o, String key, String value) {
+        try {
+            if (redact && isTextField(key)) {
+                String s = value != null ? value : "";
+                o.put(key, "sha1:" + Integer.toHexString(s.hashCode()) + ":" + s.length());
+                return;
+            }
+            o.put(key, value != null ? value : "");
         } catch (Exception ignored) {}
     }
 

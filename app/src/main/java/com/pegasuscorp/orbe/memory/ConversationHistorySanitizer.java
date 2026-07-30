@@ -15,10 +15,9 @@ public final class ConversationHistorySanitizer {
     public static final int MAX_STORED_TURNS = 14;
 
     /**
-     * Longueur max d'une réponse assistant en historique / affichage.
-     * 420 coupait les histoires — budget texte large (voix reste limitée par TTS / max_tokens).
+     * Plafond optionnel pour l'affichage UI (bulles, bandeaux) — jamais pour le prompt LLM.
      */
-    public static final int MAX_ASSISTANT_CHARS = 8_000;
+    public static final int MAX_DISPLAY_ASSISTANT_CHARS = 8_000;
 
     private ConversationHistorySanitizer() {}
 
@@ -27,7 +26,24 @@ public final class ConversationHistorySanitizer {
         return text.replaceAll("\\s+", " ").trim();
     }
 
+    /**
+     * Nettoie une réponse assistant pour stockage et réinjection au LLM — sans troncature.
+     * (La limite de contexte est gérée par {@link ConversationHistorySelector}, pas ici.)
+     */
     public static String forAssistant(String text) {
+        return cleanAssistant(text);
+    }
+
+    /** Variante tronquée pour l'affichage seulement (bulles Discussion, aperçus). */
+    public static String forDisplayAssistant(String text) {
+        String out = cleanAssistant(text);
+        if (out.length() > MAX_DISPLAY_ASSISTANT_CHARS) {
+            out = out.substring(0, MAX_DISPLAY_ASSISTANT_CHARS - 1).trim() + "…";
+        }
+        return out;
+    }
+
+    private static String cleanAssistant(String text) {
         if (text == null) return "";
         if (ChatSpokenErrors.isHistoryPoison(text)) {
             return "";
@@ -36,9 +52,6 @@ public final class ConversationHistorySanitizer {
         out = PegasePrompt.sanitizeForDisplay(out);
         if (ChatSpokenErrors.isHistoryPoison(out)) {
             return "";
-        }
-        if (out.length() > MAX_ASSISTANT_CHARS) {
-            out = out.substring(0, MAX_ASSISTANT_CHARS - 1).trim() + "…";
         }
         return out;
     }

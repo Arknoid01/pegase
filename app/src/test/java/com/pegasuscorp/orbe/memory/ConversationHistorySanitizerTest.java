@@ -13,10 +13,9 @@ import static org.junit.Assert.*;
 public class ConversationHistorySanitizerTest {
 
     @Test
-    public void forAssistant_stripsThinkingAndTruncates() {
+    public void forAssistant_stripsThinkingWithoutTruncating() {
         StringBuilder longBody = new StringBuilder("Réponse propre. ");
-        // Dépasser MAX_ASSISTANT_CHARS
-        while (longBody.length() < ConversationHistorySanitizer.MAX_ASSISTANT_CHARS + 200) {
+        while (longBody.length() < 1200) {
             longBody.append("phrase suite ");
         }
         String raw = "<think>secret</think>" + longBody;
@@ -26,8 +25,19 @@ public class ConversationHistorySanitizerTest {
         assertFalse(out.contains("redacted_thinking"));
         assertFalse(out.contains("secret"));
         assertTrue(out.startsWith("Réponse propre."));
+        assertFalse(out.endsWith("…"));
+        assertTrue(out.length() > 1000);
+    }
+
+    @Test
+    public void forDisplayAssistant_truncatesForUiOnly() {
+        StringBuilder longBody = new StringBuilder("Affichage. ");
+        while (longBody.length() < ConversationHistorySanitizer.MAX_DISPLAY_ASSISTANT_CHARS + 200) {
+            longBody.append("mot ");
+        }
+        String out = ConversationHistorySanitizer.forDisplayAssistant(longBody.toString());
         assertTrue(out.endsWith("…"));
-        assertTrue(out.length() <= ConversationHistorySanitizer.MAX_ASSISTANT_CHARS + 1);
+        assertTrue(out.length() <= ConversationHistorySanitizer.MAX_DISPLAY_ASSISTANT_CHARS + 1);
     }
 
     @Test
