@@ -119,9 +119,24 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         }
         if (chain == null || chain.isEmpty()) return LlmReply.text("");
         ChatSendOptions opts = options != null ? options : ChatSendOptions.legacy();
-        String body = buildAgenticBody(chain, opts);
+        String body = buildAgenticBody(chain, opts, false);
         String raw = postWithRetry(body);
         return GroqCompletionParser.parse(raw);
+    }
+
+    /** Synthèse agentique finale en streaming (voix). Thread IO — callbacks sur main. */
+    void streamAgenticContinuation(AgenticChain chain, ChatSendOptions options,
+            StreamOnReply callback) throws Exception {
+        if (TextUtils.isEmpty(provider.apiKey)) {
+            throw new IllegalStateException("Clé " + provider.displayName + " manquante");
+        }
+        if (chain == null || chain.isEmpty()) {
+            main.post(() -> callback.onReply(""));
+            return;
+        }
+        ChatSendOptions opts = options != null ? options : ChatSendOptions.legacy();
+        String body = buildAgenticBody(chain, opts, true);
+        streamPostWithRetry(body, callback);
     }
 
     private void streamPostWithRetry(String body, StreamOnReply callback) throws Exception {
@@ -256,7 +271,8 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         return root.toString();
     }
 
-    private String buildAgenticBody(AgenticChain chain, ChatSendOptions options) throws Exception {
+    private String buildAgenticBody(AgenticChain chain, ChatSendOptions options, boolean stream)
+            throws Exception {
         JSONArray messages = new JSONArray();
         messages.put(message("system", MemoryPromptBuilder.buildFullSystem(
                 appContext, chain.userMessage, options.allowMoreTools, !options.allowMoreTools)));
@@ -284,6 +300,9 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         root.put("messages", messages);
         root.put("temperature", 0.92);
         root.put("max_tokens", options.allowMoreTools ? 512 : options.replyMaxTokens());
+        if (stream) {
+            root.put("stream", true);
+        }
         if (options.allowMoreTools && provider.nativeFc
                 && CloudModelStore.isToolCapableModel(currentModelId())) {
             JSONArray tools = OpenAiToolSchemaBuilder.build(toolRegistry, options.allowedTools);
@@ -400,10 +419,15 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             return;
         }
         ChatSendOptions opts = options != null ? options : ChatSendOptions.legacy();
+        boolean stream = callback instanceof StreamOnReply && !opts.allowMoreTools;
         io.execute(() -> {
             try {
-                LlmReply reply = sendAgenticBlocking(chain, opts);
-                main.post(() -> callback.onLlmReply(reply));
+                if (stream) {
+                    streamAgenticContinuation(chain, opts, (StreamOnReply) callback);
+                } else {
+                    LlmReply reply = sendAgenticBlocking(chain, opts);
+                    main.post(() -> callback.onLlmReply(reply));
+                }
             } catch (Exception e) {
                 main.post(() -> callback.onError(e.getMessage()));
             }
