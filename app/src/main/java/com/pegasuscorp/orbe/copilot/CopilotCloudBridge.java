@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.copilot;
 
 import android.content.Context;
+import com.pegasuscorp.orbe.R;
 import android.util.Log;
 
 import java.util.List;
@@ -47,7 +48,7 @@ public final class CopilotCloudBridge {
                 translating.set(false);
                 Log.w(TAG, "Traduction échouée: " + message);
                 CopilotStatusBridge.postError(app,
-                        "Traduction indisponible — vérifie la connexion ou la clé API.");
+                        app.getString(R.string.copilot_error_translation));
             }
         });
     }

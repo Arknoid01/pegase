@@ -21,6 +21,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.pegasuscorp.orbe.iface.IfaceUi;
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.notifications.NotificationAccess;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 
@@ -72,14 +73,14 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     root.setPadding(dp(14), dp(14), dp(14), dp(14));
 
     TextView title = new TextView(this);
-    title.setText("🛸 Mode copilote");
+    title.setText(getString(R.string.copilot_settings_title));
     title.setTextColor(OrbeTokens.COLOR_TEXT);
     title.setTextSize(20);
     title.setTypeface(OrbeTokens.typeMedium());
     root.addView(title);
 
     TextView subtitle = new TextView(this);
-    subtitle.setText("Listes blanches strictes — rien ne s'active sans ton accord");
+    subtitle.setText(getString(R.string.copilot_settings_subtitle));
     subtitle.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
     subtitle.setTextSize(12);
     subtitle.setPadding(0, dp(4), 0, dp(12));
@@ -111,43 +112,43 @@ public class CopilotSettingsActivity extends AppCompatActivity {
 
   private void rebuild() {
     contentHost.removeAllViews();
-    addSectionTitle("Général");
-    addSwitch("Orbe toujours visible", CopilotPrefs.isAlwaysOn(this), (on) -> {
+    addSectionTitle(getString(R.string.copilot_section_general));
+    addSwitch(getString(R.string.copilot_toggle_always_on), CopilotPrefs.isAlwaysOn(this), (on) -> {
       CopilotPrefs.setAlwaysOn(this, on);
     });
-    addSwitch("Analyse d'écran (apps autorisées)", CopilotPrefs.isScreenAnalysisEnabled(this), (on) -> {
+    addSwitch(getString(R.string.copilot_toggle_screen_analysis), CopilotPrefs.isScreenAnalysisEnabled(this), (on) -> {
       CopilotPrefs.setScreenAnalysisEnabled(this, on);
       if (on) CopilotClient.get().sync(this);
     });
-    addSwitch("Traduction à l'écran", CopilotPrefs.isTranslationOverlayEnabled(this), (on) -> {
+    addSwitch(getString(R.string.copilot_toggle_translation), CopilotPrefs.isTranslationOverlayEnabled(this), (on) -> {
       CopilotPrefs.setTranslationOverlayEnabled(this, on);
       if (!on) TranslationOverlayService.hide(this);
     });
-    addSwitch("Surlignage boutons (a11y)", CopilotPrefs.isElementHighlightEnabled(this), (on) -> {
+    addSwitch(getString(R.string.copilot_toggle_highlight), CopilotPrefs.isElementHighlightEnabled(this), (on) -> {
       CopilotPrefs.setElementHighlightEnabled(this, on);
       if (!on) ElementHighlightService.hide(this);
     });
-    addSwitch("Alertes notifications ciblées", CopilotPrefs.isNotificationCopilotEnabled(this), (on) -> {
+    addSwitch(getString(R.string.copilot_toggle_notif), CopilotPrefs.isNotificationCopilotEnabled(this), (on) -> {
       CopilotPrefs.setNotificationCopilotEnabled(this, on);
     });
 
-    addSectionTitle("Permissions");
-    addPermissionRow("Afficher par-dessus les apps",
+    addSectionTitle(getString(R.string.copilot_section_permissions));
+    addPermissionRow(getString(R.string.copilot_perm_overlay),
             Settings.canDrawOverlays(this),
             () -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 android.net.Uri.parse("package:" + getPackageName()))));
-    addPermissionRow("Service d'accessibilité Pégase",
+    addPermissionRow(getString(R.string.copilot_perm_accessibility),
             AccessibilityAccess.isEnabled(this),
             () -> AccessibilityAccess.openSettings(this));
-    addPermissionRow("Accès aux notifications",
+    addPermissionRow(getString(R.string.copilot_perm_notifications),
             NotificationAccess.isEnabled(this),
             () -> NotificationAccess.openSettings(this));
-    addPermissionRow("Capture d'écran (vision / OCR)",
+    addPermissionRow(getString(R.string.copilot_perm_capture),
             ScreenCaptureHelper.hasPermission(),
             () -> ScreenCapturePermissionActivity.request(this, granted -> rebuild()));
 
-    addSectionTitle("Apps — analyse d'écran");
-    addHint("Seules ces apps déclenchent lecture a11y / traduction / OCR.");
+    addSectionTitle(getString(R.string.copilot_section_apps_screen));
+    addHint(getString(R.string.copilot_hint_screen_apps));
     Set<String> screenWl = new HashSet<>(CopilotPrefs.getWhitelist(this));
     for (AppPreset p : PRESETS) {
       boolean on = screenWl.contains(p.packageName);
@@ -165,18 +166,18 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     for (String pkg : screenWl) {
       addCustomAppRow(pkg, true);
     }
-    addActionButton("+ Ajouter une app installée", () -> {
+    addActionButton(getString(R.string.copilot_add_app_screen), () -> {
       Intent i = new Intent(this, CopilotAppPickerActivity.class);
       i.putExtra(CopilotAppPickerActivity.EXTRA_TARGET, CopilotAppPickerActivity.TARGET_SCREEN);
       screenPickerLauncher.launch(i);
     });
 
-    addSectionTitle("Apps — notifications copilote");
-    addHint("Pégase t'alerte uniquement pour ces apps.");
+    addSectionTitle(getString(R.string.copilot_section_apps_notif));
+    addHint(getString(R.string.copilot_hint_notif_apps));
     Set<String> notifWl = new HashSet<>(CopilotPrefs.getNotificationWhitelist(this));
     for (AppPreset p : PRESETS) {
       boolean on = notifWl.contains(p.packageName);
-      addSwitch(p.label + " (notif)", on, (checked) -> {
+      addSwitch(p.label + getString(R.string.copilot_notif_preset_suffix), on, (checked) -> {
         Set<String> wl = new HashSet<>(CopilotPrefs.getNotificationWhitelist(this));
         if (checked) wl.add(p.packageName);
         else wl.remove(p.packageName);
@@ -188,7 +189,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     for (String pkg : notifWl) {
       addCustomAppRow(pkg, false);
     }
-    addActionButton("+ Ajouter une app (notifications)", () -> {
+    addActionButton(getString(R.string.copilot_add_app_notif), () -> {
       Intent i = new Intent(this, CopilotAppPickerActivity.class);
       i.putExtra(CopilotAppPickerActivity.EXTRA_TARGET, CopilotAppPickerActivity.TARGET_NOTIF);
       notifPickerLauncher.launch(i);
@@ -212,7 +213,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
     TextView remove = new TextView(this);
-    remove.setText("Retirer");
+    remove.setText(getString(R.string.copilot_remove_app));
     remove.setTextColor(OrbeTokens.COLOR_CYAN);
     remove.setTextSize(13);
     remove.setPadding(dp(8), dp(4), dp(4), dp(4));
@@ -275,7 +276,9 @@ public class CopilotSettingsActivity extends AppCompatActivity {
   }
 
   private void addPermissionRow(String label, boolean granted, Runnable action) {
-    String status = granted ? " ✓" : " — à accorder";
+    String status = granted
+            ? getString(R.string.copilot_perm_granted)
+            : getString(R.string.copilot_perm_missing);
     TextView btn = new TextView(this);
     btn.setText(label + status);
     btn.setTextColor(granted ? OrbeTokens.COLOR_CYAN : OrbeTokens.COLOR_MUTED);

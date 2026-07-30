@@ -12,6 +12,7 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.AppListCache;
 import com.pegasuscorp.orbe.iface.IfaceUi;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
@@ -45,8 +46,8 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
 
         TextView header = new TextView(this);
         header.setText(TARGET_NOTIF.equals(target)
-                ? "Choisir une app — notifications"
-                : "Choisir une app — analyse d'écran");
+                ? getString(R.string.copilot_picker_notif)
+                : getString(R.string.copilot_picker_screen));
         header.setTextColor(OrbeTokens.COLOR_CYAN);
         header.setTextSize(14);
         header.setPadding(IfaceUi.dp(this, 16), IfaceUi.dp(this, 20),
@@ -54,7 +55,7 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
         root.addView(header, IfaceUi.matchWrap());
 
         emptyView = new TextView(this);
-        emptyView.setText("Chargement des apps…");
+        emptyView.setText(getString(R.string.copilot_picker_loading));
         emptyView.setTextColor(OrbeTokens.COLOR_MUTED);
         emptyView.setPadding(IfaceUi.dp(this, 16), IfaceUi.dp(this, 8),
                 IfaceUi.dp(this, 16), IfaceUi.dp(this, 8));
@@ -89,7 +90,7 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
 
     private void updateEmptyState() {
         if (apps.isEmpty()) {
-            emptyView.setText("Aucune app trouvée");
+            emptyView.setText(getString(R.string.copilot_picker_empty));
             emptyView.setVisibility(View.VISIBLE);
         } else {
             emptyView.setVisibility(View.GONE);

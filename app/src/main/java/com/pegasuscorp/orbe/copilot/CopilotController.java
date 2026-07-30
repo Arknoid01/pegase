@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.OpenRouterVisionClient;
 import com.pegasuscorp.orbe.memory.MemoryEntry;
@@ -33,6 +34,7 @@ public final class CopilotController implements SessionObserver {
         void onStatus(String status);
         void onError(String message);
         void onSendingChanged(boolean sending);
+        void onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel);
     }
 
     private static volatile CopilotController instance;
@@ -154,19 +156,19 @@ public final class CopilotController implements SessionObserver {
     /** Capture l'écran puis analyse via vision (OpenRouter). */
     public void captureAndAnalyze(String userPrompt) {
         BubbleSink sink = bubbleSink;
-        if (sink != null) sink.onStatus("Capture de l'écran…");
+        if (sink != null) sink.onStatus(appContext.getString(R.string.copilot_status_capturing));
 
         ScreenCaptureHelper.capture(appContext, new ScreenCaptureHelper.Callback() {
             @Override
             public void onNeedPermission() {
                 main.post(() -> {
                     if (bubbleSink != null) {
-                        bubbleSink.onStatus("Autorise la capture d'écran…");
+                        bubbleSink.onStatus(appContext.getString(R.string.copilot_status_capture_permission));
                     }
                     ScreenCapturePermissionActivity.request(appContext, granted -> {
                         if (!granted) {
                             if (bubbleSink != null) {
-                                bubbleSink.onError("Capture d'écran refusée.");
+                                bubbleSink.onError(appContext.getString(R.string.copilot_error_capture_denied));
                             }
                             return;
                         }
@@ -178,9 +180,11 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onCaptured(byte[] jpeg) {
                 String prompt = TextUtils.isEmpty(userPrompt)
-                        ? "Décris ce que tu vois à l'écran et extrais le texte important."
+                        ? appContext.getString(R.string.copilot_vision_default_prompt)
                         : userPrompt.trim();
-                if (bubbleSink != null) bubbleSink.onStatus("Analyse de l'écran…");
+                if (bubbleSink != null) {
+                    bubbleSink.onStatus(appContext.getString(R.string.copilot_status_analyzing));
+                }
                 OpenRouterVisionClient.analyzeJpegBytes(appContext, jpeg, prompt,
                         new OpenRouterVisionClient.Callback() {
                             @Override
@@ -221,7 +225,7 @@ public final class CopilotController implements SessionObserver {
     /** Retient le contenu visible (capture + vision → mémoire permanente). */
     public void rememberFromScreen() {
         BubbleSink sink = bubbleSink;
-        if (sink != null) sink.onStatus("Je regarde l'écran pour retenir…");
+        if (sink != null) sink.onStatus(appContext.getString(R.string.copilot_status_remembering));
 
         ScreenCaptureHelper.capture(appContext, new ScreenCaptureHelper.Callback() {
             @Override
@@ -229,7 +233,7 @@ public final class CopilotController implements SessionObserver {
                 main.post(() -> ScreenCapturePermissionActivity.request(appContext, granted -> {
                     if (!granted) {
                         if (bubbleSink != null) {
-                            bubbleSink.onError("Capture d'écran refusée.");
+                            bubbleSink.onError(appContext.getString(R.string.copilot_error_capture_denied));
                         }
                         return;
                     }
@@ -270,7 +274,9 @@ public final class CopilotController implements SessionObserver {
     private void storeMemory(String analysis) {
         String text = analysis != null ? analysis.trim() : "";
         if (text.isEmpty()) {
-            if (bubbleSink != null) bubbleSink.onError("Rien à retenir sur cet écran.");
+            if (bubbleSink != null) {
+                bubbleSink.onError(appContext.getString(R.string.copilot_error_nothing_to_remember));
+            }
             return;
         }
         MemoryRepository repo = MemoryRepository.getInstance(appContext);
@@ -281,7 +287,8 @@ public final class CopilotController implements SessionObserver {
                 MemoryEntry.SOURCE_USER));
         lastScreenContext = text;
         if (bubbleSink != null) {
-            bubbleSink.onAssistantMessage("Je retiens : " + text);
+            bubbleSink.onAssistantMessage(
+                    appContext.getString(R.string.copilot_remember_prefix, text));
         }
     }
 
@@ -329,7 +336,9 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onLlmStart() {
                 main.post(() -> {
-                    if (bubbleSink != null) bubbleSink.onStatus("Pégase réfléchit…");
+                    if (bubbleSink != null) {
+                        bubbleSink.onStatus(appContext.getString(R.string.copilot_status_thinking));
+                    }
                 });
             }
         };
@@ -358,7 +367,7 @@ public final class CopilotController implements SessionObserver {
     @Override
     public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
         if (bubbleSink == null || TextUtils.isEmpty(question)) return false;
-        main.post(() -> bubbleSink.onAssistantMessage(question));
-        return false;
+        main.post(() -> bubbleSink.onConfirmNeeded(question, onConfirm, onCancel));
+        return true;
     }
 }

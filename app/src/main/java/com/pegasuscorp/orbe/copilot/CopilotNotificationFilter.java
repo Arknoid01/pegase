@@ -20,9 +20,12 @@ public final class CopilotNotificationFilter {
         String pkg = sbn.getPackageName();
         if (!CopilotPrefs.isNotificationPackageAllowed(ctx, pkg)) return false;
         if (isGroupSummary(sbn)) return false;
-        Notification n = sbn.getNotification();
+        return hasAlertContent(sbn.getNotification());
+    }
+
+    /** Contenu titre ou texte non vide — testable sans StatusBarNotification complet. */
+    static boolean hasAlertContent(Notification n) {
         if (n == null) return false;
-        // Ignore silencieuses / minimales
         if (n.priority < Notification.PRIORITY_DEFAULT
                 && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
             return false;

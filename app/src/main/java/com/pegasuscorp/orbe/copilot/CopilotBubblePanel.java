@@ -12,6 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 /**
@@ -20,6 +21,8 @@ import com.pegasuscorp.orbe.ui.OrbeTokens;
 public final class CopilotBubblePanel extends FrameLayout {
 
     private static final String TAG_WELCOME = "welcome";
+
+    private static final String TAG_CONFIRM = "confirm";
 
     public interface Listener {
         void onSend(String text);
@@ -53,7 +56,7 @@ public final class CopilotBubblePanel extends FrameLayout {
         root.addView(header, lpMatchWrap());
 
         TextView title = new TextView(ctx);
-        title.setText("Pégase");
+        title.setText(ctx.getString(R.string.copilot_title));
         title.setTextColor(OrbeTokens.COLOR_CYAN);
         title.setTextSize(14);
         title.setTypeface(OrbeTokens.typeMedium());
@@ -89,19 +92,19 @@ public final class CopilotBubblePanel extends FrameLayout {
         actions.setGravity(Gravity.START);
         root.addView(actions, lpMatchWrap());
 
-        TextView capBtn = actionChip(ctx, "📷 Écran");
+        TextView capBtn = actionChip(ctx, ctx.getString(R.string.copilot_action_screen));
         capBtn.setOnClickListener(v -> {
             if (listener != null) listener.onCaptureScreen();
         });
         actions.addView(capBtn, actionLp());
 
-        TextView memBtn = actionChip(ctx, "💾 Retenir");
+        TextView memBtn = actionChip(ctx, ctx.getString(R.string.copilot_action_remember));
         memBtn.setOnClickListener(v -> {
             if (listener != null) listener.onRememberScreen();
         });
         actions.addView(memBtn, actionLp());
 
-        TextView openBtn = actionChip(ctx, "↗ Pégase");
+        TextView openBtn = actionChip(ctx, ctx.getString(R.string.copilot_action_open_pegase));
         openBtn.setOnClickListener(v -> {
             if (listener != null) listener.onOpenPegase();
         });
@@ -115,7 +118,7 @@ public final class CopilotBubblePanel extends FrameLayout {
         root.addView(inputRow, inputRowLp);
 
         input = new EditText(ctx);
-        input.setHint("Message…");
+        input.setHint(ctx.getString(R.string.copilot_hint_message));
         input.setHintTextColor(OrbeTokens.COLOR_MUTED);
         input.setTextColor(OrbeTokens.COLOR_TEXT);
         input.setTextSize(14);
@@ -154,6 +157,58 @@ public final class CopilotBubblePanel extends FrameLayout {
     public void addUserMessage(String text) {
         dismissWelcome();
         addBubble(text, true);
+    }
+
+    public void showConfirm(String question, Runnable onConfirm, Runnable onCancel) {
+        if (TextUtils.isEmpty(question)) return;
+        dismissWelcome();
+        clearPendingConfirm();
+        setStatus(null);
+
+        Context ctx = getContext();
+        LinearLayout block = new LinearLayout(ctx);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setTag(TAG_CONFIRM);
+        block.setBackground(bubbleBg(false));
+        block.setPadding(dp(10), dp(6), dp(10), dp(6));
+
+        TextView q = new TextView(ctx);
+        q.setText(question);
+        q.setTextColor(OrbeTokens.COLOR_TEXT);
+        q.setTextSize(13);
+        block.addView(q, lpMatchWrap());
+
+        LinearLayout actions = new LinearLayout(ctx);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(6), 0, 0);
+
+        TextView yes = actionChip(ctx, ctx.getString(R.string.copilot_confirm_yes));
+        yes.setOnClickListener(v -> {
+            clearPendingConfirm();
+            if (onConfirm != null) onConfirm.run();
+        });
+        actions.addView(yes, actionLp());
+
+        TextView no = actionChip(ctx, ctx.getString(R.string.copilot_confirm_no));
+        no.setOnClickListener(v -> {
+            clearPendingConfirm();
+            if (onCancel != null) onCancel.run();
+        });
+        actions.addView(no, actionLp());
+
+        block.addView(actions, lpMatchWrap());
+
+        LinearLayout.LayoutParams lp = bubbleLp(false);
+        messagesHost.addView(block, lp);
+        scrollToBottom();
+    }
+
+    private void clearPendingConfirm() {
+        for (int i = messagesHost.getChildCount() - 1; i >= 0; i--) {
+            if (TAG_CONFIRM.equals(messagesHost.getChildAt(i).getTag())) {
+                messagesHost.removeViewAt(i);
+            }
+        }
     }
 
     public void addAssistantMessage(String text) {
@@ -210,7 +265,7 @@ public final class CopilotBubblePanel extends FrameLayout {
 
     private void addWelcome() {
         TextView bubble = createBubbleView(
-                "Je suis là — pose-moi une question ou capture l'écran.", false);
+                getContext().getString(R.string.copilot_welcome), false);
         bubble.setTag(TAG_WELCOME);
         LinearLayout.LayoutParams lp = bubbleLp(false);
         messagesHost.addView(bubble, lp);

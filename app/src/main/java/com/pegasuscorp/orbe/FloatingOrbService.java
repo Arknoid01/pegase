@@ -242,6 +242,13 @@ public class FloatingOrbService extends Service {
             public void onSendingChanged(boolean sending) {
                 if (bubblePanel != null) bubblePanel.setSending(sending);
             }
+
+            @Override
+            public void onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
+                if (bubblePanel != null) {
+                    bubblePanel.showConfirm(question, onConfirm, onCancel);
+                }
+            }
         });
     }
 

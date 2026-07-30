@@ -20,6 +20,7 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.PegaseInterfaceActivity;
 
 /**
@@ -192,8 +193,8 @@ public class CopilotService extends Service {
 
     private void startAsForeground() {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Pégase copilote")
-                .setContentText("Analyse d'écran (apps autorisées)")
+                .setContentTitle(getString(R.string.copilot_fgs_analysis_title))
+                .setContentText(getString(R.string.copilot_fgs_analysis_text))
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setContentIntent(PendingIntent.getActivity(this, 0,
                         new Intent(this, PegaseInterfaceActivity.class),

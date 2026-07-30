@@ -20,6 +20,7 @@ import android.widget.TextView;
 
 import androidx.core.app.NotificationCompat;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 import java.util.ArrayList;
@@ -174,8 +175,8 @@ public class TranslationOverlayService extends Service {
 
     private void startAsForeground() {
         Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Traduction copilote")
-                .setContentText("Traductions affichées")
+                .setContentTitle(getString(R.string.copilot_fgs_translation_title))
+                .setContentText(getString(R.string.copilot_fgs_translation_text))
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)

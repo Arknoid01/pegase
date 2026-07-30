@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.widget.Toast;
 
+import com.pegasuscorp.orbe.R;
+
 /**
  * Reçoit un partage texte (ACTION_SEND) et l'envoie en mémoire ou contexte nommé.
  */
@@ -34,7 +36,7 @@ public final class ShareIngestActivity extends Activity {
         }
         String type = intent.getType();
         if (type == null || !type.startsWith("text/")) {
-            toast("Seul le texte est supporté pour l'instant.");
+            toast(getString(R.string.copilot_share_text_only));
             finish();
             return;
         }
@@ -42,7 +44,7 @@ public final class ShareIngestActivity extends Activity {
         String subject = intent.getStringExtra(Intent.EXTRA_SUBJECT);
         ShareIngestRouter.Result result = ShareIngestRouter.ingestSharedText(this, text, subject);
         toast(result.message);
-        finish();
+        getWindow().getDecorView().postDelayed(this::finish, 1_200L);
     }
 
     private void toast(String msg) {

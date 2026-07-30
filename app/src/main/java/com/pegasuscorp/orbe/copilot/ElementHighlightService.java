@@ -19,6 +19,8 @@ import android.widget.FrameLayout;
 
 import androidx.core.app.NotificationCompat;
 
+import com.pegasuscorp.orbe.R;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -164,8 +166,8 @@ public class ElementHighlightService extends Service {
 
     private void startAsForeground() {
         Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Surlignage copilote")
-                .setContentText("Éléments interactifs")
+                .setContentTitle(getString(R.string.copilot_fgs_highlight_title))
+                .setContentText(getString(R.string.copilot_fgs_highlight_text))
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)

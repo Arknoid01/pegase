@@ -361,11 +361,16 @@ Exécutables localement si Android SDK / Gradle configuré :
 
 ## Ce qui reste pour plus tard
 
-- Résumé LLM d’une notif importante (au-delà de l’affichage brut)
-- OCR en fallback quand l’arbre a11y est pauvre
-- Overlay pour **surligner** un élément (ex. bouton détecté) en plus de la traduction
-- Lecture auto page web + tri LLM (piste écartée volontairement)
-- UI pour ajouter une app hors liste prédéfinie (picker packages installés)
+- Merge et test device des PRs #4–#9
+- `open_url` minimal, browser complet (hors scope copilote)
+
+## Livré depuis la spec initiale
+
+- Résumé notif Pégase (`CopilotNotificationSummarizer`)
+- OCR fallback (`OcrFallback`)
+- Surlignage éléments (`ElementHighlightService`)
+- Picker apps installées (`CopilotAppPickerActivity`)
+- Polish complet (PR #9) — voir `docs/copilot-done.md`
 
 ---
 

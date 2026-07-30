@@ -83,4 +83,4 @@ L'idée : une **orbe discrète toujours visible** par-dessus les autres apps, qu
 
 ## Polish (PR dédiée)
 
-Voir `docs/copilot-polish-checklist.md` — bugs bulle/streaming, permissions, tokens UI, debounce surlignage.
+Voir `docs/copilot-done.md` — copilote considéré **terminé** côté code (PR #9).

@@ -1,7 +1,7 @@
 # Copilote — Checklist polish
 
 **Branche :** `cursor/v2-copilot-polish-14e9`  
-**Base :** PR #8 (Phase 5 copilote)
+**Statut :** ✅ Terminé — voir `docs/copilot-done.md`
 
 ## Bugs corrigés
 
@@ -30,13 +30,14 @@
 - [x] Capture écran : déduplication des listeners permission
 - [x] Helper overlay partagé (`BoundsOverlayHelper`)
 
-## À faire (prochaines passes)
+## Finitions finales
 
-- [ ] Externaliser les strings copilote dans `strings.xml`
-- [ ] Confirmations outils dans la bulle (`onConfirmNeeded`)
-- [ ] IME_ACTION_SEND sur le champ message
-- [ ] Tests : `CopilotNotificationFilter`, `OcrFallback`, bubble partial
-- [ ] Merge PRs #4–#8 puis test device complet
+- [x] Externaliser les strings copilote dans `strings_copilot.xml`
+- [x] Confirmations outils dans la bulle (`onConfirmNeeded`)
+- [x] IME_ACTION_SEND sur le champ message
+- [x] Tests : `CopilotNotificationFilter`, `OcrFallback`
+- [x] Share ingest : toast visible avant finish
+- [x] Doc finale `docs/copilot-done.md`
 
 ## Test device rapide
 
@@ -45,3 +46,4 @@
 3. Chrome whitelist + page EN → traduction ; couper réseau → message d'erreur en bulle
 4. Glisser l'orbe → reste dans l'écran
 5. Surlignage ON → cadres apparaissent sans clignoter à chaque scroll
+6. Outil demandant confirmation → boutons Oui / Non dans la bulle

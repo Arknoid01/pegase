@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bulle copilote -->
+    <string name="copilot_title">Pégase</string>
+    <string name="copilot_welcome">Je suis là — pose-moi une question ou capture l\'écran.</string>
+    <string name="copilot_hint_message">Message…</string>
+    <string name="copilot_action_screen">📷 Écran</string>
+    <string name="copilot_action_remember">💾 Retenir</string>
+    <string name="copilot_action_open_pegase">↗ Pégase</string>
+    <string name="copilot_confirm_yes">Oui</string>
+    <string name="copilot_confirm_no">Non</string>
+    <string name="copilot_status_thinking">Pégase réfléchit…</string>
+    <string name="copilot_status_capturing">Capture de l\'écran…</string>
+    <string name="copilot_status_capture_permission">Autorise la capture d\'écran…</string>
+    <string name="copilot_status_analyzing">Analyse de l\'écran…</string>
+    <string name="copilot_status_remembering">Je regarde l\'écran pour retenir…</string>
+    <string name="copilot_error_capture_denied">Capture d\'écran refusée.</string>
+    <string name="copilot_error_nothing_to_remember">Rien à retenir sur cet écran.</string>
+    <string name="copilot_remember_prefix">Je retiens : %1$s</string>
+    <string name="copilot_vision_default_prompt">Décris ce que tu vois à l\'écran et extrais le texte important.</string>
+    <string name="copilot_error_translation">Traduction indisponible — vérifie la connexion ou la clé API.</string>
+
+    <!-- Réglages -->
+    <string name="copilot_settings_title">🛸 Mode copilote</string>
+    <string name="copilot_settings_subtitle">Listes blanches strictes — rien ne s\'active sans ton accord</string>
+    <string name="copilot_section_general">Général</string>
+    <string name="copilot_section_permissions">Permissions</string>
+    <string name="copilot_section_apps_screen">Apps — analyse d\'écran</string>
+    <string name="copilot_section_apps_notif">Apps — notifications copilote</string>
+    <string name="copilot_toggle_always_on">Orbe toujours visible</string>
+    <string name="copilot_toggle_screen_analysis">Analyse d\'écran (apps autorisées)</string>
+    <string name="copilot_toggle_translation">Traduction à l\'écran</string>
+    <string name="copilot_toggle_highlight">Surlignage boutons (a11y)</string>
+    <string name="copilot_toggle_notif">Alertes notifications ciblées</string>
+    <string name="copilot_hint_screen_apps">Seules ces apps déclenchent lecture a11y / traduction / OCR.</string>
+    <string name="copilot_hint_notif_apps">Pégase t\'alerte uniquement pour ces apps.</string>
+    <string name="copilot_perm_overlay">Afficher par-dessus les apps</string>
+    <string name="copilot_perm_accessibility">Service d\'accessibilité Pégase</string>
+    <string name="copilot_perm_notifications">Accès aux notifications</string>
+    <string name="copilot_perm_capture">Capture d\'écran (vision / OCR)</string>
+    <string name="copilot_perm_granted"> ✓</string>
+    <string name="copilot_perm_missing"> — à accorder</string>
+    <string name="copilot_add_app_screen">+ Ajouter une app installée</string>
+    <string name="copilot_add_app_notif">+ Ajouter une app (notifications)</string>
+    <string name="copilot_remove_app">Retirer</string>
+    <string name="copilot_notif_preset_suffix"> (notif)</string>
+
+    <!-- Picker apps -->
+    <string name="copilot_picker_screen">Choisir une app — analyse d\'écran</string>
+    <string name="copilot_picker_notif">Choisir une app — notifications</string>
+    <string name="copilot_picker_loading">Chargement des apps…</string>
+    <string name="copilot_picker_empty">Aucune app trouvée</string>
+
+    <!-- Services foreground -->
+    <string name="copilot_fgs_translation_title">Traduction copilote</string>
+    <string name="copilot_fgs_translation_text">Traductions affichées</string>
+    <string name="copilot_fgs_highlight_title">Surlignage copilote</string>
+    <string name="copilot_fgs_highlight_text">Éléments interactifs</string>
+    <string name="copilot_fgs_analysis_title">Pégase copilote</string>
+    <string name="copilot_fgs_analysis_text">Analyse d\'écran (apps autorisées)</string>
+
+    <!-- Share -->
+    <string name="copilot_share_text_only">Seul le texte est supporté pour l\'instant.</string>
+</resources>
