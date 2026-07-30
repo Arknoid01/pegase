@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="conversation_feature_synonyms">
+        <item>discussion</item>
+        <item>conversation</item>
+        <item>chat</item>
+        <item>assistant</item>
+        <item>parler</item>
+        <item>micro</item>
+        <item>écoute</item>
+        <item>écoute-moi</item>
+    </string-array>
+    <string-array name="orion_feature_synonyms">
+        <item>orion</item>
+        <item>code</item>
+        <item>coder</item>
+        <item>programmation</item>
+    </string-array>
+</resources>

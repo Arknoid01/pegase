@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App Actions + raccourcis launcher pour « Hey Google, ouvre … sur Pégase ». -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.pegasuscorp.orbe"
+            android:targetClass="com.pegasuscorp.orbe.PegaseInterfaceActivity">
+            <parameter
+                android:name="feature"
+                android:key="feature" />
+        </intent>
+    </capability>
+
+    <shortcut
+        android:shortcutId="conversation"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_conversation_short"
+        android:shortcutLongLabel="@string/shortcut_conversation_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.pegasuscorp.orbe"
+            android:targetClass="com.pegasuscorp.orbe.PegaseInterfaceActivity"
+            android:data="pegase://open/conversation" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/conversation_feature_synonyms" />
+        </capability-binding>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="orion"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_orion_short"
+        android:shortcutLongLabel="@string/shortcut_orion_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.pegasuscorp.orbe"
+            android:targetClass="com.pegasuscorp.orbe.PegaseInterfaceActivity"
+            android:data="pegase://open/orion" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/orion_feature_synonyms" />
+        </capability-binding>
+    </shortcut>
+
+</shortcuts>

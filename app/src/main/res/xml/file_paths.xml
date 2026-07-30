@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Orion / CSV / exports -->
+    <cache-path name="generated" path="generated/" />
+    <!-- Bureau (*.md), contextes (*.md), diag/, etc. -->
+    <files-path name="app_files" path="." />
+    <external-path name="external" path="." />
+</paths>

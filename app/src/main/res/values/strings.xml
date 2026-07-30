@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pégase</string>
+    <string name="shortcut_conversation_short">Discussion</string>
+    <string name="shortcut_conversation_long">Ouvrir la discussion Pégase</string>
+    <string name="shortcut_orion_short">Orion</string>
+    <string name="shortcut_orion_long">Ouvrir Orion</string>
+</resources>

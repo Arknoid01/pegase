@@ -1,0 +1,15 @@
+package com.pegasuscorp.orbe.voice;
+
+import com.pegasuscorp.orbe.voice.IWakeWordCallback;
+
+/**
+ * API wake word exposée par {@code VoiceService} (processus {@code :voice}).
+ * Le launcher ne lit aucun singleton voix : il pousse start/stop.
+ */
+interface IVoiceWakeService {
+    void startWakeListening();
+    void stopWakeListening();
+    void setGentleMode(boolean gentle);
+    void registerCallback(IWakeWordCallback callback);
+    void unregisterCallback(IWakeWordCallback callback);
+}

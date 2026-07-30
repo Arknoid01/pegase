@@ -1,0 +1,106 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.pegasuscorp.orbe'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.pegasuscorp.orbe"
+        minSdk 24          // Android 7.0 (requis aussi pour un futur Gemma embarque)
+        targetSdk 34
+        versionCode 1
+        versionName "0.1"
+
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+        }
+    }
+
+    buildFeatures {
+        aidl true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    // Modèle ONNX RAG — ne pas compresser (ORT lit via mmap)
+    androidResources {
+        noCompress 'onnx'
+    }
+}
+
+// Unit tests JVM : ORT desktop (pas le .so Android de sherpa)
+configurations.configureEach { config ->
+    if (config.name.toLowerCase().contains('unittest')) {
+        config.exclude group: 'com.xdcobra.sherpa', module: 'onnxruntime'
+    }
+}
+
+    dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.fragment:fragment:1.6.2'
+    implementation 'androidx.viewpager2:viewpager2:1.1.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.7.0'
+    implementation 'androidx.lifecycle:lifecycle-livedata:2.7.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation libs.material
+    testImplementation libs.junit
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    androidTestImplementation libs.espresso.core
+    androidTestImplementation libs.ext.junit
+
+    // Piper TTS local (sherpa-onnx + onnxruntime — les deux sont requis)
+    // onnxruntime sherpa expose aussi ai.onnxruntime → EmbeddingEngine (RAG) le réutilise.
+    implementation("com.xdcobra.sherpa:sherpa-onnx:1.13.2-1:java@aar")
+    implementation("com.xdcobra.sherpa:onnxruntime:1.24.4-qnn2.43.1.260218-1")
+    implementation 'org.apache.commons:commons-compress:1.26.1'
+
+    // ORT desktop pour les tests unitaires EmbeddingEngine (sans .so Android)
+    testImplementation 'com.microsoft.onnxruntime:onnxruntime:1.19.2'
+
+    // ML Kit Digital Ink Recognition pour la recherche par tracé de lettre
+    implementation 'com.google.mlkit:digital-ink-recognition:18.1.0'
+
+    // Orion — aperçu code markdown + coloration (Markwon / Prism4j)
+    implementation 'io.noties.markwon:core:4.6.2'
+    implementation('io.noties.markwon:syntax-highlight:4.6.2') {
+        exclude group: 'org.jetbrains', module: 'annotations-java5'
+    }
+    implementation('io.noties:prism4j:2.0.0') {
+        exclude group: 'org.jetbrains', module: 'annotations-java5'
+    }
+    annotationProcessor 'io.noties:prism4j-bundler:2.0.0'
+
+    // Orion — index AST Java (OrionCodeIndexer)
+    implementation 'com.github.javaparser:javaparser-core:3.28.2'
+
+    // --- PHASE 2 (assistant LLM embarque, quand tu voudras) ---
+    // Decommente pour brancher un Gemma on-device via LiteRT-LM.
+    // C'est ce qui remplacera LocalKeywordParser sans toucher au reste.
+    // implementation 'com.google.mediapipe:tasks-genai:0.10.27'
+}
