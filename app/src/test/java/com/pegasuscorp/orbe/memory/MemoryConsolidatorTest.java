@@ -103,4 +103,17 @@ public class MemoryConsolidatorTest {
         assertEquals(2, repo.getAllPermanentMemories().size());
         assertEquals(1, repo.getAllSessionSummaries().size());
     }
+
+    @Test
+    public void promoteSession_promotesDecisionsAndPending() {
+        SessionSummary summary = new SessionSummary();
+        summary.decisions.add("On part sur Kotlin pour le module mémoire");
+        summary.pendingTopics.add("Vérifier les tests Robolectric demain");
+
+        MemoryConsolidator.promoteSession(ctx, summary);
+
+        assertEquals(2, repo.getAllPermanentMemories().size());
+        assertEquals("decision", repo.getAllPermanentMemories().get(0).category);
+        assertEquals("pending", repo.getAllPermanentMemories().get(1).category);
+    }
 }

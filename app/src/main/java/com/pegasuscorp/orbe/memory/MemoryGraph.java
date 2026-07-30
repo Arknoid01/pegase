@@ -50,7 +50,8 @@ public final class MemoryGraph {
             }
         }
 
-        graphHits.sort((a, b) -> Double.compare(b.importance, a.importance));
+        graphHits.sort((a, b) -> Double.compare(
+                b.effectiveImportance(), a.effectiveImportance()));
         for (MemoryEntry hit : graphHits) {
             if (out.size() >= maxCandidates) break;
             if (seenKeys.add(hit.memoryKey())) {

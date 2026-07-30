@@ -25,4 +25,16 @@ public class SessionSummarizerTest {
         assertEquals("Parle-moi de mon projet Orbe", s.topic);
         assertTrue(s.summary.contains("Pégase"));
     }
+
+    @Test
+    public void fallbackSummary_extractsLocalFacts() {
+        var ctx = RuntimeEnvironment.getApplication();
+        var turns = Arrays.asList(
+                new ChatBackend.Turn(true, "Retiens que mon projet s'appelle Orbe"),
+                new ChatBackend.Turn(false, "C'est noté.")
+        );
+        SessionSummary s = SessionSummarizer.fallbackSummary(ctx, turns);
+        assertEquals(1, s.importantFacts.size());
+        assertTrue(s.importantFacts.get(0).contains("Orbe"));
+    }
 }

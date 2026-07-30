@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Consolidation légère : promotion des faits importants de session vers la mémoire permanente,
+ * Consolidation légère : promotion des éléments de session vers la mémoire permanente,
  * avec déduplication textuelle et sémantique.
  */
 public final class MemoryConsolidator {
@@ -24,23 +24,35 @@ public final class MemoryConsolidator {
     private MemoryConsolidator() {}
 
     /**
-     * Promouvoit les {@code important_facts} d'un résumé de session en souvenirs permanents
-     * s'ils ne dupliquent pas un souvenir existant.
+     * Promouvoit les faits, décisions et sujets en attente d'un résumé de session
+     * en souvenirs permanents s'ils ne dupliquent pas un souvenir existant.
      */
     public static void promoteSessionFacts(Context context, SessionSummary summary) {
-        if (context == null || summary == null || summary.importantFacts.isEmpty()) return;
+        promoteSession(context, summary);
+    }
+
+    public static void promoteSession(Context context, SessionSummary summary) {
+        if (context == null || summary == null) return;
+        promoteItems(context, summary.importantFacts, "session", 0.72);
+        promoteItems(context, summary.decisions, "decision", 0.68);
+        promoteItems(context, summary.pendingTopics, "pending", 0.65);
+    }
+
+    private static void promoteItems(Context context, List<String> items, String category,
+            double importance) {
+        if (items == null || items.isEmpty()) return;
         MemoryRepository repo = MemoryRepository.getInstance(context);
         String today = today();
-        for (String fact : summary.importantFacts) {
-            if (fact == null) continue;
-            String trimmed = fact.trim();
+        for (String item : items) {
+            if (item == null) continue;
+            String trimmed = item.trim();
             if (trimmed.isEmpty()) continue;
             if (isDuplicate(repo, context, trimmed)) {
-                Log.d(TAG, "Fact ignoré (doublon): " + trimmed);
+                Log.d(TAG, "Élément ignoré (doublon): " + trimmed);
                 continue;
             }
-            repo.addPermanentMemory(new MemoryEntry("session", trimmed, 0.72, today));
-            Log.d(TAG, "Fact promu: " + trimmed);
+            repo.addPermanentMemory(new MemoryEntry(category, trimmed, importance, today));
+            Log.d(TAG, "Élément promu [" + category + "]: " + trimmed);
         }
     }
 

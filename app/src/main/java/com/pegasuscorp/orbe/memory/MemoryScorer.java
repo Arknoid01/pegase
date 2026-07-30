@@ -17,7 +17,7 @@ public final class MemoryScorer {
         double relevance = queryRelevance(entry, q);
         double entityBoost = entityRelevance(entry, entityTerms);
         double recency = recencyBoost(entry.createdAt);
-        double importance = entry.importance * 0.15;
+        double importance = entry.effectiveImportance() * 0.15;
         return relevance * 0.4 + entityBoost * 0.4 + recency * 0.05 + importance;
     }
 
@@ -46,7 +46,7 @@ public final class MemoryScorer {
         double entityBoost = entityRelevance(entry, entityTerms);
         double graphBoost = graphEntityBoost(entry, entityReach);
         double recency = recencyBoost(entry.createdAt);
-        double importance = Math.min(1.0, entry.importance) * 0.10;
+        double importance = Math.min(1.0, entry.effectiveImportance()) * 0.10;
         double c = Math.max(0f, Math.min(1f, cosine));
         return c * 0.48 + entityBoost * 0.22 + graphBoost * 0.15 + recency * 0.10 + importance;
     }

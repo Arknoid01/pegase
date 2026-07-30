@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.memory;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.util.Log;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
@@ -36,6 +37,9 @@ import java.util.concurrent.Executors;
 public class MemoryRepository implements MemoryStore {
 
     private static final String TAG = "MemoryRepository";
+    private static final String PREFS = "memory_repository";
+    private static final String KEY_LAST_DECAY_MS = "last_decay_ms";
+    private static final long DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000L;
     private static final int MAX_TURNS = ConversationHistorySanitizer.MAX_STORED_TURNS;
     private static final int MAX_SESSION_SUMMARIES = 12;
     private static final int MAX_RELEVANT_MEMORIES = 5;
@@ -70,6 +74,7 @@ public class MemoryRepository implements MemoryStore {
         loadAll();
         seedDefaultsIfEmpty();
         backfillGraphLinks();
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (autoMigrate) {
             MemoryRagMigrator.migrateAsync(appContext, this);
         }
@@ -227,6 +232,7 @@ public class MemoryRepository implements MemoryStore {
 
     public List<MemoryEntry> getRelevantMemories(String query, List<String> entityTerms,
             int max, double minScore) {
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (permanentMemories.isEmpty()) return Collections.emptyList();
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
         List<ScoredMemory> scored = new ArrayList<>();
@@ -241,6 +247,7 @@ public class MemoryRepository implements MemoryStore {
         for (int i = 0; i < scored.size() && out.size() < limit; i++) {
             out.add(scored.get(i).entry);
         }
+        recordMemoryRetrievalUse(out);
         return out;
     }
 
@@ -259,6 +266,7 @@ public class MemoryRepository implements MemoryStore {
 
     public List<MemoryEntry> getRelevantMemoriesSemantic(String query, List<String> entityTerms,
             List<String> seedEntityIds, int max, float minScore) {
+        applyNaturalDecayIfDue(System.currentTimeMillis());
         if (permanentMemories.isEmpty()) return Collections.emptyList();
         int limit = Math.min(max, MAX_RELEVANT_MEMORIES);
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
@@ -315,7 +323,43 @@ public class MemoryRepository implements MemoryStore {
         for (int i = 0; i < rescored.size() && out.size() < limit; i++) {
             out.add(rescored.get(i).entry);
         }
+        recordMemoryRetrievalUse(out);
         return out;
+    }
+
+    void applyNaturalDecay(long nowMs) {
+        boolean changed = false;
+        for (MemoryEntry entry : permanentMemories) {
+            if (entry.applyDecay(nowMs)) changed = true;
+        }
+        if (changed) savePermanent();
+        prefs().edit().putLong(KEY_LAST_DECAY_MS, nowMs).apply();
+    }
+
+    private void applyNaturalDecayIfDue(long nowMs) {
+        long last = prefs().getLong(KEY_LAST_DECAY_MS, 0L);
+        if (nowMs - last < DECAY_INTERVAL_MS) return;
+        applyNaturalDecay(nowMs);
+    }
+
+    private void recordMemoryRetrievalUse(List<MemoryEntry> used) {
+        if (used == null || used.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Set<String> keys = new HashSet<>();
+        for (MemoryEntry entry : used) {
+            if (entry != null) keys.add(entry.memoryKey());
+        }
+        boolean changed = false;
+        for (MemoryEntry entry : permanentMemories) {
+            if (!keys.contains(entry.memoryKey())) continue;
+            entry.touchRetrieval(now);
+            changed = true;
+        }
+        if (changed) savePermanent();
+    }
+
+    private SharedPreferences prefs() {
+        return appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     public void addPermanentMemory(MemoryEntry entry) {
@@ -368,7 +412,7 @@ public class MemoryRepository implements MemoryStore {
                 out.add(other);
             }
         }
-        out.sort((a, b) -> Double.compare(b.importance, a.importance));
+        out.sort((a, b) -> Double.compare(b.effectiveImportance(), a.effectiveImportance()));
         return out;
     }
 
@@ -376,7 +420,7 @@ public class MemoryRepository implements MemoryStore {
     public List<MemoryEntry> getTopPermanentMemories(int max) {
         if (max <= 0 || permanentMemories.isEmpty()) return Collections.emptyList();
         List<MemoryEntry> sorted = new ArrayList<>(permanentMemories);
-        sorted.sort((a, b) -> Double.compare(b.importance, a.importance));
+        sorted.sort((a, b) -> Double.compare(b.effectiveImportance(), a.effectiveImportance()));
         if (sorted.size() <= max) return sorted;
         return new ArrayList<>(sorted.subList(0, max));
     }
@@ -552,16 +596,20 @@ public class MemoryRepository implements MemoryStore {
 
     private void seedDefaultsIfEmpty() {
         if (!permanentMemories.isEmpty()) return;
-        permanentMemories.add(new MemoryEntry(
+        MemoryEntry pegase = new MemoryEntry(
                 "project",
                 "Yannick développe Pégase, un assistant vocal Android intégré au launcher Orbe.",
                 0.95,
-                today()));
-        permanentMemories.add(new MemoryEntry(
+                today());
+        pegase.frozen = true;
+        MemoryEntry fableris = new MemoryEntry(
                 "project",
                 "Yannick travaille sur Fableris, un city builder nommé Fableris.",
                 0.9,
-                today()));
+                today());
+        fableris.frozen = true;
+        permanentMemories.add(pegase);
+        permanentMemories.add(fableris);
         for (MemoryEntry e : permanentMemories) {
             MemoryLinker.autoLink(appContext, e);
         }

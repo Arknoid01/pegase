@@ -111,6 +111,7 @@ public final class SessionSummarizer {
         }
         s.summary = sb.toString().trim();
         if (s.summary.isEmpty()) s.summary = "Courte discussion avec Pégase.";
+        LocalSessionExtractor.enrich(s, turns);
         return s;
     }
 }
