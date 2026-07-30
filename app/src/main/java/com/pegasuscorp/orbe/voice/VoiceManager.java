@@ -257,6 +257,10 @@ public class VoiceManager {
         listening = false;
     }
 
+    public Context getAppContext() {
+        return appContext;
+    }
+
     private Context recognitionContext() {
         if (hostActivity != null) {
             Activity host = hostActivity.get();

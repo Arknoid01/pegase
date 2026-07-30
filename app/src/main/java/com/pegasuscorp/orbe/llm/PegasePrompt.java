@@ -184,7 +184,7 @@ public final class PegasePrompt {
     /** Retire emojis, balises <think> et espaces superflus avant Piper / TTS. */
     public static String sanitizeForSpeech(String text) {
         if (text == null) return "";
-        return normalizeReplyText(text, true);
+        return PersonalityGuide.stripBannedPhrases(normalizeReplyText(text, true));
     }
 
     /** Même nettoyage pour l'affichage texte (Discussion, mémoire). */

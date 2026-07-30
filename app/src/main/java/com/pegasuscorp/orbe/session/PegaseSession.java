@@ -980,7 +980,9 @@ public class PegaseSession {
             return ChatSendOptions.legacy(channel).withIntent(intent);
         }
         if (channel == Channel.VOICE) {
-            return ChatSendOptions.forVoice(intent.allowedTools).withIntent(intent);
+            return ChatSendOptions.forVoice(intent.allowedTools)
+                    .withIntent(intent)
+                    .withVoiceTokenBudget(appContext);
         }
         return ChatSendOptions.forText(intent.allowedTools).withIntent(intent);
     }

@@ -38,6 +38,14 @@ public class PersonalityGuideTest {
     }
 
     @Test
+    public void stripBannedPhrases_removesCorporateFillers() {
+        String out = PersonalityGuide.stripBannedPhrases(
+                "Voici la météo. N'hésite pas à me demander si tu veux plus.");
+        assertFalse(out.toLowerCase().contains("n'hésite pas"));
+        assertTrue(out.contains("météo"));
+    }
+
+    @Test
     public void containsBannedPhrase_detectsGenericAssistant() {
         assertTrue(PersonalityGuide.containsBannedPhrase(
                 "N'hésite pas à me demander si tu as besoin d'aide."));

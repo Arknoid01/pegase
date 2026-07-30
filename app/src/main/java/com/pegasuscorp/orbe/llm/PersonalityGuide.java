@@ -53,7 +53,11 @@ public final class PersonalityGuide {
     public static boolean containsBannedPhrase(String text) {
         if (text == null || text.trim().isEmpty()) return false;
         String fold = foldForMatch(text);
+<<<<<<< HEAD
         for (String banned : bannedPhrases()) {
+=======
+        for (String banned : BANNED_PHRASES) {
+>>>>>>> 78c9069 (v2: voice presence — mode budgets, banned phrase TTS filter, drive latency)
             if (fold.contains(banned)) return true;
         }
         return false;
@@ -66,7 +70,11 @@ public final class PersonalityGuide {
     public static String stripBannedPhrases(String text) {
         if (text == null || text.trim().isEmpty()) return "";
         String out = text;
+<<<<<<< HEAD
         for (String banned : bannedPhrases()) {
+=======
+        for (String banned : BANNED_PHRASES) {
+>>>>>>> 78c9069 (v2: voice presence — mode budgets, banned phrase TTS filter, drive latency)
             out = removeIgnoreCase(out, banned);
         }
         out = out.replaceAll("\\s+", " ").trim();
@@ -75,6 +83,7 @@ public final class PersonalityGuide {
         return out;
     }
 
+<<<<<<< HEAD
     static String[] bannedPhrases() {
         if (cachedBanned != null) return cachedBanned;
         String body = cachedBody;
@@ -113,6 +122,8 @@ public final class PersonalityGuide {
         return foldForMatch(s).replaceAll("\\s+", " ").trim();
     }
 
+=======
+>>>>>>> 78c9069 (v2: voice presence — mode budgets, banned phrase TTS filter, drive latency)
     private static String foldForMatch(String text) {
         return text.toLowerCase(Locale.ROOT)
                 .replace('\u2019', '\'')

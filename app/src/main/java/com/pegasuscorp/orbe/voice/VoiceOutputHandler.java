@@ -85,7 +85,7 @@ public final class VoiceOutputHandler {
     public static boolean readyForStreamTts(String accumulated) {
         if (accumulated == null) return false;
         String t = accumulated.trim();
-        if (t.length() >= 48) return true;
+        if (t.length() >= 36) return true;
         return t.endsWith(".") || t.endsWith("!") || t.endsWith("?")
                 || t.endsWith("…") || t.endsWith(":");
     }
