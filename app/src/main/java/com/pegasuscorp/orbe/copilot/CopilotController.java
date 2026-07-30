@@ -1,6 +1,10 @@
 package com.pegasuscorp.orbe.copilot;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
@@ -38,6 +42,7 @@ public final class CopilotController implements SessionObserver {
     private volatile BubbleSink bubbleSink;
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
+    private BroadcastReceiver notifReceiver;
 
     private CopilotController(Context ctx) {
         appContext = ctx.getApplicationContext();
@@ -59,9 +64,47 @@ public final class CopilotController implements SessionObserver {
         PegaseSession session = PegaseSession.get(appContext);
         session.addObserver(this);
         session.init(new SessionContext(Channel.COPILOT, false));
+        registerNotifReceiver();
+    }
+
+    private void registerNotifReceiver() {
+        if (notifReceiver != null) return;
+        notifReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null) return;
+                String title = intent.getStringExtra("title");
+                String text = intent.getStringExtra("text");
+                String msg = buildNotifMessage(title, text);
+                if (bubbleSink != null && !TextUtils.isEmpty(msg)) {
+                    bubbleSink.onAssistantMessage(msg);
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(CopilotNotificationBridge.ACTION_IMPORTANT_NOTIF);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            appContext.registerReceiver(notifReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            appContext.registerReceiver(notifReceiver, filter);
+        }
+    }
+
+    private static String buildNotifMessage(String title, String text) {
+        if (!TextUtils.isEmpty(title) && !TextUtils.isEmpty(text)) {
+            return "📩 " + title + " — " + text;
+        }
+        if (!TextUtils.isEmpty(title)) return "📩 " + title;
+        if (!TextUtils.isEmpty(text)) return "📩 " + text;
+        return "";
     }
 
     public void detach() {
+        if (notifReceiver != null) {
+            try {
+                appContext.unregisterReceiver(notifReceiver);
+            } catch (Exception ignored) {}
+            notifReceiver = null;
+        }
         PegaseSession.get(appContext).removeObserver(this);
         bubbleSink = null;
     }

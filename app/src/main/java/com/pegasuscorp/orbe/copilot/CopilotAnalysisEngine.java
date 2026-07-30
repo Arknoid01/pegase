@@ -43,17 +43,35 @@ public final class CopilotAnalysisEngine {
         if (!CopilotPrefs.isPackageAllowed(ctx, packageName)) return;
 
         IO.execute(() -> {
-            String text = A11yTreeExtractor.extractPlainText(ctx);
+            List<A11ySnapshot.Node> nodes = A11ySnapshot.loadNodes(ctx);
+            String text = joinText(nodes);
             if (text.isEmpty()) return;
             ScreenContextStore.update(ctx, packageName, text);
-            String filterReason = shouldSendToCloud(ctx, text);
-            if (filterReason != null) {
+            List<A11ySnapshot.Node> foreign = CopilotLocaleFilter.foreignBlocks(nodes);
+            if (!foreign.isEmpty()) {
                 CloudSink sink = cloudSink;
                 if (sink != null) {
-                    MAIN.post(() -> sink.onFilteredText(packageName, text, filterReason));
+                    MAIN.post(() -> sink.onFilteredText(packageName, text, "langue_etrangere"));
                 }
             }
         });
+    }
+
+    private static String joinText(List<A11ySnapshot.Node> nodes) {
+        if (nodes == null || nodes.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (A11ySnapshot.Node n : nodes) {
+            if (n.text.isEmpty()) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(n.text);
+        }
+        return sb.toString().trim();
+    }
+
+    /** @deprecated use {@link CopilotLocaleFilter#needsTranslation(String)} */
+    @SuppressWarnings("unused")
+    static String shouldSendToCloudLegacy(Context ctx, String text) {
+        return shouldSendToCloud(ctx, text);
     }
 
     /**

@@ -24,6 +24,9 @@ public final class CopilotPrefs {
     private static final String KEY_BUBBLE_OPEN = "bubble_open";
     private static final String KEY_WHITELIST = "app_whitelist";
     private static final String KEY_ANALYSIS_ENABLED = "screen_analysis";
+    private static final String KEY_TRANSLATION_OVERLAY = "translation_overlay";
+    private static final String KEY_NOTIF_ENABLED = "notif_copilot";
+    private static final String KEY_NOTIF_WHITELIST = "notif_whitelist";
 
     private CopilotPrefs() {}
 
@@ -45,6 +48,60 @@ public final class CopilotPrefs {
 
     public static void setScreenAnalysisEnabled(Context ctx, boolean on) {
         prefs(ctx).edit().putBoolean(KEY_ANALYSIS_ENABLED, on).apply();
+    }
+
+    public static boolean isTranslationOverlayEnabled(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_TRANSLATION_OVERLAY, true);
+    }
+
+    public static void setTranslationOverlayEnabled(Context ctx, boolean on) {
+        prefs(ctx).edit().putBoolean(KEY_TRANSLATION_OVERLAY, on).apply();
+    }
+
+    public static boolean isNotificationCopilotEnabled(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_NOTIF_ENABLED, false);
+    }
+
+    public static void setNotificationCopilotEnabled(Context ctx, boolean on) {
+        prefs(ctx).edit().putBoolean(KEY_NOTIF_ENABLED, on).apply();
+    }
+
+    public static Set<String> getNotificationWhitelist(Context ctx) {
+        String raw = prefs(ctx).getString(KEY_NOTIF_WHITELIST, "");
+        if (TextUtils.isEmpty(raw)) return Collections.emptySet();
+        Set<String> out = new HashSet<>();
+        for (String part : raw.split(",")) {
+            String p = part.trim();
+            if (!p.isEmpty()) out.add(p);
+        }
+        return out;
+    }
+
+    public static void setNotificationWhitelist(Context ctx, Set<String> packages) {
+        if (packages == null || packages.isEmpty()) {
+            prefs(ctx).edit().remove(KEY_NOTIF_WHITELIST).apply();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String p : packages) {
+            if (TextUtils.isEmpty(p)) continue;
+            if (sb.length() > 0) sb.append(',');
+            sb.append(p.trim());
+        }
+        prefs(ctx).edit().putString(KEY_NOTIF_WHITELIST, sb.toString()).apply();
+    }
+
+    public static void addToNotificationWhitelist(Context ctx, String packageName) {
+        if (TextUtils.isEmpty(packageName)) return;
+        Set<String> set = new HashSet<>(getNotificationWhitelist(ctx));
+        set.add(packageName.trim());
+        setNotificationWhitelist(ctx, set);
+    }
+
+    public static boolean isNotificationPackageAllowed(Context ctx, String packageName) {
+        if (!isNotificationCopilotEnabled(ctx)) return false;
+        if (TextUtils.isEmpty(packageName)) return false;
+        return getNotificationWhitelist(ctx).contains(packageName);
     }
 
     public static Set<String> getWhitelist(Context ctx) {

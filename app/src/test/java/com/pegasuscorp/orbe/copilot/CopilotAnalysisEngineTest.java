@@ -8,14 +8,13 @@ public class CopilotAnalysisEngineTest {
 
     @Test
     public void shouldSendToCloud_skipsShortText() {
-        assertNull(CopilotAnalysisEngine.shouldSendToCloud(null, "hello"));
+        assertFalse(CopilotLocaleFilter.needsTranslation("hello"));
     }
 
     @Test
     public void shouldSendToCloud_detectsCjk() {
         String cjk = "这是一段中文测试文本用于检测语言过滤逻辑是否正常工作";
-        assertEquals("langue_etrangere",
-                CopilotAnalysisEngine.shouldSendToCloud(null, cjk));
+        assertTrue(CopilotLocaleFilter.needsTranslation(cjk));
     }
 
     @Test

@@ -56,7 +56,7 @@ public final class PegaseInterfaceData {
 
         public boolean isNavigation() {
             return "know_me".equals(toolId) || "memory_settings".equals(toolId)
-                    || "atlas_settings".equals(toolId)
+                    || "atlas_settings".equals(toolId) || "copilot_settings".equals(toolId)
                     || "open_interface".equals(toolId);
         }
 
@@ -491,6 +491,10 @@ public final class PegaseInterfaceData {
             new ToolHint("atlas_settings",
                     "Atlas — personnes & projets",
                     "Ouvre l'atlas des entités",
+                    null),
+            new ToolHint("copilot_settings",
+                    "Mode copilote — réglages",
+                    "Liste blanche apps, traduction, notifications",
                     null)
     );
 
@@ -515,7 +519,8 @@ public final class PegaseInterfaceData {
         out.add(buildDevCategory());
         out.add(buildSituationCategory(ctx));
         out.add(buildLearnedCategory(ctx));
-        out.add(cat("🎓 Pégase", filter("open_interface", "know_me", "memory_settings", "atlas_settings")));
+        out.add(cat("🎓 Pégase", filter("open_interface", "know_me", "memory_settings",
+                "atlas_settings", "copilot_settings")));
         return out;
     }
 

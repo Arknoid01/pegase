@@ -354,6 +354,21 @@
         </service>
 
         <service
+            android:name=".copilot.TranslationOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="copilot_translation_overlay" />
+        </service>
+
+        <activity
+            android:name=".copilot.CopilotSettingsActivity"
+            android:exported="false"
+            android:label="Mode copilote"
+            android:theme="@style/Theme.Orbe" />
+
+        <service
             android:name=".FloatingOrbService"
             android:exported="false"
             android:foregroundServiceType="specialUse">

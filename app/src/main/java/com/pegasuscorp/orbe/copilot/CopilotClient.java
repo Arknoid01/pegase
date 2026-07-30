@@ -26,6 +26,17 @@ public final class CopilotClient {
     private Context app;
     private ICopilotService remote;
     private boolean binding;
+    private boolean callbackRegistered;
+
+    private final ICopilotCallback.Stub callbackStub = new ICopilotCallback.Stub() {
+        @Override
+        public void onScreenContextUpdated(String packageName, String text) {}
+
+        @Override
+        public void onCloudCandidate(String packageName, String text, String reason) {
+            main.post(() -> CopilotCloudBridge.handleCloudCandidate(app, packageName, text, reason));
+        }
+    };
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -34,6 +45,10 @@ public final class CopilotClient {
                 binding = false;
                 remote = ICopilotService.Stub.asInterface(service);
                 try {
+                    if (!callbackRegistered) {
+                        remote.registerCallback(callbackStub);
+                        callbackRegistered = true;
+                    }
                     if (CopilotPrefs.isScreenAnalysisEnabled(app)) {
                         remote.startAnalysis();
                     }
@@ -48,6 +63,7 @@ public final class CopilotClient {
             synchronized (lock) {
                 remote = null;
                 binding = false;
+                callbackRegistered = false;
             }
         }
     };
@@ -85,7 +101,11 @@ public final class CopilotClient {
     public void ensureBound(Context context) {
         init(context);
         synchronized (lock) {
-            if (remote != null || binding || app == null) return;
+            if (remote != null) {
+                registerCallbackIfNeeded();
+                return;
+            }
+            if (binding || app == null) return;
             binding = true;
             Intent intent = new Intent(app, CopilotService.class);
             intent.setAction(CopilotService.ACTION_BIND);
@@ -104,8 +124,20 @@ public final class CopilotClient {
 
     public void sync(Context context) {
         init(context);
-        if (!CopilotPrefs.isScreenAnalysisEnabled(app)) return;
-        if (!AccessibilityAccess.isEnabled(app)) return;
+        if (!CopilotPrefs.isScreenAnalysisEnabled(app)
+                && !CopilotPrefs.isTranslationOverlayEnabled(app)) return;
+        if (CopilotPrefs.isScreenAnalysisEnabled(app)
+                && !AccessibilityAccess.isEnabled(app)) return;
         ensureBound(app);
+    }
+
+    private void registerCallbackIfNeeded() {
+        if (remote == null || callbackRegistered) return;
+        try {
+            remote.registerCallback(callbackStub);
+            callbackRegistered = true;
+        } catch (Exception e) {
+            Log.w(TAG, "registerCallback", e);
+        }
     }
 }
