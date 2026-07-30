@@ -33,8 +33,13 @@ public final class PrefetchBootReceiver extends BroadcastReceiver {
             com.pegasuscorp.orbe.f1companion.F1LiveScheduler.ensureScheduled(app);
         } catch (Exception ignored) {}
         try {
-            // Rattrapage si le téléphone a redémarré après l'heure prévue
             PrefetchService.run(app);
+        } catch (Exception ignored) {}
+        try {
+            if (android.provider.Settings.canDrawOverlays(app)
+                    && com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(app)) {
+                com.pegasuscorp.orbe.FloatingOrbService.showCopilot(app);
+            }
         } catch (Exception ignored) {}
     }
 }

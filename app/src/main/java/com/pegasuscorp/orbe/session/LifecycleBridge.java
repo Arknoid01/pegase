@@ -242,13 +242,16 @@ public final class LifecycleBridge {
         }
         androidx.appcompat.app.AppCompatActivity a = host.activity();
         VoiceInputHandler voice = host.voiceInput();
-        // Orbe seulement pour un vrai chat vocal en cours — pas une session texte
-        // laissée « active » après fermeture propre de l'interface.
-        if (android.provider.Settings.canDrawOverlays(a)
-                && voice != null && voice.isConversationActive()
-                && PegaseWakeController.isVoiceChatActive()
-                && !com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) {
+        if (!android.provider.Settings.canDrawOverlays(a)
+                || com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) {
+            return;
+        }
+        // Priorité : overlay vocal pendant un chat actif, sinon copilote permanent.
+        if (voice != null && voice.isConversationActive()
+                && PegaseWakeController.isVoiceChatActive()) {
             FloatingOrbService.show(a);
+        } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
+            FloatingOrbService.showCopilot(a);
         }
     }
 

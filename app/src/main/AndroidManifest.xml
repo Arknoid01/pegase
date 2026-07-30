@@ -326,6 +326,13 @@
                 android:value="floating_orb_overlay" />
         </service>
 
+        <activity
+            android:name=".copilot.ScreenCapturePermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".PegaseNotificationListenerService"
             android:exported="true"
