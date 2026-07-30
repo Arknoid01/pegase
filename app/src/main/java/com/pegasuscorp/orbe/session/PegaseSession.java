@@ -89,6 +89,8 @@ public class PegaseSession {
     private long agenticOperationGeneration;
     /** Collecte outils / sources pour la ReasoningCard du tour. */
     private ReasoningTurnCollector turnReasoning;
+    /** Intent du tour — une seule analyse + un seul {@code routing_match} par message user. */
+    private ContextIntent currentTurnIntent;
 
     /**
      * FileLocation du dernier {@link #rewriteOrionPrompt} (phase plan).
@@ -740,7 +742,6 @@ public class PegaseSession {
         String detail = BriefTool.composeBriefDetail(appContext);
         if (detail == null || detail.trim().isEmpty()) return false;
         conv.addUserMessage(userText.trim());
-        beginTurnReasoning(userText.trim());
         if (turnReasoning != null) {
             turnReasoning.noteToolStart("brief", new JSONObject());
             turnReasoning.noteToolEnd("brief", true, 0, "cache local — plus de détail");
@@ -785,7 +786,6 @@ public class PegaseSession {
         if (IntentDetector.looksLikeDiagToolUsageQuestion(fold)) {
             String answer = answerDiagToolUsageFromTrace();
             conv.addUserMessage(userText.trim());
-            beginTurnReasoning(userText.trim());
             if (turnReasoning != null) {
                 turnReasoning.noteToolStart("diag", new JSONObject());
                 turnReasoning.noteToolEnd("diag", true, 0, "lecture trace locale");
@@ -972,7 +972,10 @@ public class PegaseSession {
 
     private ChatSendOptions buildSendOptions(String userMessage) {
         Channel channel = sessionContext.channel;
-        ContextIntent intent = ContextAnalyzer.analyze(appContext, userMessage);
+        ContextIntent intent = currentTurnIntent;
+        if (intent == null) {
+            intent = ContextAnalyzer.analyze(appContext, userMessage);
+        }
         if (!useNativeFunctionCalling()) {
             return ChatSendOptions.legacy(channel).withIntent(intent);
         }
@@ -1227,6 +1230,7 @@ public class PegaseSession {
             return;
         }
         // Carte avant notify : l'UI refresh Discussion dans onReply et doit déjà trouver la carte.
+        markTurnLlmSynthesis(conv);
         publishReasoningForReply(text);
         notifyReply(obs, text, false);
     }
@@ -1602,18 +1606,25 @@ public class PegaseSession {
             return;
         }
         conv.recordToolReply(out);
+        markTurnLlmSynthesis(conv);
         publishReasoningForReply(out);
         notifyReply(obs, out, false);
     }
 
+    private void markTurnLlmSynthesis(ConversationManager conv) {
+        if (turnReasoning == null || conv == null) return;
+        turnReasoning.markLlmSynthesis(
+                conv.lastLlmBackend(), conv.lastLlmLatencyMs(), conv.lastPromptChars());
+    }
+
     private void beginTurnReasoning(String userMessage) {
         String msg = userMessage != null ? userMessage : "";
-        ContextIntent intent = ContextAnalyzer.analyze(appContext, msg);
-        turnReasoning = new ReasoningTurnCollector(intent.intent);
+        currentTurnIntent = ContextAnalyzer.analyze(appContext, msg, true);
+        turnReasoning = new ReasoningTurnCollector(currentTurnIntent.intent);
         if (appContext == null) return;
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
-            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, intent);
+            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, currentTurnIntent);
             turnReasoning.applySnapshot(snap);
             turnReasoning.setSessionUsed(msg);
         } catch (Exception ignored) {
@@ -1643,6 +1654,7 @@ public class PegaseSession {
         }
         Trace.reasoningCard(card);
         turnReasoning = null;
+        currentTurnIntent = null;
     }
 
     private boolean isAgenticGenerationCurrent(long captured) {

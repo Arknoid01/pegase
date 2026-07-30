@@ -33,6 +33,10 @@ public final class ReasoningTurnCollector {
     private String tavilyQuery = "";
     private int contextChunks;
     private boolean ephemeral;
+    private boolean llmSynthesisUsed;
+    private String synthesisBackend = "";
+    private long synthesisLatencyMs;
+    private int synthesisPromptChars;
 
     /** Params du dernier tool_start en attente de tool_end. */
     private String pendingToolId;
@@ -81,6 +85,18 @@ public final class ReasoningTurnCollector {
         if (topic != null && !topic.trim().isEmpty()) {
             sessionUsed = clip(topic.trim(), 100);
         }
+    }
+
+    /** Synthèse LLM du tour (agentique ou réponse directe) — pas les tool_calls intermédiaires. */
+    public void markLlmSynthesis(String backend, long latencyMs, int promptChars) {
+        llmSynthesisUsed = true;
+        synthesisBackend = backend != null ? backend : "";
+        synthesisLatencyMs = Math.max(0L, latencyMs);
+        synthesisPromptChars = Math.max(0, promptChars);
+    }
+
+    public boolean llmSynthesisUsed() {
+        return llmSynthesisUsed;
     }
 
     public void setMemories(List<String> memories) {
@@ -134,6 +150,23 @@ public final class ReasoningTurnCollector {
     }
 
     public ReasoningCard build(String reply, String backend, long latencyMs, int promptChars) {
+        String cardBackend;
+        long cardLatency;
+        int cardPromptChars;
+        if (llmSynthesisUsed) {
+            cardBackend = !synthesisBackend.isEmpty() ? synthesisBackend
+                    : (backend != null ? backend : "");
+            cardLatency = synthesisLatencyMs > 0L ? synthesisLatencyMs : latencyMs;
+            cardPromptChars = synthesisPromptChars > 0 ? synthesisPromptChars : promptChars;
+        } else if (!tools.isEmpty()) {
+            cardBackend = "local";
+            cardLatency = 0L;
+            cardPromptChars = 0;
+        } else {
+            cardBackend = backend != null ? backend : "";
+            cardLatency = latencyMs;
+            cardPromptChars = promptChars;
+        }
         boolean reliable = hasReliableToolSource() || contextChunks > 0
                 || !memoriesUsed.isEmpty() || !atlasUsed.isEmpty();
         boolean hallu = HallucinationDetector.isPotentialHallucination(
@@ -153,9 +186,9 @@ public final class ReasoningTurnCollector {
                 sessionUsed,
                 new ArrayList<>(webSources),
                 tavilyQuery,
-                backend != null ? backend : "",
-                latencyMs,
-                promptChars,
+                cardBackend,
+                cardLatency,
+                cardPromptChars,
                 ephemeral,
                 hallu,
                 reason != null ? reason : "");

@@ -84,4 +84,26 @@ public class HallucinationDetectorTest {
         ReasoningCard card = c.build("RAS.", "local", 0, 0);
         assertEquals("Tu as eut des problèmes ?", card.sessionUsed);
     }
+
+    @Test
+    public void reasoningCard_localToolWithoutLlmSynthesis() {
+        ReasoningTurnCollector c = new ReasoningTurnCollector("diag");
+        c.noteToolStart("diag", null);
+        c.noteToolEnd("diag", true, 19, "lecture trace locale");
+        // Sans markLlmSynthesis : ignore le backend/latence du tour précédent (Groq).
+        ReasoningCard card = c.build("RAS.", "Groq/gpt-oss-20b", 1241, 800);
+        assertEquals("local", card.backend);
+        assertEquals(0L, card.latencyMs);
+        assertEquals(0, card.promptChars);
+    }
+
+    @Test
+    public void reasoningCard_llmSynthesisOverridesStaleMetrics() {
+        ReasoningTurnCollector c = new ReasoningTurnCollector("general");
+        c.markLlmSynthesis("Groq/gpt-oss-20b", 450, 600);
+        ReasoningCard card = c.build("Voici.", "local", 0, 0);
+        assertEquals("Groq/gpt-oss-20b", card.backend);
+        assertEquals(450L, card.latencyMs);
+        assertEquals(600, card.promptChars);
+    }
 }
