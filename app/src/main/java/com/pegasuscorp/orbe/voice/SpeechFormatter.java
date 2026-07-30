@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.voice;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.llm.PegasePrompt;
+import com.pegasuscorp.orbe.llm.PersonalityGuide;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,7 @@ public final class SpeechFormatter {
         String text = llmText == null ? "" : llmText;
 
         text = stripThinking(text);
+        text = PersonalityGuide.stripBannedPhrases(text);
         text = PegasePrompt.fixFrenchOralSpacing(text);
         if (rules.removeEmoji) {
             text = EMOJI.matcher(text).replaceAll("");

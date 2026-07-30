@@ -686,15 +686,47 @@ public final class VoiceInputHandler {
         }
     }
 
+    private static final class VoiceStreamState {
+        boolean started;
+    }
+
+    private void feedVoicePartial(int requestId, VoiceStreamState stream, String accumulated) {
+        if (requestId != chatRequestId) return;
+        if (!VoiceOutputHandler.readyForStreamTts(accumulated)) return;
+        if (!stream.started) {
+            stream.started = true;
+            if (orbUi != null) orbUi.setThinking(false);
+            output.beginSpeakStream(null);
+        }
+        output.feedSpeakStream(accumulated);
+    }
+
+    private void deliverVoiceReply(int requestId, VoiceStreamState stream, String text,
+            com.pegasuscorp.orbe.conversation.InteractionMood mood, Runnable onComplete) {
+        if (requestId != chatRequestId) return;
+        if (orbUi != null) orbUi.setThinking(false);
+        if (text != null && !text.trim().isEmpty()) {
+            VoiceSessionContext.get().onAssistantReply(text);
+        }
+        if (stream.started) {
+            output.endSpeakStream(text, onComplete);
+        } else if (text != null && !text.trim().isEmpty()) {
+            output.speakWithMood(text, mood, onComplete);
+        } else if (onComplete != null) {
+            onComplete.run();
+        }
+    }
+
     private SessionObserver voiceToolObserver(int requestId, InteractionStateStore interaction) {
+        final VoiceStreamState stream = new VoiceStreamState();
         return new SessionObserver() {
             @Override
             public void onReply(String text, boolean toolFired) {
                 if (requestId != chatRequestId) return;
                 if (toolFired) return;
                 if (text == null || text.trim().isEmpty()) return;
-                if (orbUi != null) orbUi.setThinking(false);
-                output.speak(text, VoiceInputHandler.this::scheduleListeningResume);
+                deliverVoiceReply(requestId, stream, text, interaction.getMood(),
+                        VoiceInputHandler.this::scheduleListeningResume);
             }
 
             @Override
@@ -733,6 +765,7 @@ public final class VoiceInputHandler {
 
             @Override
             public void onPartial(String accumulated) {
+                feedVoicePartial(requestId, stream, accumulated);
             }
 
             @Override
@@ -904,31 +937,18 @@ public final class VoiceInputHandler {
         String payload = lockedChatMode
                 ? transcript + LockSessionPolicy.LOCKED_LLM_HINT
                 : transcript;
-        final boolean[] streamStarted = {false};
+        final VoiceStreamState stream = new VoiceStreamState();
         pegaseSession.send(payload, transcript, new SessionObserver() {
             @Override
             public void onPartial(String accumulated) {
-                if (requestId != chatRequestId) return;
-                if (!streamStarted[0]) {
-                    if (!VoiceOutputHandler.readyForStreamTts(accumulated)) return;
-                    streamStarted[0] = true;
-                    if (orbUi != null) orbUi.setThinking(false);
-                    output.beginSpeakStream(null);
-                }
-                output.feedSpeakStream(accumulated);
+                feedVoicePartial(requestId, stream, accumulated);
             }
 
             @Override
             public void onReply(String text, boolean toolFired) {
                 if (requestId != chatRequestId || toolFired) return;
-                if (orbUi != null) orbUi.setThinking(false);
-                VoiceSessionContext.get().onAssistantReply(text);
-                if (streamStarted[0]) {
-                    output.endSpeakStream(text, VoiceInputHandler.this::scheduleListeningResume);
-                } else {
-                    output.speakWithMood(text, interaction.getMood(),
-                            VoiceInputHandler.this::scheduleListeningResume);
-                }
+                deliverVoiceReply(requestId, stream, text, interaction.getMood(),
+                        VoiceInputHandler.this::scheduleListeningResume);
             }
 
             @Override
@@ -959,7 +979,7 @@ public final class VoiceInputHandler {
 
             @Override
             public void onError(String error) {
-                handleChatError(requestId, streamStarted[0], error);
+                handleChatError(requestId, stream.started, error);
             }
         });
     }

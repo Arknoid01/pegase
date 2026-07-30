@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.conversation;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.pegasuscorp.orbe.intentions.PegaseModeStore;
 import com.pegasuscorp.orbe.llm.PegasePrompt;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 
@@ -16,6 +17,8 @@ public final class ResponseDelivery {
     private static final float THINK_ALOUD_CHANCE = 0.18f;
     private static final int SHORT_DELAY_MS = 300;
     private static final int LONG_DELAY_MS = 700;
+    private static final int DRIVE_DELAY_MS = 100;
+    private static final int WORK_DELAY_MS = 200;
     private static final int LONG_RESPONSE_WORDS = 18;
 
     private static final String[] THINKING_NORMAL = {
@@ -39,10 +42,17 @@ public final class ResponseDelivery {
         }
 
         long delay = wordCount(text) >= LONG_RESPONSE_WORDS ? LONG_DELAY_MS : SHORT_DELAY_MS;
+        if (voiceManager != null) {
+            if (PegaseModeStore.isDrive(voiceManager.getAppContext())) {
+                delay = DRIVE_DELAY_MS;
+            } else if (PegaseModeStore.isWork(voiceManager.getAppContext())) {
+                delay = WORK_DELAY_MS;
+            }
+        }
         Runnable speakAnswer = () -> main.postDelayed(
                 () -> voiceManager.speak(text, onComplete), delay);
 
-        if (shouldThinkAloud(text)) {
+        if (shouldThinkAloud(text, voiceManager)) {
             String filler = pickThinkingPhrase(mood);
             voiceManager.speak(filler, speakAnswer);
         } else {
@@ -50,7 +60,13 @@ public final class ResponseDelivery {
         }
     }
 
-    private static boolean shouldThinkAloud(String text) {
+    private static boolean shouldThinkAloud(String text, VoiceManager voiceManager) {
+        if (voiceManager != null) {
+            if (PegaseModeStore.isDrive(voiceManager.getAppContext())
+                    || PegaseModeStore.isWork(voiceManager.getAppContext())) {
+                return false;
+            }
+        }
         int words = wordCount(text);
         if (words <= 4) return false;
         if (isTinyReply(text)) return false;

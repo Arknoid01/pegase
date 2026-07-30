@@ -3,6 +3,9 @@ package com.pegasuscorp.orbe.chat;
 import com.pegasuscorp.orbe.memory.ContextIntent;
 import com.pegasuscorp.orbe.session.Channel;
 import com.pegasuscorp.orbe.tools.ToolTag;
+import com.pegasuscorp.orbe.intentions.PegaseModeStore;
+
+import android.content.Context;
 
 import java.util.EnumSet;
 
@@ -102,6 +105,29 @@ public final class ChatSendOptions {
     public ChatSendOptions withIntentName(String intent) {
         return new ChatSendOptions(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
                 maxTokensOverride, intent);
+    }
+
+    /**
+     * Ajuste le plafond voix selon mode conduite/travail et intention —
+     * sans effet si {@link #withMaxTokens} déjà appelé.
+     */
+    public ChatSendOptions withVoiceTokenBudget(Context context) {
+        if (channel != Channel.VOICE || maxTokensOverride != null) return this;
+        if (context == null) return this;
+        if (PegaseModeStore.isDrive(context)) return withMaxTokens(90);
+        if (PegaseModeStore.isWork(context)) return withMaxTokens(120);
+        String intent = intentName;
+        if ("productivity".equals(intent) || "device".equals(intent) || "diag".equals(intent)) {
+            return withMaxTokens(140);
+        }
+        if ("fresh_data".equals(intent) || "music".equals(intent)) {
+            return withMaxTokens(220);
+        }
+        if ("general".equals(intent) || "creative".equals(intent) || "story".equals(intent)
+                || "philosophical".equals(intent)) {
+            return withMaxTokens(250);
+        }
+        return this;
     }
 
     /** Budget réponse — utilise {@link #intentName} si présent. */

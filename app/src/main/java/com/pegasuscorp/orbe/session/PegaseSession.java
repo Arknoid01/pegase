@@ -980,7 +980,9 @@ public class PegaseSession {
             return ChatSendOptions.legacy(channel).withIntent(intent);
         }
         if (channel == Channel.VOICE) {
-            return ChatSendOptions.forVoice(intent.allowedTools).withIntent(intent);
+            return ChatSendOptions.forVoice(intent.allowedTools)
+                    .withIntent(intent)
+                    .withVoiceTokenBudget(appContext);
         }
         return ChatSendOptions.forText(intent.allowedTools).withIntent(intent);
     }
@@ -1486,53 +1488,113 @@ public class PegaseSession {
         if (activeAgenticOptions != null && activeAgenticOptions.intentName != null) {
             stepOpts = stepOpts.withIntentName(activeAgenticOptions.intentName);
         }
-        // Synthèse après search/wiki : assez de tokens même si intent absent
+        Channel channel = activeAgenticOptions != null
+                ? activeAgenticOptions.channel
+                : sessionContext.channel;
+        if (channel == Channel.VOICE) {
+            stepOpts = stepOpts.withVoiceTokenBudget(appContext);
+        }
+        // Synthèse après search/wiki : budget adapté au canal
         if (!allowMoreTools && activeAgenticChain != null
                 && !activeAgenticChain.steps().isEmpty()) {
             AgenticChain.Step last = activeAgenticChain.steps()
                     .get(activeAgenticChain.steps().size() - 1);
             String lastTool = last.toolCall != null ? last.toolCall.name : "";
-            if (ToolSuccessHint.isInformational(lastTool)
-                    && stepOpts.replyMaxTokens() < 700) {
-                stepOpts = stepOpts.withMaxTokens(700);
+            if (ToolSuccessHint.isInformational(lastTool)) {
+                int cap = channel == Channel.VOICE
+                        ? Math.min(Math.max(stepOpts.replyMaxTokens(), 220), 280)
+                        : 700;
+                if (stepOpts.replyMaxTokens() < cap) {
+                    stepOpts = stepOpts.withMaxTokens(cap);
+                }
             }
         }
         agenticStepIndex++;
         notifyLlmStart(obs);
         final long agenticGeneration = agenticOperationGeneration;
-        conv.sendAgenticStep(activeAgenticChain, stepOpts, new ChatBackend.OnReply() {
-            @Override
-            public void onLlmReply(LlmReply reply) {
-                main.post(() -> {
-                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
-                    handleAgenticStepReply(conv, reply, obs);
-                });
-            }
+        boolean streamVoiceSynthesis = !allowMoreTools
+                && channel == Channel.VOICE
+                && sessionContext.streamingEnabled
+                && conv.supportsStreaming();
+        ChatBackend.OnReply agenticCallback;
+        if (streamVoiceSynthesis) {
+            agenticCallback = new ChatBackend.StreamOnReply() {
+                @Override
+                public void onPartial(String accumulated) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        notifyPartial(obs, accumulated);
+                    });
+                }
 
-            @Override
-            public void onReply(String text) {
-                main.post(() -> {
-                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
-                    finalizeAgentic(conv, obs, text);
-                });
-            }
+                @Override
+                public void onLlmReply(LlmReply reply) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        handleAgenticStepReply(conv, reply, obs);
+                    });
+                }
 
-            @Override
-            public void onError(String error) {
-                main.post(() -> {
-                    if (!isAgenticGenerationCurrent(agenticGeneration)) return;
-                    if (isToolChoiceConflict(error)) {
-                        Trace.error("agentic", "tool_choice_conflict: " + error);
-                        finalizeAgentic(conv, obs, activeAgenticChain != null
-                                ? activeAgenticChain.lastToolDisplayText() : error);
-                        return;
-                    }
-                    String fallback = activeAgenticChain != null
-                            ? activeAgenticChain.lastToolDisplayText() : error;
-                    finalizeAgentic(conv, obs, fallback.isEmpty() ? error : fallback);
-                });
-            }
-        });
+                @Override
+                public void onReply(String text) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        finalizeAgentic(conv, obs, text);
+                    });
+                }
+
+                @Override
+                public void onError(String error) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        if (isToolChoiceConflict(error)) {
+                            Trace.error("agentic", "tool_choice_conflict: " + error);
+                            finalizeAgentic(conv, obs, activeAgenticChain != null
+                                    ? activeAgenticChain.lastToolDisplayText() : error);
+                            return;
+                        }
+                        String fallback = activeAgenticChain != null
+                                ? activeAgenticChain.lastToolDisplayText() : error;
+                        finalizeAgentic(conv, obs, fallback.isEmpty() ? error : fallback);
+                    });
+                }
+            };
+        } else {
+            agenticCallback = new ChatBackend.OnReply() {
+                @Override
+                public void onLlmReply(LlmReply reply) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        handleAgenticStepReply(conv, reply, obs);
+                    });
+                }
+
+                @Override
+                public void onReply(String text) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        finalizeAgentic(conv, obs, text);
+                    });
+                }
+
+                @Override
+                public void onError(String error) {
+                    main.post(() -> {
+                        if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        if (isToolChoiceConflict(error)) {
+                            Trace.error("agentic", "tool_choice_conflict: " + error);
+                            finalizeAgentic(conv, obs, activeAgenticChain != null
+                                    ? activeAgenticChain.lastToolDisplayText() : error);
+                            return;
+                        }
+                        String fallback = activeAgenticChain != null
+                                ? activeAgenticChain.lastToolDisplayText() : error;
+                        finalizeAgentic(conv, obs, fallback.isEmpty() ? error : fallback);
+                    });
+                }
+            };
+        }
+        conv.sendAgenticStep(activeAgenticChain, stepOpts, agenticCallback);
     }
 
     private boolean computeAllowMoreTools() {
