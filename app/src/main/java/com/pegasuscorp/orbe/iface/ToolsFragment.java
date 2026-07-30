@@ -25,6 +25,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
+import com.pegasuscorp.orbe.copilot.CopilotSettingsActivity;
 import com.pegasuscorp.orbe.AtlasSettingsActivity;
 import com.pegasuscorp.orbe.KnowMeSettingsActivity;
 import com.pegasuscorp.orbe.MemorySettingsActivity;
@@ -286,6 +287,9 @@ public class ToolsFragment extends Fragment {
                 break;
             case "atlas_settings":
                 startActivity(new Intent(ctx, AtlasSettingsActivity.class));
+                break;
+            case "copilot_settings":
+                startActivity(new Intent(ctx, CopilotSettingsActivity.class));
                 break;
             case "create_file":
                 createRecapDirect();

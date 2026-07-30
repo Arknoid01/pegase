@@ -53,7 +53,11 @@ public class PegaseNotificationListenerService extends NotificationListenerServi
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        // Le snapshot est recalculé à la demande.
+        if (sbn == null) return;
+        try {
+            NotificationItem item = toItem(0, sbn, getPackageManager());
+            com.pegasuscorp.orbe.copilot.CopilotNotificationBridge.onPosted(this, sbn, item);
+        } catch (Exception ignored) {}
     }
 
     @Override

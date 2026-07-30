@@ -5,6 +5,7 @@ import android.content.Context;
 import com.pegasuscorp.orbe.diag.CorrectionsEditor;
 import com.pegasuscorp.orbe.notepad.NotepadEditor;
 import com.pegasuscorp.orbe.voice.handlers.BureauIntentHandler;
+import com.pegasuscorp.orbe.voice.handlers.CopilotIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.DiagIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.IntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.KnowledgeIntentHandler;
@@ -86,6 +87,7 @@ public final class VoiceIntentRouter {
     }
 
     private static final IntentHandler[] HANDLERS = {
+            new CopilotIntentHandler(),
             new LifeIntentHandler(),
             new DiagIntentHandler(),
             new OrionIntentHandler(),

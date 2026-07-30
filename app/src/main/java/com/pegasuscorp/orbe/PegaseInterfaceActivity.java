@@ -405,9 +405,12 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         // Ne pas afficher l'orbe pendant la fermeture (Back) — la session
         // sera finalisée dans onDestroy / onInterfaceClosed.
         if (!isFinishing()
-                && android.provider.Settings.canDrawOverlays(this)
-                && ChatVoiceBridge.isChatActive()) {
-            FloatingOrbService.show(this);
+                && android.provider.Settings.canDrawOverlays(this)) {
+            if (ChatVoiceBridge.isChatActive()) {
+                FloatingOrbService.show(this);
+            } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(this)) {
+                FloatingOrbService.showCopilot(this);
+            }
         }
         super.onPause();
     }

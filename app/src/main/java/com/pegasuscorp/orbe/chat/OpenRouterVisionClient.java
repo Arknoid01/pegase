@@ -57,6 +57,48 @@ public final class OpenRouterVisionClient {
                 .apply();
     }
 
+    /** Analyse une image JPEG brute (capture d'écran copilote). */
+    public static void analyzeJpegBytes(Context context, byte[] jpeg, String userPrompt,
+            Callback callback) {
+        Context app = context.getApplicationContext();
+        IO.execute(() -> {
+            try {
+                if (jpeg == null || jpeg.length == 0) {
+                    postError(callback, "Image vide.");
+                    return;
+                }
+                String dataUrl = "data:image/jpeg;base64,"
+                        + Base64.encodeToString(jpeg, Base64.NO_WRAP);
+                String text = analyzeBlocking(app, userPrompt, imagePart(dataUrl), null);
+                postSuccess(callback, text);
+            } catch (Exception e) {
+                postError(callback, ChatSpokenErrors.toUserMessage("OpenRouter Vision",
+                        e.getMessage()));
+            }
+        });
+    }
+
+    /** Compresse un bitmap en JPEG pour vision / capture. */
+    public static byte[] compressBitmapToJpeg(Bitmap bitmap) {
+        if (bitmap == null) return new byte[0];
+        Bitmap bmp = bitmap;
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        int edge = Math.max(w, h);
+        if (edge > MAX_IMAGE_EDGE) {
+            float scale = MAX_IMAGE_EDGE / (float) edge;
+            Bitmap scaled = Bitmap.createScaledBitmap(bmp,
+                    Math.max(1, Math.round(w * scale)),
+                    Math.max(1, Math.round(h * scale)), true);
+            if (scaled != bmp) bmp.recycle();
+            bmp = scaled;
+        }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos);
+        bmp.recycle();
+        return bos.toByteArray();
+    }
+
     /** Analyse une image (JPEG/PNG/WebP…) depuis un Uri content:// ou file://. */
     public static void analyzeImageUri(Context context, Uri uri, String userPrompt,
             Callback callback) {
@@ -245,22 +287,7 @@ public final class OpenRouterVisionClient {
         }
         if (bmp == null) return null;
 
-        int w = bmp.getWidth();
-        int h = bmp.getHeight();
-        int edge = Math.max(w, h);
-        if (edge > MAX_IMAGE_EDGE) {
-            float scale = MAX_IMAGE_EDGE / (float) edge;
-            Bitmap scaled = Bitmap.createScaledBitmap(bmp,
-                    Math.max(1, Math.round(w * scale)),
-                    Math.max(1, Math.round(h * scale)), true);
-            if (scaled != bmp) bmp.recycle();
-            bmp = scaled;
-        }
-
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos);
-        bmp.recycle();
-        return bos.toByteArray();
+        return compressBitmapToJpeg(bmp);
     }
 
     private static byte[] readUriBytes(Context ctx, Uri uri, int maxBytes) throws Exception {

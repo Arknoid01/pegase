@@ -317,6 +317,72 @@
             android:name=".f1companion.F1LiveScheduler$LiveTickReceiver"
             android:exported="false" />
 
+        <activity
+            android:name=".copilot.ShareIngestActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Pégase — mémoriser"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".copilot.PegaseAccessibilityService"
+            android:exported="false"
+            android:label="Pégase copilote"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/pegase_accessibility_config" />
+        </service>
+
+        <service
+            android:name=".copilot.CopilotService"
+            android:exported="false"
+            android:process=":copilot"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="copilot_screen_analysis" />
+        </service>
+
+        <service
+            android:name=".copilot.TranslationOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="copilot_translation_overlay" />
+        </service>
+
+        <service
+            android:name=".copilot.ElementHighlightService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="copilot_element_highlight" />
+        </service>
+
+        <activity
+            android:name=".copilot.CopilotSettingsActivity"
+            android:exported="false"
+            android:label="Mode copilote"
+            android:theme="@style/Theme.Orbe" />
+
+        <activity
+            android:name=".copilot.CopilotAppPickerActivity"
+            android:exported="false"
+            android:label="Choisir une app"
+            android:theme="@style/Theme.Orbe" />
+
         <service
             android:name=".FloatingOrbService"
             android:exported="false"
@@ -325,6 +391,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="floating_orb_overlay" />
         </service>
+
+        <activity
+            android:name=".copilot.ScreenCapturePermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service
             android:name=".PegaseNotificationListenerService"
