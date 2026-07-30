@@ -24,6 +24,7 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.memory.MemoryEntry;
+import com.pegasuscorp.orbe.memory.MemoryGraphLabels;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.memory.SessionSummary;
 import com.pegasuscorp.orbe.memory.UserProfileStore;
@@ -146,6 +147,26 @@ public class MemorySettingsActivity extends AppCompatActivity {
                 startActivity(new Intent(this, ApiSettingsActivity.class)));
         addActionButton("+ Ajouter un souvenir", this::showAddMemoryDialog);
 
+        List<String> atlasEdges = MemoryGraphLabels.atlasEdgesLines(this);
+        if (!atlasEdges.isEmpty()) {
+            LinearLayout graphCard = cardContainer();
+            TextView graphTitle = new TextView(this);
+            graphTitle.setText("Graphe atlas — " + atlasEdges.size() + " lien"
+                    + (atlasEdges.size() > 1 ? "s" : "") + " entité↔entité");
+            graphTitle.setTextColor(Color.parseColor("#35D0DD"));
+            graphTitle.setTextSize(13);
+            graphTitle.setTypeface(null, Typeface.BOLD);
+            graphCard.addView(graphTitle);
+            for (String line : atlasEdges) {
+                TextView edgeLine = new TextView(this);
+                edgeLine.setText("• " + line);
+                edgeLine.setTextColor(Color.parseColor("#CCFFFFFF"));
+                edgeLine.setTextSize(12);
+                graphCard.addView(edgeLine);
+            }
+            contentHost.addView(graphCard);
+        }
+
         List<MemoryEntry> entries = memory.getAllPermanentMemories();
         if (entries.isEmpty()) {
             contentHost.addView(emptyLabel("Aucun souvenir pour l'instant."));
@@ -171,8 +192,30 @@ public class MemorySettingsActivity extends AppCompatActivity {
         body.setText(e.content);
         body.setTextColor(Color.WHITE);
         body.setTextSize(14);
-        body.setPadding(0, dp(6), 0, dp(8));
+        body.setPadding(0, dp(6), 0, dp(4));
         card.addView(body);
+
+        String entityLine = MemoryGraphLabels.entityLinksLine(this, e);
+        if (!entityLine.isEmpty()) {
+            TextView entities = new TextView(this);
+            entities.setText("🔗 " + entityLine);
+            entities.setTextColor(Color.parseColor("#88D0DD"));
+            entities.setTextSize(12);
+            entities.setPadding(0, 0, 0, dp(4));
+            card.addView(entities);
+        }
+
+        String relatedLine = MemoryGraphLabels.relatedMemoriesLine(memory, e);
+        if (!relatedLine.isEmpty()) {
+            TextView related = new TextView(this);
+            related.setText(relatedLine);
+            related.setTextColor(Color.parseColor("#99FFFFFF"));
+            related.setTextSize(11);
+            related.setPadding(0, 0, 0, dp(6));
+            card.addView(related);
+        } else {
+            body.setPadding(0, dp(6), 0, dp(8));
+        }
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -195,9 +238,13 @@ public class MemorySettingsActivity extends AppCompatActivity {
     private void showEditMemoryDialog(int index, MemoryEntry e) {
         showMemoryDialog(e.content, e.category, e.content, e.importance,
                 (category, content, importance) -> {
-                    memory.updatePermanentMemoryAt(index, new MemoryEntry(
+                    MemoryEntry updated = new MemoryEntry(
                             category, content, importance,
-                            e.createdAt == null || e.createdAt.isEmpty() ? today() : e.createdAt));
+                            e.createdAt == null || e.createdAt.isEmpty() ? today() : e.createdAt,
+                            e.source);
+                    updated.entityIds.addAll(e.entityIds);
+                    updated.relatedMemoryKeys.addAll(e.relatedMemoryKeys);
+                    memory.updatePermanentMemoryAt(index, updated);
                     selectTab(TAB_MEMORIES);
                     toast("Souvenir mis à jour.");
                 });

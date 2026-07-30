@@ -22,9 +22,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -261,6 +263,8 @@ public class MemoryRepository implements MemoryStore {
         int limit = Math.min(max, MAX_RELEVANT_MEMORIES);
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
         Map<String, Float> cosineByKey = new HashMap<>();
+        EntityGraphStore.EntityReach entityReach = EntityGraphStore.getInstance(appContext)
+                .expand(seedEntityIds != null ? seedEntityIds : Collections.emptyList(), 2);
         try {
             float[] qv = EmbeddingEngine.get(appContext).embed(query == null ? "" : query);
             List<VectorStore.Hit> hits = vectors().search(qv, Math.max(limit * 3, 8), minScore);
@@ -271,7 +275,7 @@ public class MemoryRepository implements MemoryStore {
                 MemoryEntry entry = byKey.get(hit.memoryKey);
                 if (entry != null && isInjectable(entry)) {
                     double composite = MemoryScorer.compositeSemantic(
-                            entry, hit.score, entityTerms, seedEntityIds);
+                            entry, hit.score, entityTerms, entityReach);
                     scored.add(new ScoredMemory(entry, composite));
                 }
             }
@@ -279,7 +283,7 @@ public class MemoryRepository implements MemoryStore {
                 scored.sort((a, b) -> Double.compare(b.score, a.score));
                 List<MemoryEntry> ranked = new ArrayList<>();
                 for (ScoredMemory sm : scored) ranked.add(sm.entry);
-                return finalizeGraphRanked(ranked, q, entityTerms, seedEntityIds, limit,
+                return finalizeGraphRanked(ranked, q, entityTerms, entityReach, limit,
                         cosineByKey);
             }
         } catch (Exception e) {
@@ -289,18 +293,19 @@ public class MemoryRepository implements MemoryStore {
     }
 
     private List<MemoryEntry> finalizeGraphRanked(List<MemoryEntry> ranked, String queryLower,
-            List<String> entityTerms, List<String> seedEntityIds, int limit,
+            List<String> entityTerms, EntityGraphStore.EntityReach entityReach, int limit,
             Map<String, Float> cosineByKey) {
         List<MemoryEntry> expanded = MemoryGraph.expandCandidates(
-                ranked, permanentMemories, seedEntityIds, Math.max(limit * 2, limit + 1));
+                ranked, permanentMemories, entityReach.allWithin(2),
+                Math.max(limit * 2, limit + 1));
         List<ScoredMemory> rescored = new ArrayList<>();
         for (MemoryEntry entry : expanded) {
             float cosine = cosineByKey.containsKey(entry.memoryKey())
                     ? cosineByKey.get(entry.memoryKey()) : 0f;
             double score = cosine > 0
-                    ? MemoryScorer.compositeSemantic(entry, cosine, entityTerms, seedEntityIds)
+                    ? MemoryScorer.compositeSemantic(entry, cosine, entityTerms, entityReach)
                     : MemoryScorer.keywordScore(entry, queryLower, entityTerms)
-                            + MemoryScorer.graphEntityBoost(entry, seedEntityIds);
+                            + MemoryScorer.graphEntityBoost(entry, entityReach);
             rescored.add(new ScoredMemory(entry, score));
         }
         rescored.sort((a, b) -> Double.compare(b.score, a.score));
@@ -331,6 +336,38 @@ public class MemoryRepository implements MemoryStore {
 
     public List<MemoryEntry> getAllPermanentMemories() {
         return new ArrayList<>(permanentMemories);
+    }
+
+    /**
+     * Souvenirs liés (graphe mémoire) — clés partagées ou entités communes.
+     */
+    public List<MemoryEntry> getLinkedMemories(MemoryEntry entry) {
+        if (entry == null) return Collections.emptyList();
+        String key = entry.memoryKey();
+        List<MemoryEntry> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        seen.add(key);
+        for (MemoryEntry other : permanentMemories) {
+            if (other == null || !isInjectable(other)) continue;
+            String otherKey = other.memoryKey();
+            if (seen.contains(otherKey)) continue;
+            boolean linked = entry.relatedMemoryKeys.contains(otherKey)
+                    || other.relatedMemoryKeys.contains(key);
+            if (!linked) {
+                for (String id : entry.entityIds) {
+                    if (other.entityIds.contains(id)) {
+                        linked = true;
+                        break;
+                    }
+                }
+            }
+            if (linked) {
+                seen.add(otherKey);
+                out.add(other);
+            }
+        }
+        out.sort((a, b) -> Double.compare(b.importance, a.importance));
+        return out;
     }
 
     /** Souvenirs permanents triés par importance (pour affichage Discussion). */

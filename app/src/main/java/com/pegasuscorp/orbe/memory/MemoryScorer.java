@@ -25,27 +25,46 @@ public final class MemoryScorer {
         return compositeSemantic(entry, cosine, entityTerms, null);
     }
 
-    /**
-     * Re-rank sémantique : cosine MiniLM + entités + graphe + récence + importance.
-     */
     public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms,
             List<String> seedEntityIds) {
+        EntityGraphStore.EntityReach reach = null;
+        if (seedEntityIds != null && !seedEntityIds.isEmpty()) {
+            reach = new EntityGraphStore.EntityReach();
+            reach.hop0.addAll(seedEntityIds);
+        }
+        return compositeSemantic(entry, cosine, entityTerms, reach);
+    }
+
+    /**
+     * Re-rank sémantique : cosine MiniLM + entités + graphe (0–2 hops) + récence + importance.
+     */
+    public static double compositeSemantic(MemoryEntry entry, float cosine, List<String> entityTerms,
+            EntityGraphStore.EntityReach entityReach) {
         double entityBoost = entityRelevance(entry, entityTerms);
-        double graphBoost = graphEntityBoost(entry, seedEntityIds);
+        double graphBoost = graphEntityBoost(entry, entityReach);
         double recency = recencyBoost(entry.createdAt);
         double importance = Math.min(1.0, entry.importance) * 0.10;
         double c = Math.max(0f, Math.min(1f, cosine));
-        return c * 0.50 + entityBoost * 0.22 + graphBoost * 0.13 + recency * 0.10 + importance;
+        return c * 0.48 + entityBoost * 0.22 + graphBoost * 0.15 + recency * 0.10 + importance;
+    }
+
+    static double graphEntityBoost(MemoryEntry entry, EntityGraphStore.EntityReach reach) {
+        if (reach == null || entry.entityIds.isEmpty()) return 0;
+        int bestHop = Integer.MAX_VALUE;
+        for (String id : entry.entityIds) {
+            int hop = reach.hopDistance(id);
+            if (hop >= 0 && hop < bestHop) bestHop = hop;
+        }
+        if (bestHop == 0) return MemoryGraph.GRAPH_LINK_BOOST;
+        if (bestHop == 1 || bestHop == 2) return MemoryGraph.GRAPH_LINK_BOOST_HOP2;
+        return 0;
     }
 
     static double graphEntityBoost(MemoryEntry entry, List<String> seedEntityIds) {
-        if (seedEntityIds == null || seedEntityIds.isEmpty() || entry.entityIds.isEmpty()) {
-            return 0;
-        }
-        for (String id : entry.entityIds) {
-            if (seedEntityIds.contains(id)) return MemoryGraph.GRAPH_LINK_BOOST;
-        }
-        return 0;
+        if (seedEntityIds == null || seedEntityIds.isEmpty()) return 0;
+        EntityGraphStore.EntityReach reach = new EntityGraphStore.EntityReach();
+        reach.hop0.addAll(seedEntityIds);
+        return graphEntityBoost(entry, reach);
     }
 
     static double queryRelevance(MemoryEntry entry, String queryLower) {

@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.*;
 
@@ -55,7 +56,22 @@ public class MemoryScorerTest {
         linked.entityIds.add("project_fableris");
         double withGraph = MemoryScorer.compositeSemantic(
                 linked, 0.25f, null, Collections.singletonList("project_fableris"));
-        double without = MemoryScorer.compositeSemantic(linked, 0.25f, null, null);
+        double without = MemoryScorer.compositeSemantic(linked, 0.25f, null, (List<String>) null);
         assertTrue(withGraph > without);
+    }
+
+    @Test
+    public void graphEntityBoost_hop2_lowerThanDirect() {
+        MemoryEntry linked = new MemoryEntry("projects", "Note téléphone", 0.7, "2026-01-01");
+        linked.entityIds.add("device_nothing_phone");
+        EntityGraphStore.EntityReach reach = new EntityGraphStore.EntityReach();
+        reach.hop0.add("project_fableris");
+        reach.hop2.add("device_nothing_phone");
+        double hop2 = MemoryScorer.graphEntityBoost(linked, reach);
+        reach.hop2.clear();
+        reach.hop0.add("device_nothing_phone");
+        double direct = MemoryScorer.graphEntityBoost(linked, reach);
+        assertTrue(direct > hop2);
+        assertEquals(MemoryGraph.GRAPH_LINK_BOOST_HOP2, hop2, 0.001);
     }
 }

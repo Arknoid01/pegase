@@ -6,19 +6,22 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Expansion 1-hop du graphe mémoire (entités atlas + liens entre souvenirs).
+ * Expansion multi-hop du graphe mémoire (entités atlas + liens entre souvenirs).
  */
 public final class MemoryGraph {
 
     static final double GRAPH_LINK_BOOST = 0.18;
+    static final double GRAPH_LINK_BOOST_HOP2 = 0.10;
 
     private MemoryGraph() {}
 
     /**
-     * Ajoute des candidats liés aux entités de la requête ou aux souvenirs déjà classés.
+     * Ajoute des candidats liés aux entités (direct ou 2-hop) et aux souvenirs reliés.
+     *
+     * @param expandedEntityIds entités graines + voisinage atlas (jusqu'à 2 sauts)
      */
     public static List<MemoryEntry> expandCandidates(List<MemoryEntry> ranked,
-            List<MemoryEntry> allPermanent, List<String> seedEntityIds, int maxCandidates) {
+            List<MemoryEntry> allPermanent, Set<String> expandedEntityIds, int maxCandidates) {
         if (allPermanent == null || allPermanent.isEmpty()) return ranked;
         Set<String> seenKeys = new HashSet<>();
         List<MemoryEntry> out = new ArrayList<>();
@@ -31,7 +34,7 @@ public final class MemoryGraph {
         }
 
         Set<String> activeEntities = new HashSet<>();
-        if (seedEntityIds != null) activeEntities.addAll(seedEntityIds);
+        if (expandedEntityIds != null) activeEntities.addAll(expandedEntityIds);
         for (MemoryEntry e : out) {
             activeEntities.addAll(e.entityIds);
         }

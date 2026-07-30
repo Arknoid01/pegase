@@ -34,6 +34,7 @@ public final class MemoryLinker {
             entry.entityIds.add(id);
             if (++added >= MAX_ENTITY_LINKS) break;
         }
+        EntityGraphStore.getInstance(context).inferFromMemory(context, entry);
     }
 
     /** IDs d'entités injectées depuis une résolution de requête. */

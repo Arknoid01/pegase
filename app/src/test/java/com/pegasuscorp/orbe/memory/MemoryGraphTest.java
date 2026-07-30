@@ -4,7 +4,9 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.Assert.*;
 
@@ -26,8 +28,9 @@ public class MemoryGraphTest {
         List<MemoryEntry> all = Arrays.asList(fabDelivery, fabNote, unrelated);
         List<MemoryEntry> ranked = Collections.singletonList(fabDelivery);
 
+        Set<String> seeds = new HashSet<>(Collections.singletonList("project_fableris"));
         List<MemoryEntry> expanded = MemoryGraph.expandCandidates(
-                ranked, all, Collections.singletonList("project_fableris"), 3);
+                ranked, all, seeds, 3);
 
         assertEquals(2, expanded.size());
         assertTrue(expanded.contains(fabNote));
@@ -51,7 +54,7 @@ public class MemoryGraphTest {
         List<MemoryEntry> expanded = MemoryGraph.expandCandidates(
                 Collections.singletonList(a),
                 Arrays.asList(a, b),
-                Collections.emptyList(),
+                Collections.emptySet(),
                 2);
 
         assertTrue(expanded.contains(b));
