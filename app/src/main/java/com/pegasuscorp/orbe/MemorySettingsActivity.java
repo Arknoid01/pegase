@@ -25,9 +25,11 @@ import androidx.core.view.WindowInsetsCompat;
 import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.memory.MemoryEntry;
 import com.pegasuscorp.orbe.memory.MemoryGraphLabels;
+import com.pegasuscorp.orbe.memory.MemoryGraphScene;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.memory.SessionSummary;
 import com.pegasuscorp.orbe.memory.UserProfileStore;
+import com.pegasuscorp.orbe.ui.MemoryGraph3DView;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -147,12 +149,17 @@ public class MemorySettingsActivity extends AppCompatActivity {
                 startActivity(new Intent(this, ApiSettingsActivity.class)));
         addActionButton("+ Ajouter un souvenir", this::showAddMemoryDialog);
 
+        MemoryGraphScene.Scene graphScene = MemoryGraphScene.build(this);
+        if (!graphScene.isEmpty()) {
+            contentHost.addView(buildGraph3DCard(graphScene));
+        }
+
         List<String> atlasEdges = MemoryGraphLabels.atlasEdgesLines(this);
         if (!atlasEdges.isEmpty()) {
             LinearLayout graphCard = cardContainer();
             TextView graphTitle = new TextView(this);
-            graphTitle.setText("Graphe atlas — " + atlasEdges.size() + " lien"
-                    + (atlasEdges.size() > 1 ? "s" : "") + " entité↔entité");
+            graphTitle.setText("Liens atlas — " + atlasEdges.size() + " arête"
+                    + (atlasEdges.size() > 1 ? "s" : ""));
             graphTitle.setTextColor(Color.parseColor("#35D0DD"));
             graphTitle.setTextSize(13);
             graphTitle.setTypeface(null, Typeface.BOLD);
@@ -177,6 +184,33 @@ public class MemorySettingsActivity extends AppCompatActivity {
             MemoryEntry e = entries.get(i);
             contentHost.addView(memoryCard(e, index));
         }
+    }
+
+    private View buildGraph3DCard(MemoryGraphScene.Scene scene) {
+        LinearLayout card = cardContainer();
+        TextView graphTitle = new TextView(this);
+        graphTitle.setText("Constellation mémoire · " + scene.nodes.size() + " nœud"
+                + (scene.nodes.size() > 1 ? "s" : "") + " · " + scene.edges.size() + " lien"
+                + (scene.edges.size() > 1 ? "s" : ""));
+        graphTitle.setTextColor(Color.parseColor("#35D0DD"));
+        graphTitle.setTextSize(13);
+        graphTitle.setTypeface(null, Typeface.BOLD);
+        card.addView(graphTitle);
+
+        TextView hint3d = new TextView(this);
+        hint3d.setText("Glisse pour tourner · cyan = entités · ambre = souvenirs");
+        hint3d.setTextColor(Color.parseColor("#66FFFFFF"));
+        hint3d.setTextSize(10);
+        hint3d.setPadding(0, dp(2), 0, dp(6));
+        card.addView(hint3d);
+
+        MemoryGraph3DView graphView = new MemoryGraph3DView(this);
+        graphView.setScene(scene);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(240));
+        lp.bottomMargin = dp(4);
+        card.addView(graphView, lp);
+        return card;
     }
 
     private View memoryCard(MemoryEntry e, int index) {
