@@ -77,6 +77,10 @@ L'idée : une **orbe discrète toujours visible** par-dessus les autres apps, qu
 ## Pas encore fait (roadmap)
 
 - Merge et test des PRs #4–#8
-- Résumé LLM des notifs importantes
 - `open_url` minimal, browser complet
-- Surlignage d'éléments détectés via overlay
+- Externalisation strings copilote (`strings.xml`)
+- Confirmations outils dans la bulle copilote
+
+## Polish (PR dédiée)
+
+Voir `docs/copilot-polish-checklist.md` — bugs bulle/streaming, permissions, tokens UI, debounce surlignage.

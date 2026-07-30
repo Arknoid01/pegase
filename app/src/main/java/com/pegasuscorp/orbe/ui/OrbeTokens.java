@@ -29,6 +29,19 @@ public final class OrbeTokens {
     public static final int COLOR_MUTED = Color.parseColor(MUTED);
     public static final int COLOR_SEP = Color.parseColor(SEP);
 
+    /** Bulle copilote / overlay. */
+    public static final String USER_BUBBLE = "#1E3A40";
+    public static final String CHIP_BG = "#152428";
+    public static final String CHIP_STROKE = "#2A4048";
+    public static final String INPUT_BG = "#121820";
+    public static final String MUTED_TEXT = "#88FFFFFF";
+
+    public static final int COLOR_USER_BUBBLE = Color.parseColor(USER_BUBBLE);
+    public static final int COLOR_CHIP_BG = Color.parseColor(CHIP_BG);
+    public static final int COLOR_CHIP_STROKE = Color.parseColor(CHIP_STROKE);
+    public static final int COLOR_INPUT_BG = Color.parseColor(INPUT_BG);
+    public static final int COLOR_MUTED_TEXT = Color.parseColor(MUTED_TEXT);
+
     public static final int PAD_SM = 8;
     public static final int PAD_MD = 12;
     public static final int PAD_LG = 16;

@@ -8,13 +8,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Color;
-import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -114,8 +112,7 @@ public class ElementHighlightService extends Service {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) return;
 
-        root = new FrameLayout(this);
-        root.setBackgroundColor(Color.TRANSPARENT);
+        root = BoundsOverlayHelper.createRoot(this);
 
         for (HighlightRect rect : rects) {
             if (rect == null) continue;
@@ -123,29 +120,12 @@ public class ElementHighlightService extends Service {
             int h = rect.bottom - rect.top;
             if (w < 8 || h < 8) continue;
             View box = buildHighlight(rect);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                    Math.max(dp(24), w), Math.max(dp(24), h));
-            lp.leftMargin = Math.max(0, rect.left);
-            lp.topMargin = Math.max(0, rect.top);
-            lp.gravity = Gravity.TOP | Gravity.START;
-            root.addView(box, lp);
+            root.addView(box, BoundsOverlayHelper.childAt(
+                    rect.left, rect.top, Math.max(dp(24), w), Math.max(dp(24), h)));
         }
 
-        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                : WindowManager.LayoutParams.TYPE_PHONE;
-
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT);
-
         try {
-            wm.addView(root, params);
+            BoundsOverlayHelper.addView(wm, root);
         } catch (Exception e) {
             root = null;
             stopSelf();
@@ -174,10 +154,8 @@ public class ElementHighlightService extends Service {
     }
 
     private void removeOverlay() {
-        if (wm != null && root != null) {
-            try { wm.removeView(root); } catch (Exception ignored) {}
-            root = null;
-        }
+        BoundsOverlayHelper.removeView(wm, root);
+        root = null;
     }
 
     private int dp(int v) {

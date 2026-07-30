@@ -440,6 +440,7 @@ public class FloatingOrbService extends Service {
 
     public static void showCopilot(Context ctx) {
         if (!CopilotPrefs.isAlwaysOn(ctx)) return;
+        if (!android.provider.Settings.canDrawOverlays(ctx)) return;
         show(ctx, OverlayMode.COPILOT);
     }
 
@@ -522,6 +523,8 @@ public class FloatingOrbService extends Service {
         private int startParamX, startParamY;
         private boolean dragged;
         private long downTime;
+        private int maxX = Integer.MAX_VALUE;
+        private int maxY = Integer.MAX_VALUE;
 
         DragAndTapListener(WindowManager wm, WindowManager.LayoutParams p, View root,
                            Runnable onTap, Runnable onLongPress) {
@@ -530,6 +533,17 @@ public class FloatingOrbService extends Service {
             this.root = root;
             this.onTap = onTap;
             this.onLongPress = onLongPress;
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            root.post(() -> {
+                maxX = Math.max(0, dm.widthPixels - root.getWidth());
+                maxY = Math.max(0, dm.heightPixels - root.getHeight());
+            });
+        }
+
+        private void clampPosition() {
+            params.x = Math.max(0, Math.min(params.x, maxX));
+            params.y = Math.max(0, Math.min(params.y, maxY));
         }
 
         @Override
@@ -549,11 +563,14 @@ public class FloatingOrbService extends Service {
                     if (dragged) {
                         params.x = startParamX + (int) dx;
                         params.y = startParamY + (int) dy;
+                        clampPosition();
                         wm.updateViewLayout(root, params);
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
                     Context ctx = v.getContext();
+                    clampPosition();
+                    wm.updateViewLayout(root, params);
                     CopilotPrefs.setOrbPosition(ctx, params.x, params.y);
                     long elapsed = System.currentTimeMillis() - downTime;
                     if (!dragged) {

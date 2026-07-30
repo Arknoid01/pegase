@@ -23,8 +23,16 @@ public final class ScreenCapturePermissionActivity extends Activity {
     private static final CopyOnWriteArrayList<PermissionListener> PENDING =
             new CopyOnWriteArrayList<>();
 
+    private static volatile boolean requesting;
+
     public static void request(Context ctx, PermissionListener listener) {
+        if (ScreenCaptureHelper.hasPermission()) {
+            if (listener != null) listener.onResult(true);
+            return;
+        }
         if (listener != null) PENDING.add(listener);
+        if (requesting) return;
+        requesting = true;
         Intent i = new Intent(ctx, ScreenCapturePermissionActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         ctx.startActivity(i);
@@ -58,6 +66,7 @@ public final class ScreenCapturePermissionActivity extends Activity {
     }
 
     private void finishWith(boolean granted) {
+        requesting = false;
         for (PermissionListener l : PENDING) {
             try {
                 l.onResult(granted);

@@ -2,12 +2,10 @@ package com.pegasuscorp.orbe.copilot;
 
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.view.View;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.CompoundButton;
 import android.widget.LinearLayout;
@@ -22,7 +20,9 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.pegasuscorp.orbe.iface.IfaceUi;
 import com.pegasuscorp.orbe.notifications.NotificationAccess;
+import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -53,7 +53,6 @@ public class CopilotSettingsActivity extends AppCompatActivity {
       new AppPreset("Slack", "com.Slack"),
   };
 
-  private float density;
   private LinearLayout contentHost;
   private ActivityResultLauncher<Intent> screenPickerLauncher;
   private ActivityResultLauncher<Intent> notifPickerLauncher;
@@ -61,7 +60,6 @@ public class CopilotSettingsActivity extends AppCompatActivity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-    density = getResources().getDisplayMetrics().density;
 
     screenPickerLauncher = registerForActivityResult(
         new ActivityResultContracts.StartActivityForResult(), r -> rebuild());
@@ -70,19 +68,19 @@ public class CopilotSettingsActivity extends AppCompatActivity {
 
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
-    root.setBackgroundColor(Color.parseColor("#F00B0E14"));
+    root.setBackgroundColor(OrbeTokens.COLOR_BG);
     root.setPadding(dp(14), dp(14), dp(14), dp(14));
 
     TextView title = new TextView(this);
     title.setText("🛸 Mode copilote");
-    title.setTextColor(Color.WHITE);
+    title.setTextColor(OrbeTokens.COLOR_TEXT);
     title.setTextSize(20);
-    title.setTypeface(null, Typeface.BOLD);
+    title.setTypeface(OrbeTokens.typeMedium());
     root.addView(title);
 
     TextView subtitle = new TextView(this);
     subtitle.setText("Listes blanches strictes — rien ne s'active sans ton accord");
-    subtitle.setTextColor(Color.parseColor("#88FFFFFF"));
+    subtitle.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
     subtitle.setTextSize(12);
     subtitle.setPadding(0, dp(4), 0, dp(12));
     root.addView(subtitle);
@@ -90,7 +88,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     contentHost = new LinearLayout(this);
     contentHost.setOrientation(LinearLayout.VERTICAL);
     ScrollView scroll = new ScrollView(this);
-    scroll.addView(contentHost, matchWrap());
+    scroll.addView(contentHost, IfaceUi.matchWrap());
     root.addView(scroll, new LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -121,7 +119,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
       CopilotPrefs.setScreenAnalysisEnabled(this, on);
       if (on) CopilotClient.get().sync(this);
     });
-    addSwitch("Overlay traduction", CopilotPrefs.isTranslationOverlayEnabled(this), (on) -> {
+    addSwitch("Traduction à l'écran", CopilotPrefs.isTranslationOverlayEnabled(this), (on) -> {
       CopilotPrefs.setTranslationOverlayEnabled(this, on);
       if (!on) TranslationOverlayService.hide(this);
     });
@@ -134,13 +132,19 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     });
 
     addSectionTitle("Permissions");
-    addActionButton("Afficher par-dessus les apps", () -> {
-      Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-          android.net.Uri.parse("package:" + getPackageName()));
-      startActivity(i);
-    });
-    addActionButton("Service d'accessibilité Pégase", () -> AccessibilityAccess.openSettings(this));
-    addActionButton("Accès aux notifications", () -> NotificationAccess.openSettings(this));
+    addPermissionRow("Afficher par-dessus les apps",
+            Settings.canDrawOverlays(this),
+            () -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:" + getPackageName()))));
+    addPermissionRow("Service d'accessibilité Pégase",
+            AccessibilityAccess.isEnabled(this),
+            () -> AccessibilityAccess.openSettings(this));
+    addPermissionRow("Accès aux notifications",
+            NotificationAccess.isEnabled(this),
+            () -> NotificationAccess.openSettings(this));
+    addPermissionRow("Capture d'écran (vision / OCR)",
+            ScreenCaptureHelper.hasPermission(),
+            () -> ScreenCapturePermissionActivity.request(this, granted -> rebuild()));
 
     addSectionTitle("Apps — analyse d'écran");
     addHint("Seules ces apps déclenchent lecture a11y / traduction / OCR.");
@@ -192,17 +196,32 @@ public class CopilotSettingsActivity extends AppCompatActivity {
   }
 
   private void addCustomAppRow(String packageName, boolean screenList) {
-    String label = resolveLabel(packageName);
-    addSwitch(label + " ✕", true, (checked) -> {
-      if (!checked) {
-        if (screenList) {
-          CopilotPrefs.removeFromWhitelist(this, packageName);
-        } else {
-          CopilotPrefs.removeFromNotificationWhitelist(this, packageName);
-        }
-        rebuild();
-      }
+    LinearLayout row = new LinearLayout(this);
+    row.setOrientation(LinearLayout.HORIZONTAL);
+    row.setGravity(Gravity.CENTER_VERTICAL);
+    row.setPadding(dp(10), dp(8), dp(10), dp(8));
+    row.setBackground(cardBg());
+    LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
+    lp.bottomMargin = dp(6);
+    contentHost.addView(row, lp);
+
+    TextView label = new TextView(this);
+    label.setText(resolveLabel(packageName));
+    label.setTextColor(OrbeTokens.COLOR_TEXT);
+    label.setTextSize(14);
+    row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+    TextView remove = new TextView(this);
+    remove.setText("Retirer");
+    remove.setTextColor(OrbeTokens.COLOR_CYAN);
+    remove.setTextSize(13);
+    remove.setPadding(dp(8), dp(4), dp(4), dp(4));
+    remove.setOnClickListener(v -> {
+      if (screenList) CopilotPrefs.removeFromWhitelist(this, packageName);
+      else CopilotPrefs.removeFromNotificationWhitelist(this, packageName);
+      rebuild();
     });
+    row.addView(remove);
   }
 
   private String resolveLabel(String packageName) {
@@ -217,35 +236,35 @@ public class CopilotSettingsActivity extends AppCompatActivity {
   private void addSectionTitle(String text) {
     TextView tv = new TextView(this);
     tv.setText(text);
-    tv.setTextColor(Color.parseColor("#35D0DD"));
+    tv.setTextColor(OrbeTokens.COLOR_CYAN);
     tv.setTextSize(14);
-    tv.setTypeface(null, Typeface.BOLD);
+    tv.setTypeface(OrbeTokens.typeMedium());
     tv.setPadding(0, dp(14), 0, dp(6));
-    contentHost.addView(tv, matchWrap());
+    contentHost.addView(tv, IfaceUi.matchWrap());
   }
 
   private void addHint(String text) {
     TextView tv = new TextView(this);
     tv.setText(text);
-    tv.setTextColor(Color.parseColor("#88FFFFFF"));
+    tv.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
     tv.setTextSize(11);
     tv.setPadding(0, 0, 0, dp(8));
-    contentHost.addView(tv, matchWrap());
+    contentHost.addView(tv, IfaceUi.matchWrap());
   }
 
   private void addSwitch(String label, boolean checked, SwitchListener listener) {
     LinearLayout row = new LinearLayout(this);
     row.setOrientation(LinearLayout.HORIZONTAL);
-    row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    row.setGravity(Gravity.CENTER_VERTICAL);
     row.setPadding(dp(10), dp(8), dp(10), dp(8));
     row.setBackground(cardBg());
-    LinearLayout.LayoutParams lp = matchWrap();
+    LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
     lp.bottomMargin = dp(6);
     contentHost.addView(row, lp);
 
     TextView tv = new TextView(this);
     tv.setText(label);
-    tv.setTextColor(Color.WHITE);
+    tv.setTextColor(OrbeTokens.COLOR_TEXT);
     tv.setTextSize(14);
     row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -255,23 +274,37 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     row.addView(sw);
   }
 
-  private void addActionButton(String label, Runnable action) {
+  private void addPermissionRow(String label, boolean granted, Runnable action) {
+    String status = granted ? " ✓" : " — à accorder";
     TextView btn = new TextView(this);
-    btn.setText(label);
-    btn.setTextColor(Color.parseColor("#35D0DD"));
+    btn.setText(label + status);
+    btn.setTextColor(granted ? OrbeTokens.COLOR_CYAN : OrbeTokens.COLOR_MUTED);
     btn.setTextSize(14);
     btn.setPadding(dp(12), dp(10), dp(12), dp(10));
     btn.setBackground(cardBg());
     btn.setOnClickListener(v -> action.run());
-    LinearLayout.LayoutParams lp = matchWrap();
+    LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
+    lp.bottomMargin = dp(6);
+    contentHost.addView(btn, lp);
+  }
+
+  private void addActionButton(String label, Runnable action) {
+    TextView btn = new TextView(this);
+    btn.setText(label);
+    btn.setTextColor(OrbeTokens.COLOR_CYAN);
+    btn.setTextSize(14);
+    btn.setPadding(dp(12), dp(10), dp(12), dp(10));
+    btn.setBackground(cardBg());
+    btn.setOnClickListener(v -> action.run());
+    LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
     lp.bottomMargin = dp(6);
     contentHost.addView(btn, lp);
   }
 
   private GradientDrawable cardBg() {
     GradientDrawable d = new GradientDrawable();
-    d.setColor(Color.parseColor("#1A1A1A"));
-    d.setCornerRadius(dp(10));
+    d.setColor(OrbeTokens.COLOR_CARD);
+    d.setCornerRadius(dp(OrbeTokens.RADIUS_MD));
     return d;
   }
 
@@ -279,12 +312,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     void onChanged(boolean on);
   }
 
-  private LinearLayout.LayoutParams matchWrap() {
-    return new LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-  }
-
   private int dp(int v) {
-    return Math.round(v * density);
+    return IfaceUi.dp(this, v);
   }
 }

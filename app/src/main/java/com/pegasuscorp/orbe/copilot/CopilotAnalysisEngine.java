@@ -22,6 +22,9 @@ public final class CopilotAnalysisEngine {
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final int MAX_HIGHLIGHTS = 12;
+    private static final long HIGHLIGHT_DEBOUNCE_MS = 4_000L;
+
+    private static volatile long lastHighlightMs;
 
     private final Context appContext;
     private volatile boolean screenOn = true;
@@ -63,8 +66,11 @@ public final class CopilotAnalysisEngine {
 
     private static void maybeShowElementHighlights(Context ctx, List<A11ySnapshot.Node> nodes) {
         if (!CopilotPrefs.isElementHighlightEnabled(ctx)) return;
+        long now = System.currentTimeMillis();
+        if (now - lastHighlightMs < HIGHLIGHT_DEBOUNCE_MS) return;
         List<ElementHighlightService.HighlightRect> rects = buildHighlightRects(nodes);
         if (rects.isEmpty()) return;
+        lastHighlightMs = now;
         MAIN.post(() -> ElementHighlightService.show(ctx, rects));
     }
 
@@ -90,36 +96,5 @@ public final class CopilotAnalysisEngine {
             sb.append(n.text);
         }
         return sb.toString().trim();
-    }
-
-    /** @deprecated use {@link CopilotLocaleFilter#needsTranslation(String)} */
-    @SuppressWarnings("unused")
-    static String shouldSendToCloudLegacy(Context ctx, String text) {
-        return shouldSendToCloud(ctx, text);
-    }
-
-    /**
-     * Filtre local — retourne une raison si le texte devrait partir au cloud,
-     * null si on reste 100% local.
-     */
-    static String shouldSendToCloud(Context ctx, String text) {
-        if (text == null || text.trim().length() < 12) return null;
-        // Heuristique : langue étrangère détectée (hors français système)
-        int latin = 0;
-        int accented = 0;
-        int cjk = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c >= 0x4E00 && c <= 0x9FFF) cjk++;
-            if ("àâäéèêëïîôùûüç".indexOf(Character.toLowerCase(c)) >= 0) accented++;
-            if (Character.isLetter(c)) latin++;
-        }
-        if (latin > 20 && accented == 0 && cjk > 4) {
-            return "langue_etrangere";
-        }
-        if (cjk > 8 && accented < 2) {
-            return "langue_etrangere";
-        }
-        return null;
     }
 }

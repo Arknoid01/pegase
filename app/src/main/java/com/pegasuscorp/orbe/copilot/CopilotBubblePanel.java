@@ -1,11 +1,11 @@
 package com.pegasuscorp.orbe.copilot;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -18,6 +18,8 @@ import com.pegasuscorp.orbe.ui.OrbeTokens;
  * Bulle messenger attachée à l'orbe copilote — messages + saisie + actions rapides.
  */
 public final class CopilotBubblePanel extends FrameLayout {
+
+    private static final String TAG_WELCOME = "welcome";
 
     public interface Listener {
         void onSend(String text);
@@ -120,6 +122,14 @@ public final class CopilotBubblePanel extends FrameLayout {
         input.setBackground(inputBg());
         input.setPadding(dp(10), dp(8), dp(10), dp(8));
         input.setMaxLines(3);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        input.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                submitInput();
+                return true;
+            }
+            return false;
+        });
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         inputRow.addView(input, inputLp);
 
@@ -142,22 +152,28 @@ public final class CopilotBubblePanel extends FrameLayout {
     }
 
     public void addUserMessage(String text) {
+        dismissWelcome();
         addBubble(text, true);
     }
 
     public void addAssistantMessage(String text) {
         setStatus(null);
+        dismissWelcome();
         addBubble(text, false);
     }
 
     public void updateAssistantPartial(String text) {
         if (TextUtils.isEmpty(text)) return;
         setStatus("…");
-        // Remplace ou ajoute la dernière bulle assistant
         int count = messagesHost.getChildCount();
         if (count > 0) {
             View last = messagesHost.getChildAt(count - 1);
             Object tag = last.getTag();
+            if (TAG_WELCOME.equals(tag)) {
+                addBubble(text, false);
+                scrollToBottom();
+                return;
+            }
             if (Boolean.FALSE.equals(tag) && last instanceof TextView) {
                 ((TextView) last).setText(text);
                 scrollToBottom();
@@ -193,32 +209,50 @@ public final class CopilotBubblePanel extends FrameLayout {
     }
 
     private void addWelcome() {
-        addBubble("Je suis là — pose-moi une question ou capture l'écran.", false);
+        TextView bubble = createBubbleView(
+                "Je suis là — pose-moi une question ou capture l'écran.", false);
+        bubble.setTag(TAG_WELCOME);
+        LinearLayout.LayoutParams lp = bubbleLp(false);
+        messagesHost.addView(bubble, lp);
+    }
+
+    private void dismissWelcome() {
+        for (int i = 0; i < messagesHost.getChildCount(); i++) {
+            View child = messagesHost.getChildAt(i);
+            if (TAG_WELCOME.equals(child.getTag())) {
+                messagesHost.removeViewAt(i);
+                return;
+            }
+        }
     }
 
     private void addBubble(String text, boolean user) {
         if (TextUtils.isEmpty(text)) return;
-        Context ctx = getContext();
-        TextView bubble = new TextView(ctx);
+        TextView bubble = createBubbleView(text, user);
+        bubble.setTag(user);
+        messagesHost.addView(bubble, bubbleLp(user));
+        scrollToBottom();
+    }
+
+    private TextView createBubbleView(String text, boolean user) {
+        TextView bubble = new TextView(getContext());
         bubble.setText(text);
         bubble.setTextSize(13);
         bubble.setTextColor(OrbeTokens.COLOR_TEXT);
-        bubble.setTag(user);
         bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
         bubble.setBackground(bubbleBg(user));
+        return bubble;
+    }
 
+    private LinearLayout.LayoutParams bubbleLp(boolean user) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
         lp.gravity = user ? Gravity.END : Gravity.START;
         lp.topMargin = dp(4);
         lp.bottomMargin = dp(4);
-        if (user) {
-            lp.leftMargin = dp(24);
-        } else {
-            lp.rightMargin = dp(24);
-        }
-        messagesHost.addView(bubble, lp);
-        scrollToBottom();
+        if (user) lp.leftMargin = dp(24);
+        else lp.rightMargin = dp(24);
+        return lp;
     }
 
     private void scrollToBottom() {
@@ -233,10 +267,10 @@ public final class CopilotBubblePanel extends FrameLayout {
         return new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
     }
 
-    private static LinearLayout.LayoutParams actionLp() {
+    private LinearLayout.LayoutParams actionLp() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
-        lp.rightMargin = 4;
+        lp.rightMargin = dp(4);
         return lp;
     }
 
@@ -260,22 +294,22 @@ public final class CopilotBubblePanel extends FrameLayout {
 
     private GradientDrawable bubbleBg(boolean user) {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(user ? Color.parseColor("#1E3A40") : OrbeTokens.COLOR_CARD_ACTIVE);
+        d.setColor(user ? OrbeTokens.COLOR_USER_BUBBLE : OrbeTokens.COLOR_CARD_ACTIVE);
         d.setCornerRadius(dp(12));
         return d;
     }
 
     private GradientDrawable chipBg() {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(Color.parseColor("#152428"));
+        d.setColor(OrbeTokens.COLOR_CHIP_BG);
         d.setCornerRadius(dp(8));
-        d.setStroke(dp(1), Color.parseColor("#2A4048"));
+        d.setStroke(dp(1), OrbeTokens.COLOR_CHIP_STROKE);
         return d;
     }
 
     private GradientDrawable inputBg() {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(Color.parseColor("#121820"));
+        d.setColor(OrbeTokens.COLOR_INPUT_BG);
         d.setCornerRadius(dp(10));
         d.setStroke(dp(1), OrbeTokens.COLOR_SEP);
         return d;

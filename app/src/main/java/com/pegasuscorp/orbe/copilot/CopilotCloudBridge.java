@@ -46,6 +46,8 @@ public final class CopilotCloudBridge {
             public void onError(String message) {
                 translating.set(false);
                 Log.w(TAG, "Traduction échouée: " + message);
+                CopilotStatusBridge.postError(app,
+                        "Traduction indisponible — vérifie la connexion ou la clé API.");
             }
         });
     }

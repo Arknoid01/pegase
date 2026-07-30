@@ -43,6 +43,7 @@ public final class CopilotController implements SessionObserver {
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
     private BroadcastReceiver notifReceiver;
+    private BroadcastReceiver statusReceiver;
 
     private CopilotController(Context ctx) {
         appContext = ctx.getApplicationContext();
@@ -65,6 +66,27 @@ public final class CopilotController implements SessionObserver {
         session.addObserver(this);
         session.init(new SessionContext(Channel.COPILOT, false));
         registerNotifReceiver();
+        registerStatusReceiver();
+    }
+
+    private void registerStatusReceiver() {
+        if (statusReceiver != null) return;
+        statusReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null) return;
+                String error = intent.getStringExtra("error");
+                if (bubbleSink != null && !TextUtils.isEmpty(error)) {
+                    bubbleSink.onError(error);
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(CopilotStatusBridge.ACTION_STATUS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            appContext.registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            appContext.registerReceiver(statusReceiver, filter);
+        }
     }
 
     private void registerNotifReceiver() {
@@ -92,6 +114,12 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void detach() {
+        if (statusReceiver != null) {
+            try {
+                appContext.unregisterReceiver(statusReceiver);
+            } catch (Exception ignored) {}
+            statusReceiver = null;
+        }
         if (notifReceiver != null) {
             try {
                 appContext.unregisterReceiver(notifReceiver);

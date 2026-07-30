@@ -98,13 +98,7 @@ public class CopilotService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && PegaseAccessibilityService.ACTION_CONTENT_CHANGED
-                .equals(intent.getAction())) {
-            String pkg = intent.getStringExtra("package");
-            if (pkg != null && analysisActive && screenOn) {
-                engine.onContentChanged(pkg);
-            }
-        }
+        // L'analyse est déclenchée par contentReceiver — évite le double appel.
         return START_STICKY;
     }
 

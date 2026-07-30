@@ -8,14 +8,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Color;
-import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.view.Gravity;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -120,36 +118,20 @@ public class TranslationOverlayService extends Service {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (wm == null) return;
 
-        root = new FrameLayout(this);
-        root.setBackgroundColor(Color.TRANSPARENT);
+        root = BoundsOverlayHelper.createRoot(this);
 
         for (TranslatedBlock block : blocks) {
             if (block == null || block.translated == null || block.translated.isEmpty()) continue;
             TextView label = buildLabel(block);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            root.addView(label, BoundsOverlayHelper.childAt(
+                    block.left,
+                    block.top - dp(4),
                     Math.max(dp(48), block.right - block.left + dp(8)),
-                    FrameLayout.LayoutParams.WRAP_CONTENT);
-            lp.leftMargin = Math.max(0, block.left);
-            lp.topMargin = Math.max(0, block.top - dp(4));
-            lp.gravity = Gravity.TOP | Gravity.START;
-            root.addView(label, lp);
+                    FrameLayout.LayoutParams.WRAP_CONTENT));
         }
 
-        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                : WindowManager.LayoutParams.TYPE_PHONE;
-
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT);
-
         try {
-            wm.addView(root, params);
+            BoundsOverlayHelper.addView(wm, root);
         } catch (Exception e) {
             root = null;
             stopSelf();
@@ -182,10 +164,8 @@ public class TranslationOverlayService extends Service {
     }
 
     private void removeOverlay() {
-        if (wm != null && root != null) {
-            try { wm.removeView(root); } catch (Exception ignored) {}
-            root = null;
-        }
+        BoundsOverlayHelper.removeView(wm, root);
+        root = null;
     }
 
     private int dp(int v) {
@@ -195,7 +175,7 @@ public class TranslationOverlayService extends Service {
     private void startAsForeground() {
         Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Traduction copilote")
-                .setContentText("Overlay actif")
+                .setContentText("Traductions affichées")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)

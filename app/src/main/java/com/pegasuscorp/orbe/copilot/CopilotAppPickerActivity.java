@@ -1,7 +1,6 @@
 package com.pegasuscorp.orbe.copilot;
 
 import android.content.Intent;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,6 +13,8 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.pegasuscorp.orbe.AppListCache;
+import com.pegasuscorp.orbe.iface.IfaceUi;
+import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
     private final List<AppListCache.AppEntry> apps = new ArrayList<>();
     private AppAdapter adapter;
     private String target;
+    private TextView emptyView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,24 +39,39 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
         target = getIntent().getStringExtra(EXTRA_TARGET);
         if (target == null) target = TARGET_SCREEN;
 
-        ListView list = new ListView(this);
-        list.setBackgroundColor(Color.parseColor("#0B0E14"));
-        list.setDividerHeight(1);
-        list.setPadding(0, 24, 0, 24);
-        setContentView(list);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(OrbeTokens.COLOR_BG);
 
         TextView header = new TextView(this);
         header.setText(TARGET_NOTIF.equals(target)
                 ? "Choisir une app — notifications"
                 : "Choisir une app — analyse d'écran");
-        header.setTextColor(Color.parseColor("#35D0DD"));
+        header.setTextColor(OrbeTokens.COLOR_CYAN);
         header.setTextSize(14);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        header.setPadding(pad, pad, pad, pad);
-        list.addHeaderView(header);
+        header.setPadding(IfaceUi.dp(this, 16), IfaceUi.dp(this, 20),
+                IfaceUi.dp(this, 16), IfaceUi.dp(this, 8));
+        root.addView(header, IfaceUi.matchWrap());
+
+        emptyView = new TextView(this);
+        emptyView.setText("Chargement des apps…");
+        emptyView.setTextColor(OrbeTokens.COLOR_MUTED);
+        emptyView.setPadding(IfaceUi.dp(this, 16), IfaceUi.dp(this, 8),
+                IfaceUi.dp(this, 16), IfaceUi.dp(this, 8));
+        root.addView(emptyView, IfaceUi.matchWrap());
+
+        ListView list = new ListView(this);
+        list.setBackgroundColor(OrbeTokens.COLOR_BG);
+        list.setDividerHeight(1);
+        root.addView(list, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        setContentView(root);
 
         List<AppListCache.AppEntry> cached = AppListCache.getCached();
-        if (cached != null) apps.addAll(cached);
+        if (cached != null) {
+            apps.addAll(cached);
+            updateEmptyState();
+        }
 
         adapter = new AppAdapter();
         list.setAdapter(adapter);
@@ -64,15 +81,24 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
             AppListCache.loadAsync(this, loaded -> runOnUiThread(() -> {
                 apps.clear();
                 apps.addAll(loaded);
+                updateEmptyState();
                 adapter.notifyDataSetChanged();
             }));
         }
     }
 
+    private void updateEmptyState() {
+        if (apps.isEmpty()) {
+            emptyView.setText("Aucune app trouvée");
+            emptyView.setVisibility(View.VISIBLE);
+        } else {
+            emptyView.setVisibility(View.GONE);
+        }
+    }
+
     private void onAppSelected(AdapterView<?> parent, View view, int position, long id) {
-        int index = position - 1;
-        if (index < 0 || index >= apps.size()) return;
-        String pkg = apps.get(index).pkg;
+        if (position < 0 || position >= apps.size()) return;
+        String pkg = apps.get(position).pkg;
         if (TARGET_NOTIF.equals(target)) {
             CopilotPrefs.addToNotificationWhitelist(this, pkg);
             CopilotPrefs.setNotificationCopilotEnabled(this, true);
@@ -97,15 +123,14 @@ public class CopilotAppPickerActivity extends AppCompatActivity {
                 tv = (TextView) convertView;
             } else {
                 tv = new TextView(parent.getContext());
-                tv.setTextColor(Color.WHITE);
+                tv.setTextColor(OrbeTokens.COLOR_TEXT);
                 tv.setTextSize(16);
-                int pad = (int) (16 * parent.getResources().getDisplayMetrics().density);
+                int pad = IfaceUi.dp(parent.getContext(), 16);
                 tv.setPadding(pad, pad, pad, pad);
                 tv.setLayoutParams(new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             }
-            AppListCache.AppEntry entry = apps.get(position);
-            tv.setText(entry.label);
+            tv.setText(apps.get(position).label);
             return tv;
         }
     }
