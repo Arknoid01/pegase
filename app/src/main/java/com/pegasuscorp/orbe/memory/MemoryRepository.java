@@ -215,6 +215,7 @@ public class MemoryRepository implements MemoryStore {
             sessionSummaries.remove(0);
         }
         saveSessions();
+        MemoryConsolidator.promoteSessionFacts(appContext, summary);
     }
 
     public List<MemoryEntry> getRelevantMemories(String query, int max) {
@@ -228,7 +229,7 @@ public class MemoryRepository implements MemoryStore {
         List<ScoredMemory> scored = new ArrayList<>();
         for (MemoryEntry entry : permanentMemories) {
             if (!isInjectable(entry)) continue;
-            double s = score(entry, q, entityTerms);
+            double s = MemoryScorer.keywordScore(entry, q, entityTerms);
             if (s >= minScore) scored.add(new ScoredMemory(entry, s));
         }
         scored.sort((a, b) -> Double.compare(b.score, a.score));
@@ -256,16 +257,20 @@ public class MemoryRepository implements MemoryStore {
             float[] qv = EmbeddingEngine.get(appContext).embed(query == null ? "" : query);
             List<VectorStore.Hit> hits = vectors().search(qv, Math.max(limit * 3, 8), minScore);
             Map<String, MemoryEntry> byKey = indexByKey();
-            List<MemoryEntry> out = new ArrayList<>();
+            List<ScoredMemory> scored = new ArrayList<>();
             for (VectorStore.Hit hit : hits) {
                 MemoryEntry entry = byKey.get(hit.memoryKey);
                 if (entry != null && isInjectable(entry)) {
-                    out.add(entry);
-                    if (out.size() >= limit) break;
+                    double composite = MemoryScorer.compositeSemantic(entry, hit.score, entityTerms);
+                    scored.add(new ScoredMemory(entry, composite));
                 }
             }
-            if (!out.isEmpty()) {
-                maybeBoostEntities(out, entityTerms, limit);
+            if (!scored.isEmpty()) {
+                scored.sort((a, b) -> Double.compare(b.score, a.score));
+                List<MemoryEntry> out = new ArrayList<>();
+                for (int i = 0; i < scored.size() && out.size() < limit; i++) {
+                    out.add(scored.get(i).entry);
+                }
                 return out;
             }
         } catch (Exception e) {
@@ -456,64 +461,6 @@ public class MemoryRepository implements MemoryStore {
         });
     }
 
-    /**
-     * Si des termes d'entité matchent un souvenir hors top-K, on le remonte (hybride léger).
-     */
-    private void maybeBoostEntities(List<MemoryEntry> out, List<String> entityTerms, int limit) {
-        if (entityTerms == null || entityTerms.isEmpty() || out.size() >= limit) return;
-        for (MemoryEntry entry : permanentMemories) {
-            if (!isInjectable(entry) || out.contains(entry)) continue;
-            if (entityRelevance(entry, entityTerms) >= 0.75) {
-                out.add(0, entry);
-                while (out.size() > limit) out.remove(out.size() - 1);
-                break;
-            }
-        }
-    }
-
-    private double score(MemoryEntry entry, String query, List<String> entityTerms) {
-        double relevance = queryRelevance(entry, query);
-        double entityBoost = entityRelevance(entry, entityTerms);
-        double recency = recencyBoost(entry.createdAt);
-        double importance = entry.importance * 0.15;
-        return relevance * 0.4 + entityBoost * 0.4 + recency * 0.05 + importance;
-    }
-
-    private static double queryRelevance(MemoryEntry entry, String query) {
-        if (query.isEmpty() || entry.content == null) return 0.1;
-        String c = entry.content.toLowerCase(Locale.ROOT);
-        double score = 0.1;
-        for (String word : query.split("\\s+")) {
-            if (word.length() > 3 && c.contains(word)) score += 0.22;
-        }
-        return Math.min(1.0, score);
-    }
-
-    private static double entityRelevance(MemoryEntry entry, List<String> entityTerms) {
-        if (entityTerms == null || entityTerms.isEmpty() || entry.content == null) return 0;
-        String c = entry.content.toLowerCase(Locale.ROOT);
-        String cat = entry.category != null ? entry.category.toLowerCase(Locale.ROOT) : "";
-        double best = 0;
-        for (String term : entityTerms) {
-            if (term == null || term.isEmpty()) continue;
-            String t = term.toLowerCase(Locale.ROOT);
-            if (c.contains(t)) best = Math.max(best, 0.95);
-            else if (cat.contains(t)) best = Math.max(best, 0.75);
-        }
-        return best;
-    }
-
-    private static double recencyBoost(String createdAt) {
-        if (createdAt == null || createdAt.isEmpty()) return 0;
-        try {
-            long created = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).parse(createdAt).getTime();
-            long days = (System.currentTimeMillis() - created) / (24L * 60 * 60 * 1000);
-            if (days <= 7) return 0.2;
-            if (days <= 30) return 0.1;
-        } catch (Exception ignored) {}
-        return 0;
-    }
-
     private static final class ScoredMemory {
         final MemoryEntry entry;
         final double score;
@@ -522,10 +469,6 @@ public class MemoryRepository implements MemoryStore {
             this.entry = entry;
             this.score = score;
         }
-    }
-
-    private double score(MemoryEntry entry, String query) {
-        return score(entry, query, null);
     }
 
     private void seedDefaultsIfEmpty() {
