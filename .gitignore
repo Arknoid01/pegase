@@ -40,3 +40,8 @@ app-debug-device.zip
 *.zip
 !gradle/wrapper/**
 
+
+# Captures device locales
+docs/device-*.png
+docs/device-test-report-*.txt
+
