@@ -5,6 +5,7 @@ import android.content.Context;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.conversation.InteractionStateStore;
 import com.pegasuscorp.orbe.copilot.CopilotScreenContext;
+import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 import com.pegasuscorp.orbe.session.Channel;
 
 import java.text.SimpleDateFormat;
@@ -208,6 +209,11 @@ public final class ContextBuilder {
         int max = "project".equals(intent.intent) || "person".equals(intent.intent) ? 3 : 2;
 
         List<String> entityTerms = EntityResolver.termsForScoring(entities);
+        String placeTerm = LocationSituationReader.currentPlaceSearchTerm(context);
+        if (placeTerm != null && !placeTerm.isEmpty()) {
+            entityTerms = new ArrayList<>(entityTerms);
+            entityTerms.add(placeTerm);
+        }
         List<String> seedEntityIds = MemoryLinker.seedEntityIds(entities, 3);
         List<MemoryEntry> memories = repo.getRelevantMemoriesSemantic(
                 userMessage, entityTerms, seedEntityIds, max, minScore);

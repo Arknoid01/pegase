@@ -10,7 +10,7 @@ import androidx.core.app.ActivityCompat;
 import com.pegasuscorp.orbe.AppListCache;
 import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
-import com.pegasuscorp.orbe.PegaseWakeService;
+import com.pegasuscorp.orbe.permissions.PermissionFlow;
 import com.pegasuscorp.orbe.PersonalizationStore;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
@@ -120,6 +120,12 @@ public final class LifecycleBridge {
             } else {
                 host.onMicGrantedStartListening();
             }
+        } else if (requestCode == PermissionFlow.REQ_LOCATION && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            try {
+                com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap
+                        .ensureStarted(host.activity());
+            } catch (Exception ignored) {}
         }
     }
 

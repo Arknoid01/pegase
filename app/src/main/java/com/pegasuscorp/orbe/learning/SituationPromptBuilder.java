@@ -6,6 +6,8 @@ import android.text.TextUtils;
 import com.pegasuscorp.orbe.intentions.IntentionEvaluator;
 import com.pegasuscorp.orbe.intentions.IntentionIds;
 import com.pegasuscorp.orbe.intentions.IntentionPrefs;
+import com.pegasuscorp.orbe.intentions.PegaseModeStore;
+import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 import com.pegasuscorp.orbe.intentions.rules.LifePatternSoonRule;
 import com.pegasuscorp.orbe.intentions.rules.WorkWifiRule;
 import com.pegasuscorp.orbe.life.LifePatternStore;
@@ -46,6 +48,7 @@ public final class SituationPromptBuilder {
             appendActive(app, cal, lines);
             appendSoon(app, cal, lines);
             appendWorkWifi(app, ssidOverride, lines);
+            appendLocationContext(app, lines);
             appendAcceptedPrefs(app, lines);
 
             if (lines.isEmpty()) return "";
@@ -106,6 +109,16 @@ public final class SituationPromptBuilder {
         if (ssid.isEmpty() || WorkWifiRule.isUnknown(ssid)) return;
         if (work.equalsIgnoreCase(ssid)) {
             lines.add("Lieu : Wi‑Fi travail");
+        }
+    }
+
+    private static void appendLocationContext(Context app, List<String> lines) {
+        String place = LocationSituationReader.getCurrentPlaceLabel(app);
+        if (place != null && !place.isEmpty()) {
+            lines.add("Lieu : " + place);
+        }
+        if (PegaseModeStore.isDrive(app) && PegaseModeStore.isAutoDriveActive(app)) {
+            lines.add("Conduite détectée (vitesse)");
         }
     }
 

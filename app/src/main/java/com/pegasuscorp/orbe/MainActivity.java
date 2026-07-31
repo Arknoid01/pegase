@@ -110,6 +110,7 @@ public class MainActivity extends AppCompatActivity
             if (com.pegasuscorp.orbe.intentions.IntentionPrefs.isEnabled(this)) {
                 com.pegasuscorp.orbe.permissions.PermissionFlow.ensureNotifications(this);
             }
+            com.pegasuscorp.orbe.permissions.PermissionFlow.ensureLocation(this);
         } catch (Exception ignored) {}
         try {
             com.pegasuscorp.orbe.f1companion.F1NewsScheduler.ensureScheduled(this);

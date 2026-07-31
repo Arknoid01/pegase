@@ -16,6 +16,7 @@ public final class PegaseModeStore {
 
     private static final String PREFS = "pegase_mode";
     private static final String KEY_MODE = "mode";
+    private static final String KEY_AUTO_DRIVE = "auto_drive";
 
     private PegaseModeStore() {}
 
@@ -30,7 +31,27 @@ public final class PegaseModeStore {
 
     public static void setMode(Context ctx, Mode mode) {
         Mode m = mode != null ? mode : Mode.NORMAL;
-        prefs(ctx).edit().putString(KEY_MODE, m.name()).apply();
+        prefs(ctx).edit()
+                .putString(KEY_MODE, m.name())
+                .putBoolean(KEY_AUTO_DRIVE, false)
+                .apply();
+    }
+
+    /** Activation automatique via vitesse GPS — réversible si la vitesse baisse. */
+    public static void setModeFromAutoDrive(Context ctx, Mode mode) {
+        Mode m = mode != null ? mode : Mode.NORMAL;
+        prefs(ctx).edit()
+                .putString(KEY_MODE, m.name())
+                .putBoolean(KEY_AUTO_DRIVE, true)
+                .apply();
+    }
+
+    public static boolean isAutoDriveActive(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_AUTO_DRIVE, false);
+    }
+
+    public static void clearAutoDrive(Context ctx) {
+        prefs(ctx).edit().putBoolean(KEY_AUTO_DRIVE, false).apply();
     }
 
     public static boolean isWork(Context ctx) {

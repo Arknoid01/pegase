@@ -23,6 +23,10 @@ public final class IntentionScheduler {
         Context app = ctx.getApplicationContext();
         IntentionEventReceiver.register(app);
         scheduleTick(app);
+        try {
+            com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap
+                    .ensureStarted(app);
+        } catch (Exception ignored) {}
     }
 
     @SuppressWarnings("deprecation")

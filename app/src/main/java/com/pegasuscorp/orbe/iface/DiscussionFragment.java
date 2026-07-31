@@ -754,6 +754,7 @@ public class DiscussionFragment extends Fragment {
                 lastConversationText = "";
                 refreshConversationIfNeeded();
                 if (thinkingView != null) thinkingView.onError();
+                PegaseWakeController.setAssistantThinking(false);
                 Toast.makeText(requireContext(), err, Toast.LENGTH_LONG).show();
                 finishTextChatReply();
             }

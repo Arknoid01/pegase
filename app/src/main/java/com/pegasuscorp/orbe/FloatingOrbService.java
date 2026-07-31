@@ -477,6 +477,7 @@ public class FloatingOrbService extends Service {
     public static void showCopilot(Context ctx) {
         if (!CopilotPrefs.isAlwaysOn(ctx)) return;
         if (!android.provider.Settings.canDrawOverlays(ctx)) return;
+        if (com.pegasuscorp.orbe.intentions.PegaseModeStore.isDrive(ctx)) return;
         show(ctx, OverlayMode.COPILOT);
     }
 
