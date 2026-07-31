@@ -18,6 +18,9 @@ public final class CopilotUiSupport {
     private CopilotUiSupport() {}
 
     public static PegaseAccessibilityService requireService(Context ctx, ToolCallback cb) {
+        PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
+        if (svc != null) return svc;
+
         if (!AccessibilityAccess.isEnabled(ctx)) {
             cb.onError("Active le service d'accessibilité Pégase dans les réglages, puis réessaie.");
             Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -25,12 +28,8 @@ public final class CopilotUiSupport {
             ctx.startActivity(i);
             return null;
         }
-        PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
-        if (svc == null) {
-            cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
-            return null;
-        }
-        return svc;
+        cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
+        return null;
     }
 
     /** Statut « Action en cours » dans la bulle copilote. */

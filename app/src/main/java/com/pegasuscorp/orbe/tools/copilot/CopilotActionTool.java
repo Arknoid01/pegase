@@ -50,7 +50,8 @@ public final class CopilotActionTool implements Tool {
     }
 
     private static void executeYouTubeSubtitles(Context ctx, ToolCallback cb) {
-        if (!AccessibilityAccess.isEnabled(ctx)) {
+        PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
+        if (svc == null && !AccessibilityAccess.isEnabled(ctx)) {
             CopilotPrefs.enableYouTubeCopilot(ctx);
             cb.onError("Active le service d'accessibilité Pégase dans les réglages, "
                     + "puis réessaie.");
@@ -59,7 +60,6 @@ public final class CopilotActionTool implements Tool {
             ctx.startActivity(i);
             return;
         }
-        PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
         if (svc == null) {
             cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
             return;
