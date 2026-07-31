@@ -46,7 +46,9 @@ import com.pegasuscorp.orbe.ui.OrbeTokens;
 import com.pegasuscorp.orbe.ui.PegaseSheets;
 import com.pegasuscorp.orbe.ui.ThinkingView;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
+import com.pegasuscorp.orbe.voice.PttTouchHelper;
 import com.pegasuscorp.orbe.voice.VoiceManager;
+import com.pegasuscorp.orbe.voice.VoicePushToTalk;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -84,6 +86,7 @@ public class DiscussionFragment extends Fragment {
     private TextView memoryBannerView;
     private EditText chatInput;
     private Button chatSendBtn;
+    private Button chatPttBtn;
     private TextView chatContextsLine;
     private TextView visionAttachBadge;
     private ThinkingView thinkingView;
@@ -235,6 +238,25 @@ public class DiscussionFragment extends Fragment {
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         inputRow.addView(chatInput, inputLp);
 
+        chatPttBtn = makeIconButton(ctx, "🎤");
+        chatPttBtn.setContentDescription(ctx.getString(com.pegasuscorp.orbe.R.string.voice_ptt_mic));
+        PttTouchHelper.attach(chatPttBtn, ctx, requireActivity(),
+                VoicePushToTalk.Channel.DISCUSSION, new VoicePushToTalk.Callback() {
+                    @Override
+                    public void onTranscript(String text) {
+                        if (!isAdded() || chatInput == null) return;
+                        chatInput.setText(text);
+                        sendTextChatMessage();
+                    }
+
+                    @Override
+                    public void onListeningChanged(boolean listening) {
+                        if (!isAdded() || chatPttBtn == null) return;
+                        chatPttBtn.setAlpha(listening ? 1f : 0.75f);
+                    }
+                });
+        inputRow.addView(chatPttBtn);
+
         chatSendBtn = makeIconButton(ctx, "↗");
         chatSendBtn.setContentDescription("Envoyer");
         chatSendBtn.setOnClickListener(v -> sendTextChatMessage());
@@ -285,6 +307,7 @@ public class DiscussionFragment extends Fragment {
         conversationAdapter = null;
         chatInput = null;
         chatSendBtn = null;
+        chatPttBtn = null;
         visionAttachBadge = null;
         thinkingView = null;
         super.onDestroyView();

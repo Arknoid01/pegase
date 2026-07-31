@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_help_message">Tu peux parler en maintenant le micro dans la discussion ou la bulle copilote. Dis Pégase pour me réveiller, ou appui long sur l\'orbe. En conduite, le mode court s\'active automatiquement. Dis annule pour stopper.</string>
+    <string name="voice_ptt_mic">Maintenir pour parler</string>
+    <string name="voice_ptt_listening">J\'écoute…</string>
+</resources>

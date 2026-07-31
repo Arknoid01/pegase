@@ -42,6 +42,7 @@ public class VoiceManager {
 
     private Runnable onListenFailed;
     private OnListeningStateListener listeningStateListener;
+    private volatile boolean pushToTalkMode;
 
     public VoiceManager(Context ctx, OnResult onResult) {
         this.appContext = ctx.getApplicationContext();
@@ -70,8 +71,77 @@ public class VoiceManager {
         hostActivity = null;
     }
 
+    /** PTT : une écoute pendant l'appui (silences courts). */
+    public void startPushToTalkListening() {
+        pushToTalkMode = true;
+        if (recognizer == null) rebuildRecognizer();
+        if (recognizer == null) {
+            Toast.makeText(appContext, "Reconnaissance vocale indisponible",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (listening) {
+            try {
+                recognizer.cancel();
+            } catch (RuntimeException ignored) {}
+            setListeningActive(false);
+        }
+        Intent i = buildListenIntent(true);
+        try {
+            recognizer.startListening(i);
+            setListeningActive(true);
+        } catch (RuntimeException ex) {
+            setListeningActive(false);
+            destroyRecognizer();
+            rebuildRecognizer();
+            Toast.makeText(appContext, "Micro indisponible", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Relâchement PTT — demande les résultats finaux. */
+    public void finishPushToTalkListening() {
+        pushToTalkMode = false;
+        if (recognizer != null && listening) {
+            try {
+                recognizer.stopListening();
+            } catch (RuntimeException ex) {
+                try {
+                    recognizer.cancel();
+                } catch (RuntimeException ignored) {}
+                setListeningActive(false);
+                notifyListenFailed();
+            }
+        }
+    }
+
+    public void cancelPushToTalkListening() {
+        pushToTalkMode = false;
+        stopListening();
+    }
+
+    private Intent buildListenIntent(boolean ptt) {
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Parlez à Pégase");
+        if (ptt) {
+            i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 2500)
+                    .putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 2000)
+                    .putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLISECONDS", 300);
+        } else {
+            i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1500)
+                    .putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1200)
+                    .putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLISECONDS", 800);
+        }
+        return i;
+    }
+
     /** Démarre l'écoute une seule fois. */
     public void startListening() {
+        pushToTalkMode = false;
         if (recognizer == null) {
             rebuildRecognizer();
         }
@@ -81,16 +151,7 @@ public class VoiceManager {
             return;
         }
         if (listening) return;
-        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
-                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Parlez à Pégase")
-                .putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1500)
-                .putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1200)
-                .putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLISECONDS", 800);
+        Intent i = buildListenIntent(false);
         try {
             recognizer.startListening(i);
             setListeningActive(true);
@@ -287,6 +348,7 @@ public class VoiceManager {
         @Override
         public void onResults(Bundle results) {
             setListeningActive(false);
+            pushToTalkMode = false;
             ArrayList<String> list =
                     results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (list != null && !list.isEmpty()) {
@@ -319,6 +381,7 @@ public class VoiceManager {
 
         @Override public void onError(int error) {
             setListeningActive(false);
+            pushToTalkMode = false;
             if (error != SpeechRecognizer.ERROR_CLIENT
                     && error != SpeechRecognizer.ERROR_NO_MATCH
                     && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {

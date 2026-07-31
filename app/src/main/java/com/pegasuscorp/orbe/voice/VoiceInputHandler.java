@@ -8,6 +8,8 @@ import android.widget.Toast;
 
 import com.pegasuscorp.orbe.ApiSettingsActivity;
 import com.pegasuscorp.orbe.GestureHintsStore;
+import com.pegasuscorp.orbe.InPlaceVoiceActivity;
+import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
 import com.pegasuscorp.orbe.PegaseWakeService;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
@@ -309,6 +311,11 @@ public final class VoiceInputHandler {
             return;
         }
 
+        if (VoiceHelpHints.isHelpRequest(transcript)) {
+            output.speak(VoiceHelpHints.buildHelpMessage(activity), this::scheduleListeningResume);
+            return;
+        }
+
         Trace.userMessage(transcript, "voice", lockedChatMode);
 
         if (com.pegasuscorp.orbe.session.PendingToolConfirm.hasPending()) {
@@ -517,6 +524,10 @@ public final class VoiceInputHandler {
         return LockSessionPolicy.allowsTools(activity, lockedChatMode);
     }
 
+    private boolean toolsAllowed(String intentHint, String toolJson) {
+        return LockSessionPolicy.allowsTool(activity, lockedChatMode, intentHint, toolJson);
+    }
+
     private void speakUnlockRequired() {
         output.speak(LockSessionPolicy.UNLOCK_TOOL_MESSAGE, this::scheduleListeningResume);
     }
@@ -631,7 +642,7 @@ public final class VoiceInputHandler {
     }
 
     private void maybeConfirmOrExecute(VoiceIntentRouter.RoutedIntent routed) {
-        if (routed.directToolJson != null && !toolsAllowed()) {
+        if (routed.directToolJson != null && !toolsAllowed(routed.intentHint, routed.directToolJson)) {
             speakUnlockRequired();
             return;
         }
@@ -665,6 +676,45 @@ public final class VoiceInputHandler {
     }
 
     private void executeDirectVoiceTool(String toolJson, String userLine, String intentHint) {
+        if (!toolsAllowed(intentHint, toolJson)) {
+            speakUnlockRequired();
+            return;
+        }
+        if (lockedChatMode && LockScreenToolPolicy.requiresSpeakerVerifyOnLock(intentHint, toolJson)) {
+            if (!SpeakerVerifyGate.isRequired(activity)) {
+                // pas de modèle locuteur — refus discret
+                LockScreenNotifier.postAgendaDenied(activity);
+                scheduleListeningResume();
+                return;
+            }
+            output.speak("Confirme ta voix pour l'agenda.", () ->
+                    SpeakerVerifyGate.runAfterPrompt(activity, this::pauseMicForSpeakerCapture,
+                            new SpeakerVerifyGate.Callback() {
+                                @Override
+                                public void onVerified() {
+                                    callback.runOnUiThread(() -> executeDirectVoiceToolInner(
+                                            toolJson, userLine, intentHint));
+                                }
+
+                                @Override
+                                public void onRejected() {
+                                    callback.runOnUiThread(() -> {
+                                        LockScreenNotifier.postAgendaDenied(activity);
+                                        scheduleListeningResume();
+                                    });
+                                }
+
+                                @Override
+                                public void onSkipped() {
+                                    onVerified();
+                                }
+                            }));
+            return;
+        }
+        executeDirectVoiceToolInner(toolJson, userLine, intentHint);
+    }
+
+    private void executeDirectVoiceToolInner(String toolJson, String userLine, String intentHint) {
         VoiceSessionContext session = VoiceSessionContext.get();
         String rejected = session.getLastRejectedHeard();
         if (LearnModeStore.isEnabled(activity) && rejected != null && !rejected.isEmpty()) {
@@ -674,6 +724,7 @@ public final class VoiceInputHandler {
         }
 
         final int requestId = ++chatRequestId;
+        PegaseWakeController.setAssistantThinking(true);
         if (orbUi != null) orbUi.setThinking(true);
         InteractionStateStore interaction = InteractionStateStore.getInstance(activity);
         interaction.onUserMessage(userLine);
@@ -1149,6 +1200,13 @@ public final class VoiceInputHandler {
         VoiceSessionContext.get().clear();
         lockedChatMode = false;
         PegaseWakeController.setVoiceChatActive(false);
+        if (PegaseWakeController.isInPlaceVoiceActive()) {
+            PegaseWakeController.setInPlaceVoiceActive(false);
+            FloatingOrbService.hide(activity);
+            if (activity instanceof InPlaceVoiceActivity) {
+                activity.finish();
+            }
+        }
         PegaseWakeController.resumeWakeIfAllowed(activity);
         boolean saved = conversation.exit();
         if (orbUi != null) {

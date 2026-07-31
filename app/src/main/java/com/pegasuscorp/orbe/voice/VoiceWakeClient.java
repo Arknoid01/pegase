@@ -201,15 +201,15 @@ public final class VoiceWakeClient {
         }
     }
 
-    /** Côté launcher : même comportement qu'avant (intent MainActivity). */
+    /** Wake in-place (v3) — overlay vocal sans ramener HOME. */
     private void handleWakeOnLauncher(String command) {
         wantListen = false;
         Context ctx = app;
         if (ctx == null) return;
-        Intent i = new Intent(ctx, MainActivity.class)
+        Intent i = new Intent(ctx, InPlaceVoiceActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        | Intent.FLAG_ACTIVITY_NO_ANIMATION
+                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
                 .putExtra("wake_activate", true)
                 .putExtra("wake_command", command == null ? "" : command)
                 .putExtra("wake_speaker_verified", false);
