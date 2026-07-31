@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -31,14 +32,20 @@ public class ElementHighlightService extends Service {
 
     private static final String CHANNEL_ID = "pegase_element_highlight";
     private static final int NOTIF_ID = 87;
-    private static final long AUTO_HIDE_MS = 8_000L;
+    private static final long ACTION_HIDE_MS = 1_400L;
+    private static final long CONTINUOUS_HIDE_MS = 4_000L;
+    private static final String EXTRA_HIDE_MS = "hide_ms";
+    private static final String EXTRA_RESET_TIMER = "reset_timer";
 
     private static volatile List<HighlightRect> pendingRects = new ArrayList<>();
+    private static volatile long pendingHideMs = CONTINUOUS_HIDE_MS;
+    private static volatile boolean pendingResetTimer = true;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager wm;
     private FrameLayout root;
     private Runnable hideRunnable;
+    private long hideDeadlineElapsed;
     private float density;
 
     public static final class HighlightRect {
@@ -63,7 +70,8 @@ public class ElementHighlightService extends Service {
             return;
         }
         if (!CopilotPrefs.isElementHighlightEnabled(ctx)) return;
-        showInternal(ctx, rects);
+        // Continu : ne pas repousser le timer à chaque refresh Chrome (sinon cadre éternel).
+        showInternal(ctx, rects, CONTINUOUS_HIDE_MS, false);
     }
 
     /** Surlignage ponctuel avant action UI v4 — indépendant du toggle continu. */
@@ -71,14 +79,19 @@ public class ElementHighlightService extends Service {
             String label) {
         if (ctx == null) return;
         showInternal(ctx, java.util.Collections.singletonList(
-                new HighlightRect(left, top, right, bottom, label)));
+                new HighlightRect(left, top, right, bottom, label)), ACTION_HIDE_MS, true);
     }
 
-    private static void showInternal(Context ctx, List<HighlightRect> rects) {
+    private static void showInternal(Context ctx, List<HighlightRect> rects,
+            long hideMs, boolean resetTimer) {
         if (rects == null || rects.isEmpty()) return;
         pendingRects = new ArrayList<>(rects);
+        pendingHideMs = hideMs;
+        pendingResetTimer = resetTimer;
         Intent i = new Intent(ctx, ElementHighlightService.class);
         i.setAction("show");
+        i.putExtra(EXTRA_HIDE_MS, hideMs);
+        i.putExtra(EXTRA_RESET_TIMER, resetTimer);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ctx.startForegroundService(i);
@@ -89,8 +102,21 @@ public class ElementHighlightService extends Service {
     }
 
     public static void hide(Context ctx) {
+        if (ctx == null) return;
         pendingRects = new ArrayList<>();
-        ctx.stopService(new Intent(ctx, ElementHighlightService.class));
+        Intent i = new Intent(ctx, ElementHighlightService.class);
+        i.setAction("hide");
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(i);
+            } else {
+                ctx.startService(i);
+            }
+        } catch (Exception e) {
+            try {
+                ctx.stopService(new Intent(ctx, ElementHighlightService.class));
+            } catch (Exception ignored) {}
+        }
     }
 
     @Override
@@ -103,8 +129,18 @@ public class ElementHighlightService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        String action = intent != null ? intent.getAction() : null;
+        if ("hide".equals(action)) {
+            clearAndStop();
+            return START_NOT_STICKY;
+        }
+        long hideMs = intent != null
+                ? intent.getLongExtra(EXTRA_HIDE_MS, pendingHideMs)
+                : pendingHideMs;
+        boolean resetTimer = intent == null
+                || intent.getBooleanExtra(EXTRA_RESET_TIMER, pendingResetTimer);
         renderRects(new ArrayList<>(pendingRects));
-        scheduleAutoHide();
+        scheduleAutoHide(hideMs, resetTimer);
         return START_NOT_STICKY;
     }
 
@@ -113,9 +149,23 @@ public class ElementHighlightService extends Service {
 
     @Override
     public void onDestroy() {
+        if (hideRunnable != null) {
+            main.removeCallbacks(hideRunnable);
+            hideRunnable = null;
+        }
+        hideDeadlineElapsed = 0;
         removeOverlay();
-        if (hideRunnable != null) main.removeCallbacks(hideRunnable);
         super.onDestroy();
+    }
+
+    private void clearAndStop() {
+        if (hideRunnable != null) {
+            main.removeCallbacks(hideRunnable);
+            hideRunnable = null;
+        }
+        hideDeadlineElapsed = 0;
+        removeOverlay();
+        stopSelf();
     }
 
     private void renderRects(List<HighlightRect> rects) {
@@ -139,6 +189,12 @@ public class ElementHighlightService extends Service {
                     rect.left, rect.top, Math.max(dp(24), w), Math.max(dp(24), h)));
         }
 
+        if (root.getChildCount() == 0) {
+            removeOverlay();
+            stopSelf();
+            return;
+        }
+
         try {
             BoundsOverlayHelper.addView(wm, root);
         } catch (Exception e) {
@@ -159,13 +215,27 @@ public class ElementHighlightService extends Service {
         return v;
     }
 
-    private void scheduleAutoHide() {
+    /**
+     * @param resetTimer true = action ponctuelle (repart de maintenant) ;
+     *                   false = mode continu (ne pas repousser la disparition).
+     */
+    private void scheduleAutoHide(long ms, boolean resetTimer) {
+        long now = SystemClock.elapsedRealtime();
+        long at = now + Math.max(400L, ms);
+        if (!resetTimer && hideRunnable != null && hideDeadlineElapsed > now) {
+            // Refresh continu : garder l'échéance déjà planifiée.
+            return;
+        }
         if (hideRunnable != null) main.removeCallbacks(hideRunnable);
+        hideDeadlineElapsed = at;
+        long delay = Math.max(0L, at - now);
         hideRunnable = () -> {
             hideRunnable = null;
+            hideDeadlineElapsed = 0;
+            removeOverlay();
             stopSelf();
         };
-        main.postDelayed(hideRunnable, AUTO_HIDE_MS);
+        main.postDelayed(hideRunnable, delay);
     }
 
     private void removeOverlay() {

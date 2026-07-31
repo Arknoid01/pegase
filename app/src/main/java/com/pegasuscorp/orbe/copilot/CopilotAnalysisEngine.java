@@ -22,7 +22,7 @@ public final class CopilotAnalysisEngine {
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final int MAX_HIGHLIGHTS = 12;
-    private static final long HIGHLIGHT_DEBOUNCE_MS = 4_000L;
+    private static final long HIGHLIGHT_DEBOUNCE_MS = 12_000L;
 
     private static volatile long lastHighlightMs;
 

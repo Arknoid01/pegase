@@ -69,14 +69,14 @@ public final class A11yUiExecutor {
             highlightTarget(ctx, target);
             A11yClickPolicy.Level level = A11yClickPolicy.evaluate(target);
             if (level == A11yClickPolicy.Level.NEVER) {
-                performClick(root, criteria, target, cb);
+                performClick(ctx, root, criteria, target, cb);
                 return;
             }
             String question = A11yClickPolicy.buildConfirmQuestion(target, level);
             cb.onConfirmNeeded(question,
                     () -> {
                         CopilotUiSupport.notifyActionInProgress(ctx, cb);
-                        withRoot(svc, r -> performClick(r, criteria, target, cb),
+                        withRoot(svc, r -> performClick(ctx, r, criteria, target, cb),
                                 () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
                     },
                     () -> cb.onError("Clic annulé."));
@@ -142,10 +142,11 @@ public final class A11yUiExecutor {
         else cb.onError("Impossible de revenir en arrière.");
     }
 
-    private static void performClick(AccessibilityNodeInfo root, A11yUiMatcher.Criteria criteria,
-            A11yUiMatcher.Target preview, ToolCallback cb) {
+    private static void performClick(Context ctx, AccessibilityNodeInfo root,
+            A11yUiMatcher.Criteria criteria, A11yUiMatcher.Target preview, ToolCallback cb) {
         AccessibilityNodeInfo node = A11yUiMatcher.findNode(root, criteria);
         if (node == null) {
+            ElementHighlightService.hide(ctx);
             cb.onError("Je ne trouve plus l'élément à cliquer.");
             return;
         }
@@ -155,11 +156,11 @@ public final class A11yUiExecutor {
                 ok = tapTarget(preview);
             }
             if (!ok) {
-                // Dernier recours : tap sur le nœud frais trouvé.
                 android.graphics.Rect b = new android.graphics.Rect();
                 node.getBoundsInScreen(b);
                 ok = tapBounds(b);
             }
+            ElementHighlightService.hide(ctx);
             if (ok) {
                 String label = preview != null && !TextUtils.isEmpty(preview.text)
                         ? preview.text
