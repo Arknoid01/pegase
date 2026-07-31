@@ -2,7 +2,7 @@
 
 **Repo :** [Arknoid01/pegase](https://github.com/Arknoid01/pegase)  
 **Période :** 30 juillet 2026  
-**Base :** commit initial → `main` actuel (`3dec64a`)  
+**Base :** commit initial → `main` (`1d454a5`, juill. 2026)  
 **App :** `com.pegasuscorp.orbe`
 
 Ce document résume **ce qui est entré dans `main`**, puis un **audit d’opinion** (forces, risques, priorités).
@@ -176,12 +176,12 @@ Les 5 axes collent au plan de route (« approfondir plutôt qu’empiler »). Le
 | Voix budgets / TTS partiel | Prometteur — à valider en conduite / conversation longue |
 | Utilitaires alarme/timer/agenda | Utile si les intents voix sont fiables — tester 10 phrases réelles |
 | Mémoire scoring / graphe | Architecture bonne — produit encore “lab” sans télémétrie d’utilité |
-| Copilote | Feature-complete côté code — **validation device partielle** ; les 6–8 scénarios checklist restent le vrai gate |
+| Copilote | Feature-complete — smoke device PASS ; checks visuels YouTube/Chrome/WhatsApp manuels |
 
 ### Priorités recommandées (ordre)
 
-1. **Finir la checklist copilote device** (YouTube CC, Chrome trad, share→mémoire, notif WhatsApp) — sinon l’axe phare reste théorique.
-2. **Réparer `testDebugUnitTest`** (dépendance `androidx.test` + Robolectric) pour verrouiller prefs / filtres / OCR.
+1. **Checks visuels copilote** (YouTube CC, Chrome trad, WhatsApp notif) — seul reste non automatisé.
+2. **CI / `testDebugUnitTest`** sur machine avec SDK (dépendances Robolectric déjà dans `build.gradle`).
 3. **Mesurer batterie 24 h** avec copilote always-on + a11y ON vs OFF.
 4. **Boucle mémoire** : 1 écran simple “pourquoi ce souvenir a été rappelé” (debug) avant d’investir plus dans le 3D.
 5. **Pousser les utilitaires** via 20 utterances FR figées (régression manuelle ou script).

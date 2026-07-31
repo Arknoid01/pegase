@@ -1,69 +1,49 @@
-# Copilote Pégase — Terminé
+# Copilote Pégase — Livré ✅
 
-**Branche :** `cursor/v2-copilot-polish-14e9`  
-**PRs :** [#8](https://github.com/Arknoid01/pegase/pull/8) (features) + [#9](https://github.com/Arknoid01/pegase/pull/9) (polish + finition)
+**Statut :** mergé sur `main` (PR [#8](https://github.com/Arknoid01/pegase/pull/8) + [#9](https://github.com/Arknoid01/pegase/pull/9))  
+**Test device :** smoke automatisé PASS — voir `docs/device-test-report-final.txt`  
+**Post-merge :** `MediaProjectionCaptureService` (FGS Android 14+), orbe overlay vivante
 
 ---
 
-## Fonctionnalités livrées
+## Fonctionnalités
 
 | Domaine | Contenu |
 |---------|---------|
-| **Overlay** | Orbe 56dp + bulle messenger, chat, capture écran, mémorisation |
-| **Architecture** | Process `:copilot`, Accessibility Service, listes blanches strictes |
-| **Actions locales** | YouTube sous-titres à la voix (sans cloud) |
-| **Traduction** | Overlay positionné sur bounds a11y, cloud texte seul |
+| **Overlay** | Orbe 56dp + bulle messenger, chat, capture, mémorisation |
+| **Architecture** | Process `:copilot`, Accessibility Service, whitelists strictes |
+| **Actions locales** | YouTube sous-titres à la voix |
+| **Traduction** | Overlay sur bounds a11y, cloud texte seul |
 | **Notifications** | Whitelist + phrase Pégase (« Marine t'a écrit : … ») |
-| **Surlignage** | Cadres sur éléments cliquables (a11y bounds) |
-| **OCR** | Fallback ML Kit quand arbre a11y vide |
-| **Apps** | Picker pour toute app installée (écran + notif) |
-| **Share** | Intent partage → mémoire / contexte nommé |
+| **Surlignage** | Cadres éléments cliquables (a11y) |
+| **OCR** | Fallback ML Kit si arbre a11y vide |
+| **Apps** | Picker toute app installée |
+| **Share** | Intent → mémoire / contexte nommé |
 
 ---
 
-## Polish & finitions
+## Polish inclus
 
-- Bugs bulle (welcome / streaming), double analyse, orbe hors écran
-- Permissions avec statut ✓ / à accorder + capture MediaProjection
-- Confirmations outils (Oui / Non) dans la bulle
-- Strings externalisées (`strings_copilot.xml`)
-- Tests unitaires : prefs, locale, translator, summarizer, highlights, notif filter, OCR
-- Helper overlay partagé (`BoundsOverlayHelper`)
+- Bulle welcome / streaming, double analyse, orbe clampée
+- Permissions avec statut ✓, capture MediaProjection + FGS dédié
+- Confirmations outils Oui/Non dans la bulle
+- `strings_copilot.xml`, tests unitaires copilote
 
 ---
 
-## Entrées utilisateur
+## Entrée utilisateur
 
-1. **Orbe** — tap = bulle, long press = menu, drag = repositionner
-2. **Réglages** — Outils → Mode copilote
-3. **Permissions requises** — overlay, a11y (analyse/traduction), notifs (alertes), capture (vision/OCR)
+**Outils → Mode copilote** — permissions : overlay, a11y, notifs, capture écran.
 
 ---
 
-## Test device (checklist finale)
+## Tests manuels restants (visuels)
 
-| # | Test |
-|---|------|
-| 1 | Overlay + orbe visible hors Orbe |
-| 2 | Bulle : message, streaming, confirmation outil |
-| 3 | Réglages : permissions ✓, picker app custom |
-| 4 | YouTube whitelist → « active les sous-titres » |
-| 5 | Chrome EN → traductions positionnées |
-| 6 | WhatsApp notif → « X t'a écrit : … » |
-| 7 | Jeu/WebView vide → OCR si capture autorisée |
-| 8 | Partager texte → Pégase / « retiens ça » |
-| 9 | Mode voix → orbe grande (régression) |
+1. YouTube whitelist → « active les sous-titres »
+2. Chrome EN → traductions positionnées
+3. WhatsApp notif → phrase Pégase dans la bulle
+4. Share + « retiens ça »
 
 ---
 
-## Merge suggéré
-
-```
-main ← #4 (personality) ← #5 (voice) ← #6/#7 (memory, utility) ← #8 (copilot) ← #9 (polish)
-```
-
-Ou squasher #8 + #9 en une seule PR copilote si préféré.
-
----
-
-*Phase copilote considérée complète côté code — validation device à faire sur l'autre instance.*
+*Copilote considéré terminé côté code — itérations futures = polish UX, pas de refonte architecture.*
