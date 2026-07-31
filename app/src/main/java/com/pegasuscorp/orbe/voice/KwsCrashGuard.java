@@ -58,6 +58,12 @@ final class KwsCrashGuard {
         prefs(ctx).edit().clear().apply();
     }
 
+    /** Réinitialise le coupe-circuit après faux positif (réglages). */
+    static void resetForUser(Context ctx) {
+        reset(ctx);
+        Log.i(TAG, "manual reset");
+    }
+
     private static SharedPreferences prefs(Context ctx) {
         return ctx.getApplicationContext().getSharedPreferences(PREF, Context.MODE_PRIVATE);
     }

@@ -25,6 +25,7 @@ public final class PegaseWakeController {
     private static volatile boolean pausedByUser;
     private static volatile boolean micGloballyMuted;
     private static volatile boolean bureauActive;
+    private static volatile boolean wakeHealthProblem;
 
     private PegaseWakeController() {}
 
@@ -49,6 +50,15 @@ public final class PegaseWakeController {
 
     public static boolean isBureauActive() {
         return bureauActive;
+    }
+
+    public static void setWakeHealthProblem(boolean problem) {
+        wakeHealthProblem = problem;
+        logState("wakeHealth=" + problem);
+    }
+
+    public static boolean hasWakeHealthProblem() {
+        return wakeHealthProblem;
     }
 
     public static void setMicGloballyMuted(boolean muted) {

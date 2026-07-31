@@ -51,6 +51,8 @@ import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 import com.pegasuscorp.orbe.voice.VoiceMuteStore;
 import com.pegasuscorp.orbe.voice.VoiceOutputHandler;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
+import com.pegasuscorp.orbe.voice.WakeHealthUi;
 
 import java.util.concurrent.ExecutorService;
 
@@ -202,6 +204,10 @@ public class MainActivity extends AppCompatActivity
         orbUi.refreshShortcutSlots();
         wireOrbGestures();
         orbUi.applyPersonalization();
+        WakeHealthUi.setListener(status -> {
+            if (orbUi != null) orbUi.applyWakeHealth(status);
+        });
+        VoiceWakeClient.get().refreshWakeHealth();
 
         inkManager = DigitalInkManager.getInstance();
         attachInkStatusListener();

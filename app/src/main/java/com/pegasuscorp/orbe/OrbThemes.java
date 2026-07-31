@@ -32,6 +32,8 @@ public final class OrbThemes {
                     Color.parseColor("#9B6BDD"), Color.parseColor("#5B2D8F")),
             new Palette("Corail", Color.parseColor("#FFD4C8"),
                     Color.parseColor("#FF7A5C"), Color.parseColor("#B33A22")),
+            new Palette("Alerte", Color.parseColor("#FFB8B8"),
+                    Color.parseColor("#FF4444"), Color.parseColor("#8F0B0B")),
     };
 
     private OrbThemes() {}

@@ -32,12 +32,22 @@ public final class VoiceWakeClient {
     private boolean binding;
     private boolean wantListen;
     private boolean gentle = true;
+    private WakeHealthStatus cachedHealth = WakeHealthStatus.OFF;
     private Runnable pendingAfterBind;
 
     private final IWakeWordCallback.Stub callback = new IWakeWordCallback.Stub() {
         @Override
         public void onWakeWordDetected(String command) {
             main.post(() -> handleWakeOnLauncher(command));
+        }
+    };
+
+    private final IWakeHealthCallback.Stub healthCallback = new IWakeHealthCallback.Stub() {
+        @Override
+        public void onWakeHealthChanged(int code) {
+            WakeHealthStatus status = WakeHealthStatus.fromCode(code);
+            cachedHealth = status;
+            main.post(() -> WakeHealthUi.apply(status));
         }
     };
 
@@ -49,7 +59,10 @@ public final class VoiceWakeClient {
                 remote = IVoiceWakeService.Stub.asInterface(service);
                 try {
                     remote.registerCallback(callback);
+                    remote.registerHealthCallback(healthCallback);
                     remote.setGentleMode(gentle);
+                    cachedHealth = WakeHealthStatus.fromCode(remote.getWakeHealthCode());
+                    main.post(() -> WakeHealthUi.apply(cachedHealth));
                     if (wantListen) {
                         remote.startWakeListening();
                     } else {
@@ -112,7 +125,50 @@ public final class VoiceWakeClient {
             startListening(ctx);
         } else {
             stopListening(ctx);
+            if (!PegaseWakeStore.isEnabled(ctx)) {
+                cachedHealth = WakeHealthStatus.OFF;
+                main.post(() -> WakeHealthUi.apply(WakeHealthStatus.OFF));
+            }
         }
+        refreshWakeHealth();
+    }
+
+    public WakeHealthStatus getCachedWakeHealth() {
+        return cachedHealth;
+    }
+
+    public void refreshWakeHealth() {
+        IVoiceWakeService r;
+        synchronized (lock) {
+            r = remote;
+        }
+        if (r == null) return;
+        try {
+            WakeHealthStatus status = WakeHealthStatus.fromCode(r.getWakeHealthCode());
+            cachedHealth = status;
+            main.post(() -> WakeHealthUi.apply(status));
+        } catch (RemoteException e) {
+            Log.w(TAG, "refreshWakeHealth", e);
+            remoteDied();
+        }
+    }
+
+    public void resetKwsCrashGuard(Context ctx) {
+        ensureApp(ctx);
+        ensureBound(ctx, () -> {
+            IVoiceWakeService r;
+            synchronized (lock) {
+                r = remote;
+            }
+            if (r == null) return;
+            try {
+                r.resetKwsCrashGuard();
+                refreshWakeHealth();
+            } catch (RemoteException e) {
+                Log.w(TAG, "resetKwsCrashGuard", e);
+                remoteDied();
+            }
+        });
     }
 
     public void startListening(Context ctx) {

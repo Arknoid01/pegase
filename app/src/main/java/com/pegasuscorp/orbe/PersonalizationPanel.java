@@ -431,6 +431,15 @@ public class PersonalizationPanel extends FrameLayout {
                         }
                     });
         });
+        if (com.pegasuscorp.orbe.voice.VoiceWakeClient.get().getCachedWakeHealth().isProblem()) {
+            addActionRow("Réinitialiser le coupe-circuit wake", () -> {
+                com.pegasuscorp.orbe.voice.VoiceWakeClient.get().resetKwsCrashGuard(context);
+                android.widget.Toast.makeText(context,
+                        "Coupe-circuit réinitialisé — relance du wake…",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                PegaseWakeService.sync(context);
+            });
+        }
 
         body.addView(spacer(context, (int) (12 * density)));
         body.addView(addSubHeading(context, "Ma voix"));

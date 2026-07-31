@@ -22,6 +22,7 @@ import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.PegaseWakeStore;
 import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 import com.pegasuscorp.orbe.voice.VoiceManager;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 /**
  * Pont lifecycle Activity ↔ orbe / voix / prefetch / LLM idle unload.
@@ -205,11 +206,13 @@ public final class LifecycleBridge {
         // STT Google sous low-mem au retour HOME = hitch + RAM — reporter via sync léger seul.
         if (lowMemAtSchedule || MemoryPressure.isLow(a)) {
             PegaseWakeService.sync(a);
+            VoiceWakeClient.get().refreshWakeHealth();
             return;
         }
 
         VoiceInputHandler voice = host.voiceInput();
         PegaseWakeService.sync(a);
+        VoiceWakeClient.get().refreshWakeHealth();
         if ((voice == null || !voice.isConversationActive())
                 && PegaseWakeStore.isEnabled(a)
                 && PegaseWakeController.shouldListen()) {

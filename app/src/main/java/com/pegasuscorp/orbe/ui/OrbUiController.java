@@ -21,6 +21,7 @@ import com.pegasuscorp.orbe.OrbThemes;
 import com.pegasuscorp.orbe.OrbView;
 import com.pegasuscorp.orbe.PersonalizationStore;
 import com.pegasuscorp.orbe.ShortcutStore;
+import com.pegasuscorp.orbe.voice.WakeHealthStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +81,15 @@ public final class OrbUiController {
 
     public void setThinking(boolean thinking) {
         if (orbView != null) orbView.setThinking(thinking);
+    }
+
+    public void applyWakeHealth(WakeHealthStatus status) {
+        if (orbView == null) return;
+        boolean problem = status != null && status.isProblem();
+        orbView.setWakeHealthProblem(problem);
+        if (!problem) {
+            applyPersonalization();
+        }
     }
 
     public void deployWings() {
