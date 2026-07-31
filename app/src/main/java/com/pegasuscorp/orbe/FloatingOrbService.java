@@ -714,7 +714,8 @@ public class FloatingOrbService extends Service {
         runOnMain(() -> {
             if (s.overlayRoot == null || s.layoutParams == null) return;
             boolean hit = containsScreenPoint(x, y);
-            if (!hit && !(s.bubbleExpanded && currentMode == OverlayMode.COPILOT)) {
+            // Uniquement si le tap tombe dans l'overlay — sinon passthrough léger.
+            if (!hit) {
                 setTouchPassthrough(true);
                 return;
             }
@@ -725,10 +726,9 @@ public class FloatingOrbService extends Service {
                 android.util.Log.i("FloatingOrb",
                         "evacuateForScreenTap collapsed bubble for tap "
                                 + Math.round(x) + "," + Math.round(y));
-                evacuated[0] = true;
             }
             setTouchPassthrough(true);
-            if (hit) evacuated[0] = true;
+            evacuated[0] = true;
         });
         return evacuated[0];
     }

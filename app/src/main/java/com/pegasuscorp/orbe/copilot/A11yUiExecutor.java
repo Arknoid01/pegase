@@ -163,9 +163,10 @@ public final class A11yUiExecutor {
         try {
             android.graphics.Rect live = new android.graphics.Rect();
             node.getBoundsInScreen(live);
-            // Sections Wiki (hauteur 0) / nœuds non cliquables : ACTION_CLICK sur le
-            // WebView parent renvoie souvent true sans effet → succès fantôme.
-            boolean preferGesture = live.height() <= 0 || !node.isClickable();
+            // Chrome/WebView : ACTION_CLICK renvoie souvent true sans effet (succès fantôme),
+            // même sur des nœuds cliquables à hauteur > 0 (ex. lien « latin »).
+            boolean preferGesture = live.height() <= 0 || !node.isClickable()
+                    || looksLikeWebContent(node);
             boolean ok = false;
             String via = "";
             if (!preferGesture) {
@@ -185,10 +186,18 @@ public final class A11yUiExecutor {
             if (ok) {
                 String label = preview != null && !TextUtils.isEmpty(preview.text)
                         ? preview.text
-                        : (preview != null ? UiExplainHelper.humanizeViewId(preview.viewId) : "l'élément");
+                        : (preview != null ? UiExplainHelper.humanizeViewId(preview.viewId) : "");
+                if (TextUtils.isEmpty(label) && node.getText() != null) {
+                    label = node.getText().toString().trim();
+                }
                 if (TextUtils.isEmpty(label)) label = "l'élément";
+                CharSequence pkg = node.getPackageName();
                 android.util.Log.i("A11yUi", "click ok via=" + via
                         + " live=" + live.toShortString()
+                        + " h=" + live.height()
+                        + " clickable=" + node.isClickable()
+                        + " web=" + looksLikeWebContent(node)
+                        + " pkg=" + (pkg != null ? pkg : "")
                         + " label=" + label);
                 cb.onSuccess(ToolResult.text("Clic envoyé sur « " + label + " »."));
             } else {
@@ -211,6 +220,23 @@ public final class A11yUiExecutor {
             top = Math.max(0, top - 56);
         }
         return new android.graphics.Rect(left, top, right, bottom);
+    }
+
+    /** Chrome / WebView / Gecko : ACTION_CLICK a11y peu fiable. */
+    static boolean looksLikeWebContent(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence pkgCs = node.getPackageName();
+        String pkg = pkgCs != null ? pkgCs.toString() : "";
+        if (pkg.contains("chrome") || pkg.contains("firefox") || pkg.contains("browser")
+                || pkg.contains("webview") || pkg.equals("com.android.chrome")
+                || pkg.equals("com.brave.browser") || pkg.equals("org.mozilla.firefox")
+                || pkg.equals("com.microsoft.emmx") || pkg.equals("com.opera.browser")) {
+            return true;
+        }
+        CharSequence clsCs = node.getClassName();
+        String cls = clsCs != null ? clsCs.toString() : "";
+        return cls.contains("WebView") || cls.contains("Chrome")
+                || cls.contains("Gecko") || cls.contains("AwContents");
     }
 
     private static boolean tapTarget(A11yUiMatcher.Target target) {
