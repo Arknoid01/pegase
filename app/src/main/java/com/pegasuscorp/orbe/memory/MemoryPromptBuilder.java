@@ -2,6 +2,8 @@ package com.pegasuscorp.orbe.memory;
 
 import android.content.Context;
 
+import com.pegasuscorp.orbe.session.Channel;
+
 /**
  * Point d'entrée historique — délègue à {@link ContextBuilder}.
  */
@@ -25,10 +27,18 @@ public final class MemoryPromptBuilder {
     /** @param agenticSynthesisOnly étape finale sans nouvel appel d'outil. */
     public static String buildFullSystem(Context context, String userMessage, boolean nativeTools,
             boolean agenticSynthesisOnly) {
+        return buildFullSystem(context, userMessage, nativeTools, agenticSynthesisOnly,
+                Channel.TEXT);
+    }
+
+    /** @param agenticSynthesisOnly étape finale sans nouvel appel d'outil. */
+    public static String buildFullSystem(Context context, String userMessage, boolean nativeTools,
+            boolean agenticSynthesisOnly, Channel channel) {
         ContextIntent intent = ContextAnalyzer.analyze(context, userMessage);
+        Channel ch = channel != null ? channel : Channel.TEXT;
         String system = com.pegasuscorp.orbe.llm.PegasePrompt.buildSystem(
                 context, intent.allowedTools, nativeTools)
-                + ContextBuilder.build(context, userMessage, intent);
+                + ContextBuilder.build(context, userMessage, intent, ch);
         if (agenticSynthesisOnly) {
             system += "\n\n=== SYNTHÈSE FINALE (sans outil) ===\n"
                     + "Tu as déjà les résultats d'outil ci-dessus.\n"

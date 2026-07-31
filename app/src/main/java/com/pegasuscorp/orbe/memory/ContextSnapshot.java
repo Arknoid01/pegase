@@ -17,11 +17,21 @@ public final class ContextSnapshot {
     public final List<String> profileSections;
     public final List<String> namedContexts;
     public final String sessionTopic;
+    /** App écran copilote injectée (carte 🔍) — vide hors canal COPILOT. */
+    public final String screenContextLabel;
 
     public ContextSnapshot(String promptText, String intent,
             List<String> memories, List<String> atlasEntities,
             List<String> profileSections, List<String> namedContexts,
             String sessionTopic) {
+        this(promptText, intent, memories, atlasEntities, profileSections, namedContexts,
+                sessionTopic, "");
+    }
+
+    public ContextSnapshot(String promptText, String intent,
+            List<String> memories, List<String> atlasEntities,
+            List<String> profileSections, List<String> namedContexts,
+            String sessionTopic, String screenContextLabel) {
         this.promptText = promptText != null ? promptText : "";
         this.intent = intent != null ? intent : "general";
         this.memories = freeze(memories);
@@ -29,10 +39,11 @@ public final class ContextSnapshot {
         this.profileSections = freeze(profileSections);
         this.namedContexts = freeze(namedContexts);
         this.sessionTopic = sessionTopic != null ? sessionTopic : "";
+        this.screenContextLabel = screenContextLabel != null ? screenContextLabel : "";
     }
 
     public static ContextSnapshot empty() {
-        return new ContextSnapshot("", "general", null, null, null, null, "");
+        return new ContextSnapshot("", "general", null, null, null, null, "", "");
     }
 
     public int memoryCount() {

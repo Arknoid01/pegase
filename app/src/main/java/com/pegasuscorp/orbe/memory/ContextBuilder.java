@@ -4,6 +4,8 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.conversation.InteractionStateStore;
+import com.pegasuscorp.orbe.copilot.CopilotScreenContext;
+import com.pegasuscorp.orbe.session.Channel;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -28,7 +30,12 @@ public final class ContextBuilder {
     }
 
     public static String build(Context context, String userMessage, ContextIntent intent) {
-        return buildSnapshot(context, userMessage, intent).promptText;
+        return build(context, userMessage, intent, Channel.TEXT);
+    }
+
+    public static String build(Context context, String userMessage, ContextIntent intent,
+            Channel channel) {
+        return buildSnapshot(context, userMessage, intent, channel).promptText;
     }
 
     public static ContextSnapshot buildSnapshot(Context context, String userMessage) {
@@ -37,6 +44,11 @@ public final class ContextBuilder {
 
     public static ContextSnapshot buildSnapshot(Context context, String userMessage,
             ContextIntent intent) {
+        return buildSnapshot(context, userMessage, intent, Channel.TEXT);
+    }
+
+    public static ContextSnapshot buildSnapshot(Context context, String userMessage,
+            ContextIntent intent, Channel channel) {
         if (context == null) return ContextSnapshot.empty();
         if (intent == null) intent = ContextAnalyzer.analyze(context, userMessage);
 
@@ -49,6 +61,7 @@ public final class ContextBuilder {
         List<String> profileOut = new ArrayList<>();
         List<String> contextsOut = new ArrayList<>();
         String sessionTopic = "";
+        String screenLabel = "";
 
         StringBuilder sb = new StringBuilder();
         appendDeviceClock(sb);
@@ -67,9 +80,20 @@ public final class ContextBuilder {
         appendLoadedNamedContexts(sb, context, contextsOut);
         sessionTopic = appendSessionContext(sb, repo, intent);
         appendMemories(sb, repo, userMessage, entities, intent, memoriesOut);
+        screenLabel = appendCopilotScreenContext(sb, context, channel);
 
         return new ContextSnapshot(sb.toString(), intent.intent,
-                memoriesOut, atlasOut, profileOut, contextsOut, sessionTopic);
+                memoriesOut, atlasOut, profileOut, contextsOut, sessionTopic, screenLabel);
+    }
+
+    private static String appendCopilotScreenContext(StringBuilder sb, Context context,
+            Channel channel) {
+        if (channel != Channel.COPILOT || context == null) return "";
+        CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(context);
+        if (snap == null) return "";
+        String block = CopilotScreenContext.buildPromptBlock(snap);
+        if (!block.isEmpty()) sb.append(block);
+        return snap.packageName;
     }
 
     public static ContextIntent analyzeIntent(Context context, String userMessage) {

@@ -294,7 +294,7 @@ public final class CopilotController implements SessionObserver {
 
     private String buildPayload(String userText) {
         if (TextUtils.isEmpty(lastScreenContext)) return userText;
-        return "[Contexte écran récent]\n" + lastScreenContext + "\n\n[Question]\n" + userText;
+        return "[Capture écran manuelle]\n" + lastScreenContext + "\n\n[Question]\n" + userText;
     }
 
     private SessionObserver sessionObserver() {

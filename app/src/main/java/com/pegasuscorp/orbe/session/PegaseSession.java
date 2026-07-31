@@ -1686,7 +1686,8 @@ public class PegaseSession {
         if (appContext == null) return;
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
-            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, currentTurnIntent);
+            ContextSnapshot snap = ContextBuilder.buildSnapshot(
+                    appContext, msg, currentTurnIntent, sessionContext.channel);
             turnReasoning.applySnapshot(snap);
             turnReasoning.setSessionUsed(msg);
         } catch (Exception ignored) {
