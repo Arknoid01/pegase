@@ -84,20 +84,37 @@ public final class A11yUiMatcher {
     /** Trouve un nœud — l'appelant doit {@link AccessibilityNodeInfo#recycle()}. */
     public static AccessibilityNodeInfo findNode(AccessibilityNodeInfo root, Criteria criteria) {
         if (root == null || criteria == null || criteria.isEmpty()) return null;
+
+        // API système : utile quand le texte n'est pas dans getText() mais indexé autrement.
+        if (!TextUtils.isEmpty(criteria.text)) {
+            java.util.List<AccessibilityNodeInfo> byText =
+                    root.findAccessibilityNodeInfosByText(criteria.text.trim());
+            if (byText != null) {
+                AccessibilityNodeInfo pick = pickBest(byText, criteria);
+                for (AccessibilityNodeInfo n : byText) {
+                    if (n != null) n.recycle();
+                }
+                if (pick != null) return pick;
+            }
+        }
+
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(AccessibilityNodeInfo.obtain(root));
         AccessibilityNodeInfo best = null;
+        int bestScore = Integer.MIN_VALUE;
         while (!queue.isEmpty()) {
             AccessibilityNodeInfo node = queue.removeFirst();
             try {
                 if (nodeMatches(node, criteria)) {
-                    if (node.isClickable()) {
-                        recycleQueue(queue);
+                    int score = scoreCandidate(node, criteria);
+                    if (score > bestScore) {
                         if (best != null) best.recycle();
-                        return AccessibilityNodeInfo.obtain(node);
-                    }
-                    if (best == null) {
                         best = AccessibilityNodeInfo.obtain(node);
+                        bestScore = score;
+                        if (node.isClickable() && score >= 100) {
+                            recycleQueue(queue);
+                            return best;
+                        }
                     }
                 }
                 for (int i = 0; i < node.getChildCount(); i++) {
@@ -105,10 +122,50 @@ public final class A11yUiMatcher {
                     if (child != null) queue.add(child);
                 }
             } finally {
-                if (node != best) node.recycle();
+                node.recycle();
             }
         }
         return best;
+    }
+
+    private static AccessibilityNodeInfo pickBest(
+            java.util.List<AccessibilityNodeInfo> nodes, Criteria criteria) {
+        AccessibilityNodeInfo best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (AccessibilityNodeInfo node : nodes) {
+            if (node == null) continue;
+            int score = scoreCandidate(node, criteria);
+            if (nodeMatches(node, criteria)) score += 40;
+            if (score > bestScore) {
+                bestScore = score;
+                best = node;
+            }
+        }
+        return best != null ? AccessibilityNodeInfo.obtain(best) : null;
+    }
+
+    private static int scoreCandidate(AccessibilityNodeInfo node, Criteria criteria) {
+        int score = 0;
+        if (node.isClickable()) score += 50;
+        if (node.isEnabled()) score += 5;
+        Rect bounds = new Rect();
+        node.getBoundsInScreen(bounds);
+        int h = bounds.height();
+        int w = bounds.width();
+        if (h > 0 && w > 0) score += 20;
+        if (h >= 24) score += 15;
+        String label = combinedLabel(node);
+        String viewId = node.getViewIdResourceName() != null ? node.getViewIdResourceName() : "";
+        String hay = normalizeForMatch(label + " " + viewId);
+        if (!TextUtils.isEmpty(criteria.text)) {
+            java.util.List<String> toks = significantTokens(normalizeForMatch(criteria.text));
+            for (String tok : toks) {
+                if (hay.contains(tok)) score += 10;
+            }
+            String exact = normalizeForMatch(criteria.text);
+            if (hay.contains(exact)) score += 25;
+        }
+        return score;
     }
 
     public static boolean nodeMatches(AccessibilityNodeInfo node, Criteria criteria) {
@@ -122,22 +179,65 @@ public final class A11yUiMatcher {
 
     static boolean matchesFields(String label, String viewId, String className, Criteria criteria) {
         if (criteria == null || criteria.isEmpty()) return false;
-        String fLabel = fold(label);
-        String fViewId = fold(viewId);
-        String fClass = fold(className);
-        String hay = (fLabel + " " + fViewId + " " + fClass).trim();
+        String hay = normalizeForMatch(label + " " + viewId + " " + className);
+        if (hay.isEmpty()) return false;
+
         boolean textOnly = !TextUtils.isEmpty(criteria.text) && TextUtils.isEmpty(criteria.viewId);
         boolean viewOnly = TextUtils.isEmpty(criteria.text) && !TextUtils.isEmpty(criteria.viewId);
+
         if (viewOnly) {
-            return fViewId.contains(fold(criteria.viewId)) || hay.contains(fold(criteria.viewId));
+            return hayContainsNeedle(hay, criteria.viewId);
         }
         if (textOnly) {
-            return !hay.isEmpty() && hay.contains(fold(criteria.text));
+            return hayContainsNeedle(hay, criteria.text);
         }
-        boolean textOk = hay.contains(fold(criteria.text));
-        boolean viewOk = fViewId.contains(fold(criteria.viewId)) || hay.contains(fold(criteria.viewId));
-        return textOk && viewOk;
+        return hayContainsNeedle(hay, criteria.text) && hayContainsNeedle(hay, criteria.viewId);
     }
+
+    /**
+     * Contenu texte / viewId : accepte espaces vs {@code _}{@code -}, ignore les mots de commande
+     * (« clique sur… ») pour matcher p.ex. {@code Astronomie_et_espace-collapsible-content}.
+     */
+    static boolean hayContainsNeedle(String hayNormalized, String needleRaw) {
+        if (TextUtils.isEmpty(needleRaw)) return false;
+        String needle = normalizeForMatch(needleRaw);
+        if (needle.isEmpty()) return false;
+        if (hayNormalized.contains(needle)) return true;
+
+        java.util.List<String> tokens = significantTokens(needle);
+        if (tokens.isEmpty()) return false;
+        for (String tok : tokens) {
+            if (!hayNormalized.contains(tok)) return false;
+        }
+        return true;
+    }
+
+    static String normalizeForMatch(String text) {
+        String f = fold(text);
+        if (f.isEmpty()) return "";
+        return f.replace('_', ' ').replace('-', ' ').replace(':', ' ')
+                .replaceAll("\\s+", " ").trim();
+    }
+
+    static java.util.List<String> significantTokens(String normalizedNeedle) {
+        java.util.ArrayList<String> out = new java.util.ArrayList<>();
+        if (normalizedNeedle == null || normalizedNeedle.isEmpty()) return out;
+        for (String raw : normalizedNeedle.split(" ")) {
+            if (raw.length() < 2) continue;
+            if (STOPWORDS.contains(raw)) continue;
+            out.add(raw);
+        }
+        return out;
+    }
+
+    private static final java.util.Set<String> STOPWORDS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "clique", "cliquer", "click", "tap", "tape", "appuie", "appui",
+            "sur", "le", "la", "les", "un", "une", "des", "du", "de", "d",
+            "au", "aux", "et", "ou", "bouton", "lien", "element", "elements",
+            "ecran", "app", "applique", "ouvre", "ouvrir", "active", "activer",
+            "section", "titre", "menu", "onglet", "page"
+    ));
+
 
     public static Target targetFromNode(AccessibilityNodeInfo node) {
         String label = combinedLabel(node);
@@ -152,10 +252,44 @@ public final class A11yUiMatcher {
 
     public static boolean performClick(AccessibilityNodeInfo node) {
         if (node == null) return false;
-        if (node.isClickable()) {
-            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        if (node.isClickable() && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true;
         }
-        return clickClickableParent(node);
+        if (clickClickableParent(node)) return true;
+        // En-têtes Wikipedia/Chrome : souvent un nœud viewId sans surface cliquable.
+        return clickNearbyClickable(node);
+    }
+
+    /** Remonte plus profondément, puis cherche un frère / voisin cliquable. */
+    private static boolean clickNearbyClickable(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo p = node.getParent();
+        int depth = 0;
+        while (p != null && depth < 8) {
+            if (p.isClickable() && p.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                p.recycle();
+                return true;
+            }
+            // Frères cliquables (bouton d'accordéon au-dessus du content).
+            for (int i = 0; i < p.getChildCount(); i++) {
+                AccessibilityNodeInfo sibling = p.getChild(i);
+                if (sibling == null) continue;
+                try {
+                    if (sibling.isClickable()
+                            && sibling.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        p.recycle();
+                        return true;
+                    }
+                } finally {
+                    sibling.recycle();
+                }
+            }
+            AccessibilityNodeInfo next = p.getParent();
+            p.recycle();
+            p = next;
+            depth++;
+        }
+        if (p != null) p.recycle();
+        return false;
     }
 
     public static boolean clickClickableParent(AccessibilityNodeInfo node) {

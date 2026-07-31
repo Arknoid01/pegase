@@ -17,7 +17,7 @@ import java.util.ArrayDeque;
  */
 public final class A11yTreeExtractor {
 
-    private static final int MAX_NODES = 120;
+    private static final int MAX_NODES = 280;
     private static final int MAX_TEXT_LEN = 500;
 
     private A11yTreeExtractor() {}

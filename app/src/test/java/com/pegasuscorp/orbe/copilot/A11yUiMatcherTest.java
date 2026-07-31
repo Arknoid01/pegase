@@ -18,6 +18,20 @@ public class A11yUiMatcherTest {
     }
 
     @Test
+    public void matchesFields_viewIdWithSpacesInQuery() {
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromText("Astronomie et espace");
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "Astronomie_et_espace-collapsible-content", "", c));
+    }
+
+    @Test
+    public void matchesFields_ignoresClickCommandWords() {
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromText("clique sur Astronomie");
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "Astronomie_et_espace-collapsible-content", "", c));
+    }
+
+    @Test
     public void matchesFields_byViewId() {
         A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromViewId("caption_button");
         assertTrue(A11yUiMatcher.matchesFields("", "com.youtube:id/caption_button", "", c));
