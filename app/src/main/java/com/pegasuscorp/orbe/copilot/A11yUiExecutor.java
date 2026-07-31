@@ -65,7 +65,8 @@ public final class A11yUiExecutor {
             cb.onConfirmNeeded(question,
                     () -> {
                         CopilotUiSupport.notifyActionInProgress(ctx, cb);
-                        withRoot(svc, r -> performClick(r, criteria, target, cb));
+                        withRoot(svc, r -> performClick(r, criteria, target, cb),
+                                () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
                     },
                     () -> cb.onError("Clic annulé."));
         }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
