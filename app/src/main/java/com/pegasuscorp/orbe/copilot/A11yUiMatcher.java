@@ -85,7 +85,7 @@ public final class A11yUiMatcher {
     public static AccessibilityNodeInfo findNode(AccessibilityNodeInfo root, Criteria criteria) {
         if (root == null || criteria == null || criteria.isEmpty()) return null;
 
-        // API système : utile quand le texte n'est pas dans getText() mais indexé autrement.
+        AccessibilityNodeInfo fromApi = null;
         if (!TextUtils.isEmpty(criteria.text)) {
             java.util.List<AccessibilityNodeInfo> byText =
                     root.findAccessibilityNodeInfosByText(criteria.text.trim());
@@ -94,14 +94,19 @@ public final class A11yUiMatcher {
                 for (AccessibilityNodeInfo n : byText) {
                     if (n != null) n.recycle();
                 }
-                if (pick != null) return pick;
+                // Ne pas court-circuiter le BFS sur un faux positif findByText (gros WebView, etc.).
+                if (pick != null && isStrongMatch(pick, criteria)) {
+                    fromApi = pick;
+                } else if (pick != null) {
+                    pick.recycle();
+                }
             }
         }
 
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(AccessibilityNodeInfo.obtain(root));
-        AccessibilityNodeInfo best = null;
-        int bestScore = Integer.MIN_VALUE;
+        AccessibilityNodeInfo best = fromApi;
+        int bestScore = best != null ? scoreCandidate(best, criteria) + 40 : Integer.MIN_VALUE;
         while (!queue.isEmpty()) {
             AccessibilityNodeInfo node = queue.removeFirst();
             try {
@@ -111,10 +116,6 @@ public final class A11yUiMatcher {
                         if (best != null) best.recycle();
                         best = AccessibilityNodeInfo.obtain(node);
                         bestScore = score;
-                        if (node.isClickable() && score >= 100) {
-                            recycleQueue(queue);
-                            return best;
-                        }
                     }
                 }
                 for (int i = 0; i < node.getChildCount(); i++) {
@@ -126,6 +127,15 @@ public final class A11yUiMatcher {
             }
         }
         return best;
+    }
+
+    private static boolean isStrongMatch(AccessibilityNodeInfo node, Criteria criteria) {
+        if (node == null) return false;
+        if (nodeMatches(node, criteria)) return true;
+        // findByText sans match fuzzy strict : seulement si le libellé contient vraiment la cible.
+        String label = normalizeForMatch(combinedLabel(node));
+        String needle = normalizeForMatch(criteria.text);
+        return !needle.isEmpty() && label.contains(needle) && label.length() < needle.length() + 48;
     }
 
     private static AccessibilityNodeInfo pickBest(
@@ -146,25 +156,51 @@ public final class A11yUiMatcher {
 
     private static int scoreCandidate(AccessibilityNodeInfo node, Criteria criteria) {
         int score = 0;
-        if (node.isClickable()) score += 50;
-        if (node.isEnabled()) score += 5;
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);
-        int h = bounds.height();
-        int w = bounds.width();
-        if (h > 0 && w > 0) score += 20;
-        if (h >= 24) score += 15;
+        int h = Math.max(0, bounds.height());
+        int w = Math.max(0, bounds.width());
+        long area = (long) h * (long) w;
+
         String label = combinedLabel(node);
         String viewId = node.getViewIdResourceName() != null ? node.getViewIdResourceName() : "";
         String hay = normalizeForMatch(label + " " + viewId);
-        if (!TextUtils.isEmpty(criteria.text)) {
-            java.util.List<String> toks = significantTokens(normalizeForMatch(criteria.text));
-            for (String tok : toks) {
-                if (hay.contains(tok)) score += 10;
+        String exact = !TextUtils.isEmpty(criteria.text)
+                ? normalizeForMatch(criteria.text) : "";
+
+        // Libellé exact / très proche > gros conteneur cliquable ambigu.
+        if (!exact.isEmpty() && normalizeForMatch(label).equals(exact)) score += 120;
+        else if (!exact.isEmpty() && normalizeForMatch(label).startsWith(exact)) score += 70;
+
+        java.util.List<String> toks = significantTokens(exact);
+        int tokHits = 0;
+        for (String tok : toks) {
+            if (hay.contains(tok)) {
+                score += 12;
+                tokHits++;
             }
-            String exact = normalizeForMatch(criteria.text);
-            if (hay.contains(exact)) score += 25;
         }
+        if (!toks.isEmpty() && tokHits == toks.size()) score += 20;
+
+        // Sections MediaWiki : viewId type Astronomie_et_espace-collapsible-*
+        String fView = normalizeForMatch(viewId);
+        if (fView.contains("collapsible") && tokHits == toks.size() && !toks.isEmpty()) {
+            score += 80;
+        }
+
+        if (node.isClickable()) score += 25;
+        if (node.isEnabled()) score += 5;
+
+        if (h >= 20 && w >= 40) score += 30;
+        else if (h > 0 && w > 0) score += 10;
+        else score -= 15; // hauteur 0 : OK pour viewId section, mais moins prioritaire qu'un vrai libellé
+
+        // Pénalise les énormes WebView / racines.
+        if (area > 800_000L) score -= 100;
+        else if (area > 400_000L) score -= 40;
+
+        if (CopilotLocaleFilter.isBrowserChromeLabel(label)) score -= 200;
+
         return score;
     }
 

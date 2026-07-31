@@ -32,9 +32,20 @@ public final class A11yUiExecutor {
     }
 
     public static void highlightTarget(Context ctx, A11yUiMatcher.Target target) {
-        if (ctx == null || target == null || !target.hasBounds()) return;
-        ElementHighlightService.showActionTarget(ctx, target.left, target.top,
-                target.right, target.bottom, target.text);
+        if (ctx == null || target == null) return;
+        int left = target.left;
+        int top = target.top;
+        int right = target.right;
+        int bottom = target.bottom;
+        // Sections Wiki hauteur 0 : surligne une bande cliquable juste au-dessus.
+        if (bottom <= top && right > left) {
+            bottom = top + 48;
+            top = Math.max(0, top - 48);
+        }
+        if (right <= left || bottom <= top) return;
+        String label = !TextUtils.isEmpty(target.text) ? target.text
+                : UiExplainHelper.humanizeViewId(target.viewId);
+        ElementHighlightService.showActionTarget(ctx, left, top, right, bottom, label);
     }
 
     public static void executeClick(Context ctx, PegaseAccessibilityService svc,
@@ -140,9 +151,20 @@ public final class A11yUiExecutor {
         }
         try {
             boolean ok = A11yUiMatcher.performClick(node);
+            if (!ok && preview != null) {
+                ok = tapTarget(preview);
+            }
+            if (!ok) {
+                // Dernier recours : tap sur le nœud frais trouvé.
+                android.graphics.Rect b = new android.graphics.Rect();
+                node.getBoundsInScreen(b);
+                ok = tapBounds(b);
+            }
             if (ok) {
                 String label = preview != null && !TextUtils.isEmpty(preview.text)
-                        ? preview.text : "l'élément";
+                        ? preview.text
+                        : (preview != null ? UiExplainHelper.humanizeViewId(preview.viewId) : "l'élément");
+                if (TextUtils.isEmpty(label)) label = "l'élément";
                 cb.onSuccess(ToolResult.text("Clic sur « " + label + " »."));
             } else {
                 cb.onError("Le clic n'a pas abouti — l'élément n'est peut-être pas cliquable.");
@@ -150,6 +172,30 @@ public final class A11yUiExecutor {
         } finally {
             node.recycle();
         }
+    }
+
+    private static boolean tapTarget(A11yUiMatcher.Target target) {
+        if (target == null) return false;
+        int left = target.left;
+        int top = target.top;
+        int right = target.right;
+        int bottom = target.bottom;
+        if (bottom <= top && right > left) {
+            // Bande d'en-tête collapsible au-dessus du content viewId.
+            bottom = top;
+            top = Math.max(0, top - 56);
+        }
+        android.graphics.Rect b = new android.graphics.Rect(left, top, right, bottom);
+        return tapBounds(b);
+    }
+
+    private static boolean tapBounds(android.graphics.Rect b) {
+        if (b == null || b.width() <= 0) return false;
+        int h = b.height();
+        float x = b.exactCenterX();
+        float y = h > 0 ? b.exactCenterY() : Math.max(1f, b.top - 28f);
+        PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
+        return svc != null && svc.tapScreen(x, y);
     }
 
     private interface RootTask {

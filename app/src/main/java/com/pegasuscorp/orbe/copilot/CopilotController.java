@@ -400,6 +400,7 @@ public final class CopilotController {
                     if (bubbleSink != null && result != null && result.text != null) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
+                    setSending(false);
                 });
             }
 
@@ -425,9 +426,22 @@ public final class CopilotController {
             @Override
             public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
                 main.post(() -> {
-                    if (gen != attachGeneration) return;
-                    if (bubbleSink != null) {
-                        bubbleSink.onConfirmNeeded(question, onConfirm, onCancel);
+                    if (gen != attachGeneration) {
+                        if (onCancel != null) onCancel.run();
+                        return;
+                    }
+                    BubbleSink sink = bubbleSink;
+                    if (sink != null) {
+                        sink.onStatus(null);
+                        sink.onConfirmNeeded(question, () -> {
+                            sink.onStatus(appContext.getString(R.string.copilot_status_action));
+                            if (onConfirm != null) onConfirm.run();
+                        }, () -> {
+                            sink.onStatus(null);
+                            if (onCancel != null) onCancel.run();
+                        });
+                    } else if (onCancel != null) {
+                        onCancel.run();
                     }
                 });
                 return true;

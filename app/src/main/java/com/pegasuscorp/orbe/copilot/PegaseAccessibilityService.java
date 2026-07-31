@@ -2,7 +2,9 @@ package com.pegasuscorp.orbe.copilot;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
@@ -78,6 +80,20 @@ public class PegaseAccessibilityService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {}
+
+    /**
+     * Tap écran (gesture) — repli quand ACTION_CLICK a11y échoue (WebView / sections Wiki).
+     */
+    public boolean tapScreen(float x, float y) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
+        if (x < 0 || y < 0) return false;
+        android.graphics.Path path = new android.graphics.Path();
+        path.moveTo(x, y);
+        GestureDescription.StrokeDescription stroke =
+                new GestureDescription.StrokeDescription(path, 0, 60);
+        GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
+        return dispatchGesture(gesture, null, null);
+    }
 
     /** Active les sous-titres YouTube (action locale, sans cloud). */
     public boolean activateYouTubeSubtitles() {
