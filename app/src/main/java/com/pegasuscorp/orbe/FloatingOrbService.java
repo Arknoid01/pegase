@@ -32,6 +32,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.pegasuscorp.orbe.copilot.CopilotBubblePanel;
 import com.pegasuscorp.orbe.copilot.CopilotController;
@@ -72,6 +75,9 @@ public class FloatingOrbService extends Service {
     private boolean bubbleExpanded;
     private boolean foregroundStarted;
     private float density;
+    /** Hauteur IME (px) — pour remonter / réduire la bulle au-dessus du clavier. */
+    private int imeBottomPx;
+    private DragAndTapListener dragListener;
 
     @Override
     public void onCreate() {
@@ -147,9 +153,11 @@ public class FloatingOrbService extends Service {
         overlayRoot = new FrameLayout(this);
         overlayRoot.setBackgroundColor(Color.TRANSPARENT);
 
+        // Orbe en haut de la fenêtre : params.x/y = position de l'orbe (pas le haut d'une
+        // grande bulle), sinon clamp empêche d'aller au-dessus de la moitié d'écran.
         orbView = new MiniOrbView(this, currentMode == OverlayMode.COPILOT);
         overlayRoot.addView(orbView, new FrameLayout.LayoutParams(
-                orbSizePx(), orbSizePx(), Gravity.END | Gravity.BOTTOM));
+                orbSizePx(), orbSizePx(), Gravity.END | Gravity.TOP));
 
         if (currentMode == OverlayMode.COPILOT) {
             setupCopilotBubble();
@@ -169,6 +177,7 @@ public class FloatingOrbService extends Service {
         }
 
         attachOrbTouchListener();
+        setupImeInsets();
 
         try {
             wm.addView(overlayRoot, layoutParams);
@@ -184,8 +193,8 @@ public class FloatingOrbService extends Service {
         bubblePanel = new CopilotBubblePanel(this);
         bubblePanel.setVisibility(View.GONE);
         FrameLayout.LayoutParams bubbleLp = new FrameLayout.LayoutParams(
-                dp(BUBBLE_W_DP), dp(BUBBLE_H_DP), Gravity.END | Gravity.BOTTOM);
-        bubbleLp.bottomMargin = orbSizePx() + dp(8);
+                dp(BUBBLE_W_DP), dp(BUBBLE_H_DP), Gravity.END | Gravity.TOP);
+        bubbleLp.topMargin = orbSizePx() + dp(8);
         overlayRoot.addView(bubblePanel, bubbleLp);
         bubblePanel.setListener(new CopilotBubblePanel.Listener() {
             @Override
@@ -271,7 +280,9 @@ public class FloatingOrbService extends Service {
     }
 
     private void attachOrbTouchListener() {
-        orbView.setOnTouchListener(new DragAndTapListener(wm, layoutParams, overlayRoot, () -> {
+        dragListener = new DragAndTapListener(wm, layoutParams, overlayRoot,
+                this::orbSizePx,
+                () -> {
             if (currentMode == OverlayMode.COPILOT) {
                 toggleBubble(!bubbleExpanded);
             } else {
@@ -286,7 +297,97 @@ public class FloatingOrbService extends Service {
             if (currentMode == OverlayMode.COPILOT) {
                 showCopilotMenu();
             }
-        }));
+        });
+        orbView.setOnTouchListener(dragListener);
+    }
+
+    /** Insets IME → remonte la fenêtre et réduit la bulle pour garder la conversation visible. */
+    private void setupImeInsets() {
+        if (overlayRoot == null) return;
+        ViewCompat.setOnApplyWindowInsetsListener(overlayRoot, (v, insets) -> {
+            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+            int bottom = Math.max(0, ime.bottom);
+            if (bottom != imeBottomPx) {
+                imeBottomPx = bottom;
+                applyImeAwareLayout();
+            }
+            return insets;
+        });
+        // Fallback : frame visible (certains overlays ne dispatchent pas bien les insets IME)
+        overlayRoot.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (!bubbleExpanded || overlayRoot == null || layoutParams == null) return;
+            android.graphics.Rect visible = new android.graphics.Rect();
+            overlayRoot.getWindowVisibleDisplayFrame(visible);
+            int screenH = screenHeightPx();
+            int inferred = Math.max(0, screenH - visible.bottom);
+            // Ignore micro-variations / barre de nav seule
+            if (inferred < dp(80)) inferred = 0;
+            if (inferred != imeBottomPx) {
+                imeBottomPx = inferred;
+                applyImeAwareLayout();
+            }
+        });
+    }
+
+    private void applyImeAwareLayout() {
+        if (layoutParams == null || wm == null || overlayRoot == null) return;
+        if (currentMode != OverlayMode.COPILOT || !bubbleExpanded || bubblePanel == null) {
+            return;
+        }
+        int screenH = screenHeightPx();
+        int orb = orbSizePx();
+        int gap = dp(8);
+        int pad = dp(8);
+        int maxBubble = dp(BUBBLE_H_DP);
+        int minBubble = dp(160);
+        int visibleBottom = Math.max(orb + gap + minBubble, screenH - imeBottomPx);
+        // Place la fenêtre pour que bas(orbe+bulle) reste au-dessus du clavier
+        int need = orb + gap + maxBubble + pad;
+        int y = layoutParams.y;
+        if (y + need > visibleBottom) {
+            y = Math.max(0, visibleBottom - need);
+        }
+        int availableForBubble = visibleBottom - y - orb - gap - pad;
+        int bubbleH = Math.max(minBubble, Math.min(maxBubble, availableForBubble));
+        // Si le clavier est très haut, remonte encore
+        need = orb + gap + bubbleH + pad;
+        if (y + need > visibleBottom) {
+            y = Math.max(0, visibleBottom - need);
+            availableForBubble = visibleBottom - y - orb - gap - pad;
+            bubbleH = Math.max(minBubble, Math.min(maxBubble, availableForBubble));
+            need = orb + gap + bubbleH + pad;
+        }
+
+        FrameLayout.LayoutParams blp = (FrameLayout.LayoutParams) bubblePanel.getLayoutParams();
+        if (blp.height != bubbleH || blp.topMargin != orb + gap) {
+            blp.height = bubbleH;
+            blp.topMargin = orb + gap;
+            bubblePanel.setLayoutParams(blp);
+        }
+        layoutParams.y = y;
+        layoutParams.height = need;
+        try {
+            wm.updateViewLayout(overlayRoot, layoutParams);
+        } catch (Exception ignored) {}
+        bubblePanel.post(bubblePanel::scrollToBottom);
+    }
+
+    private int screenHeightPx() {
+        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+        if (wm != null) {
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return dm.heightPixels;
+        }
+        return getResources().getDisplayMetrics().heightPixels;
+    }
+
+    private int screenWidthPx() {
+        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+        if (wm != null) {
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return dm.widthPixels;
+        }
+        return getResources().getDisplayMetrics().widthPixels;
     }
 
     private void toggleBubble(boolean open) {
@@ -294,19 +395,34 @@ public class FloatingOrbService extends Service {
         CopilotPrefs.setBubbleOpen(this, open);
         if (open) showBubble();
         else hideBubble();
-        updateWindowFocus();
     }
 
     private void showBubble() {
         if (bubblePanel == null) return;
         bubblePanel.setVisibility(View.VISIBLE);
         applyExpandedWindowSize();
+        updateWindowFocus();
+        applyImeAwareLayout();
+        if (bubblePanel != null) {
+            bubblePanel.post(bubblePanel::focusInput);
+            // Fallback si les insets IME arrivent en retard sur overlay
+            overlayRoot.postDelayed(this::applyImeAwareLayout, 280);
+            overlayRoot.postDelayed(this::applyImeAwareLayout, 560);
+        }
     }
 
     private void hideBubble() {
         if (bubblePanel == null) return;
+        bubblePanel.hideKeyboard();
+        imeBottomPx = 0;
+        // Restaure hauteur bulle par défaut
+        FrameLayout.LayoutParams blp = (FrameLayout.LayoutParams) bubblePanel.getLayoutParams();
+        blp.height = dp(BUBBLE_H_DP);
+        blp.topMargin = orbSizePx() + dp(8);
+        bubblePanel.setLayoutParams(blp);
         bubblePanel.setVisibility(View.GONE);
         applyCollapsedWindowSize();
+        updateWindowFocus();
     }
 
     private void applyModeLayout() {
@@ -315,6 +431,7 @@ public class FloatingOrbService extends Service {
         int size = orbSizePx();
         orbLp.width = size;
         orbLp.height = size;
+        orbLp.gravity = Gravity.END | Gravity.TOP;
         if (orbView instanceof MiniOrbView) {
             ((MiniOrbView) orbView).setDiscreet(currentMode == OverlayMode.COPILOT);
         }
@@ -328,8 +445,8 @@ public class FloatingOrbService extends Service {
             detachCopilot();
             if (bubblePanel != null) bubblePanel.setVisibility(View.GONE);
             applyCollapsedWindowSize();
+            updateWindowFocus();
         }
-        updateWindowFocus();
     }
 
     private void setOrbActive(boolean active) {
@@ -342,6 +459,8 @@ public class FloatingOrbService extends Service {
         if (layoutParams == null || wm == null) return;
         layoutParams.width = dp(BUBBLE_W_DP);
         layoutParams.height = dp(BUBBLE_H_DP) + orbSizePx() + dp(16);
+        layoutParams.gravity = Gravity.TOP | Gravity.START;
+        clampOrbOnScreen();
         wm.updateViewLayout(overlayRoot, layoutParams);
     }
 
@@ -349,19 +468,39 @@ public class FloatingOrbService extends Service {
         if (layoutParams == null || wm == null) return;
         layoutParams.width = orbSizePx();
         layoutParams.height = orbSizePx();
+        layoutParams.gravity = Gravity.TOP | Gravity.START;
+        clampOrbOnScreen();
         wm.updateViewLayout(overlayRoot, layoutParams);
     }
 
+    /** Clamp pour que l'orbe (pas toute la bulle) reste dans l'écran. */
+    private void clampOrbOnScreen() {
+        if (layoutParams == null) return;
+        int maxX = Math.max(0, screenWidthPx() - orbSizePx());
+        int maxY = Math.max(0, screenHeightPx() - orbSizePx());
+        layoutParams.x = Math.max(0, Math.min(layoutParams.x, maxX));
+        layoutParams.y = Math.max(0, Math.min(layoutParams.y, maxY));
+    }
+
+    /**
+     * Orbe seule : non focusable (ne vole pas le clavier des autres apps).
+     * Bulle ouverte : focusable + cible IME — sans {@code FLAG_ALT_FOCUSABLE_IM},
+     * qui empêche justement le clavier sur une fenêtre focusable.
+     */
     private void updateWindowFocus() {
         if (layoutParams == null || wm == null) return;
         if (currentMode == OverlayMode.COPILOT && bubbleExpanded) {
             layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+            layoutParams.softInputMode =
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
         } else {
             layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+            layoutParams.softInputMode =
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
         }
+        layoutParams.gravity = Gravity.TOP | Gravity.START;
         wm.updateViewLayout(overlayRoot, layoutParams);
     }
 
@@ -400,11 +539,13 @@ public class FloatingOrbService extends Service {
                 ? dp(BUBBLE_W_DP) : orbSizePx();
         int h = currentMode == OverlayMode.COPILOT && bubbleExpanded
                 ? dp(BUBBLE_H_DP) + orbSizePx() + dp(16) : orbSizePx();
-        return new WindowManager.LayoutParams(
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 w, h, type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.START;
+        return lp;
     }
 
     private int orbSizePx() {
@@ -715,6 +856,7 @@ public class FloatingOrbService extends Service {
         private final WindowManager wm;
         private final WindowManager.LayoutParams params;
         private final View root;
+        private final java.util.function.IntSupplier orbSizePx;
         private final Runnable onTap;
         private final Runnable onLongPress;
 
@@ -722,25 +864,25 @@ public class FloatingOrbService extends Service {
         private int startParamX, startParamY;
         private boolean dragged;
         private long downTime;
-        private int maxX = Integer.MAX_VALUE;
-        private int maxY = Integer.MAX_VALUE;
 
         DragAndTapListener(WindowManager wm, WindowManager.LayoutParams p, View root,
+                           java.util.function.IntSupplier orbSizePx,
                            Runnable onTap, Runnable onLongPress) {
             this.wm = wm;
             this.params = p;
             this.root = root;
+            this.orbSizePx = orbSizePx;
             this.onTap = onTap;
             this.onLongPress = onLongPress;
-            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
-            wm.getDefaultDisplay().getRealMetrics(dm);
-            root.post(() -> {
-                maxX = Math.max(0, dm.widthPixels - root.getWidth());
-                maxY = Math.max(0, dm.heightPixels - root.getHeight());
-            });
         }
 
         private void clampPosition() {
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            // Clamp sur la taille de l'orbe (pas la fenêtre entière) → orbe libre sur tout l'écran
+            int clamp = Math.max(1, orbSizePx.getAsInt());
+            int maxX = Math.max(0, dm.widthPixels - clamp);
+            int maxY = Math.max(0, dm.heightPixels - clamp);
             params.x = Math.max(0, Math.min(params.x, maxX));
             params.y = Math.max(0, Math.min(params.y, maxY));
         }

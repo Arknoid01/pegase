@@ -6,6 +6,7 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -125,7 +126,13 @@ public final class CopilotBubblePanel extends FrameLayout {
         input.setBackground(inputBg());
         input.setPadding(dp(10), dp(8), dp(10), dp(8));
         input.setMaxLines(3);
+        input.setFocusable(true);
+        input.setFocusableInTouchMode(true);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        input.setOnClickListener(v -> focusInput());
+        input.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) showKeyboard();
+        });
         input.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 submitInput();
@@ -147,6 +154,32 @@ public final class CopilotBubblePanel extends FrameLayout {
 
     public void setListener(Listener listener) {
         this.listener = listener;
+    }
+
+    /** Focus + ouverture clavier (bulle overlay focusable). */
+    public void focusInput() {
+        if (input == null || !input.isEnabled()) return;
+        input.requestFocus();
+        showKeyboard();
+    }
+
+    public void hideKeyboard() {
+        if (input == null) return;
+        InputMethodManager imm = (InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
+        }
+        input.clearFocus();
+    }
+
+    private void showKeyboard() {
+        if (input == null) return;
+        InputMethodManager imm = (InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
+        }
     }
 
     public void setSending(boolean sending) {
@@ -310,7 +343,7 @@ public final class CopilotBubblePanel extends FrameLayout {
         return lp;
     }
 
-    private void scrollToBottom() {
+    public void scrollToBottom() {
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 

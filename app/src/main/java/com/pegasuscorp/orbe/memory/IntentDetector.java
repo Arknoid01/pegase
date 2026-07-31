@@ -15,6 +15,10 @@ public final class IntentDetector {
         if (looksLikeOrion(fold)) {
             return "orion";
         }
+        // Agenda avant diag : « prévu cette semaine » ≠ bilan de traces
+        if (looksLikeAgendaQuery(fold) || looksLikeAgenda(fold)) {
+            return "agenda";
+        }
         if (looksLikeDiag(fold)) {
             return "diag";
         }
@@ -215,7 +219,6 @@ public final class IntentDetector {
                 || fold.contains("tu as quelque chose")
                 || fold.contains("comment va tu")
                 || fold.contains("comment vas tu")
-                || fold.contains("cette semaine")
                 || fold.contains("probleme cette semaine")
                 || fold.contains("problemes cette semaine")
                 || fold.contains("bilan de la semaine")
@@ -361,16 +364,32 @@ public final class IntentDetector {
         return f.contains("genere") && f.contains("correction");
     }
 
-    /** true si la demande vise plutôt le bilan hebdo / archives. */
+    /**
+     * true si la demande vise le bilan hebdo / archives diag —
+     * pas un agenda (« prévu cette semaine ») ni une météo.
+     */
     public static boolean looksLikeWeeklyDiag(String fold) {
         if (fold == null || fold.isEmpty()) return false;
-        return fold.contains("cette semaine")
-                || fold.contains("bilan de la semaine")
-                || fold.contains("bilan semaine")
+        // Agenda / planning utilisateur ≠ bilan de traces Pégase
+        if (looksLikeAgenda(fold) || looksLikeAgendaQuery(fold)) return false;
+        if (fold.contains("bilan de la semaine") || fold.contains("bilan semaine")) {
+            return true;
+        }
+        if (fold.contains("archives") && fold.contains("trace")) return true;
+        boolean weekSpan = fold.contains("cette semaine")
                 || fold.contains("sur 7 jours")
                 || fold.contains("ces derniers jours")
-                || fold.contains("la semaine derniere")
-                || (fold.contains("archives") && fold.contains("trace"));
+                || fold.contains("la semaine derniere");
+        if (!weekSpan) return false;
+        return fold.contains("bilan")
+                || fold.contains("probleme")
+                || fold.contains("erreur")
+                || fold.contains("trace")
+                || fold.contains("diagnostic")
+                || fold.contains("comment tu")
+                || fold.contains("tu vas")
+                || fold.contains("echec")
+                || fold.contains("friction");
     }
 
     /**
@@ -479,7 +498,9 @@ public final class IntentDetector {
                 || fold.contains("mon planning")
                 || fold.contains("ma journee")
                 || fold.contains("ma journée")
-                || fold.contains("programme");
+                || fold.contains("programme")
+                || fold.contains("prevu")
+                || fold.contains("prévu");
         boolean cal = fold.contains("agenda")
                 || fold.contains("calendrier")
                 || fold.contains("rendez")

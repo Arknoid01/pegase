@@ -783,6 +783,10 @@ public class PegaseSession {
         if (userText == null || userText.trim().isEmpty()) return false;
         String fold = SpeechInputNormalizer.fold(userText).replace('\'', ' ')
                 .replace('’', ' ').replaceAll("\\s+", " ").trim();
+        // « agenda cette semaine » ne doit jamais court-circuiter vers diag weekly
+        if (IntentDetector.looksLikeAgenda(fold) || IntentDetector.looksLikeAgendaQuery(fold)) {
+            return false;
+        }
         if (IntentDetector.looksLikeDiagToolUsageQuestion(fold)) {
             String answer = answerDiagToolUsageFromTrace();
             conv.addUserMessage(userText.trim());

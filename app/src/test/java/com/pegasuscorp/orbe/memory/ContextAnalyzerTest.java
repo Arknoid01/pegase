@@ -112,6 +112,30 @@ public class ContextAnalyzerTest {
     }
 
     @Test
+    public void agendaCetteSemaine_isNotWeeklyDiag() {
+        String fold = SpeechInputNormalizer.fold(
+                        "J'ai des choses de prévu dans mon agenda cette semaine ?")
+                .replace('\'', ' ').replace('’', ' ')
+                .replaceAll("\\s+", " ").trim();
+        assertTrue(IntentDetector.looksLikeAgenda(fold));
+        assertTrue(IntentDetector.looksLikeAgendaQuery(fold));
+        assertFalse(IntentDetector.looksLikeDiag(fold));
+        assertFalse(IntentDetector.looksLikeWeeklyDiag(fold));
+    }
+
+    @Test
+    public void bilanCetteSemaine_isStillWeeklyDiag() {
+        String fold = SpeechInputNormalizer.fold("Bilan de la semaine")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeWeeklyDiag(fold));
+        assertTrue(IntentDetector.looksLikeDiag(fold));
+        String fold2 = SpeechInputNormalizer.fold(
+                        "Tu as eu des problèmes cette semaine ?")
+                .replace('\'', ' ').replace('’', ' ');
+        assertTrue(IntentDetector.looksLikeWeeklyDiag(fold2));
+    }
+
+    @Test
     public void looksLikeDiag_problemeAvec_et_euUnProbleme() {
         assertTrue(IntentDetector.looksLikeDiag(
                 SpeechInputNormalizer.fold("J'ai un problème avec le timer")
@@ -122,7 +146,7 @@ public class ContextAnalyzerTest {
         assertTrue(IntentDetector.looksLikeDiag(
                 SpeechInputNormalizer.fold("Tu as eut un problème ?")
                         .replace('\'', ' ')));
-        assertTrue(IntentDetector.looksLikeDiag(
+        assertTrue(IntentDetector.looksLikeDiagDetailFollowUp(
                 SpeechInputNormalizer.fold("Tu peux m'en dire plus")
                         .replace('\'', ' ')));
         assertTrue(IntentDetector.looksLikeDiag(
