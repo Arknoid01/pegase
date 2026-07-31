@@ -16,8 +16,12 @@ public final class UiExplainHelper {
     private UiExplainHelper() {}
 
     public static A11yUiMatcher.Target resolveTarget(Context ctx, JSONObject params) {
+        A11yUiMatcher.Target fromBounds = targetFromBounds(params);
+        if (fromBounds != null) return fromBounds;
+
         A11yUiMatcher.Criteria criteria = A11yUiExecutor.parseCriteria(params);
         if (criteria.isEmpty()) return null;
+
         PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
         if (svc != null) {
             android.view.accessibility.AccessibilityNodeInfo root = svc.getRootInActiveWindow();
@@ -49,6 +53,20 @@ public final class UiExplainHelper {
                         target.text, text,
                         target.left, target.top, target.right, target.bottom));
         TranslationOverlayService.showExplain(ctx, blocks);
+    }
+
+    private static A11yUiMatcher.Target targetFromBounds(JSONObject params) {
+        if (params == null || !params.has("left") || !params.has("top")
+                || !params.has("right") || !params.has("bottom")) {
+            return null;
+        }
+        int left = params.optInt("left");
+        int top = params.optInt("top");
+        int right = params.optInt("right");
+        int bottom = params.optInt("bottom");
+        if (right <= left || bottom <= top) return null;
+        String label = params.optString("target", params.optString("label", "")).trim();
+        return new A11yUiMatcher.Target(label, "", "", false, left, top, right, bottom);
     }
 
     private static A11yUiMatcher.Target findInSnapshot(Context ctx, A11yUiMatcher.Criteria criteria) {

@@ -141,10 +141,11 @@ Statut **"Action en cours"** à ajouter dans la bulle, à côté des statuts exi
 | 2. Matcher générique | ✅ | `A11yUiMatcher` |
 | 3. Highlight ponctuel | ✅ | `ElementHighlightService.showActionTarget` |
 | 4. `ui_action` | ✅ | `A11yUiExecutor`, `UiActionTool`, `A11yClickPolicy` |
-| 5. `ui_explain` | ✅ (local + overlay, vision repli à venir) | `UiExplainTool`, `UiExplainHelper` |
+| 5. `ui_explain` | ✅ (local + vision repli + overlay) | `UiExplainTool`, `UiExplainHelper`, `UiExplainVision` |
 | 6. `ui_search` | ✅ | `UiSearchTool` → `WebSearchTool` |
 | 7. Tests unitaires | ✅ | `A11yUiMatcherTest`, `A11yClickPolicyTest` |
-| 8. Validation device | ⏳ | — |
+| 8. Statut bulle « Action en cours » | ✅ | `CopilotUiSupport`, `CopilotController.onToolProgress` |
+| 9. Validation device | ⏳ | — |
 
 ---
 

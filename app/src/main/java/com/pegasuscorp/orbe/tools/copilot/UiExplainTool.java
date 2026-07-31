@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.tools.copilot;
 import com.pegasuscorp.orbe.copilot.A11yUiExecutor;
 import com.pegasuscorp.orbe.copilot.A11yUiMatcher;
 import com.pegasuscorp.orbe.copilot.UiExplainHelper;
+import com.pegasuscorp.orbe.copilot.UiExplainVision;
 import com.pegasuscorp.orbe.tools.Tool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
@@ -14,7 +15,7 @@ import android.text.TextUtils;
 import org.json.JSONObject;
 
 /**
- * Explique un élément à l'écran — texte local puis overlay (v4).
+ * Explique un élément à l'écran — texte local, repli vision, overlay (v4).
  */
 public final class UiExplainTool implements Tool {
 
@@ -31,7 +32,7 @@ public final class UiExplainTool implements Tool {
     @Override
     public String description() {
         return "ui_explain(target:str, view_id:str, question:str) — Explique un élément "
-                + "visible (overlay local). Ne ouvre jamais de page web.";
+                + "visible (texte local ou vision si image/icône). Ne ouvre jamais de page web.";
     }
 
     @Override
@@ -43,9 +44,15 @@ public final class UiExplainTool implements Tool {
             return;
         }
         String question = params.optString("question", "").trim();
+
+        if (UiExplainVision.needsVisionFallback(target)) {
+            UiExplainVision.explain(ctx, target, question, cb);
+            return;
+        }
+
         String answer = UiExplainHelper.localAnswer(target, question);
         if (TextUtils.isEmpty(answer)) {
-            cb.onError("Pas de texte lisible sur cet élément — essaie la capture écran.");
+            UiExplainVision.explain(ctx, target, question, cb);
             return;
         }
         A11yUiExecutor.highlightTarget(ctx, target);

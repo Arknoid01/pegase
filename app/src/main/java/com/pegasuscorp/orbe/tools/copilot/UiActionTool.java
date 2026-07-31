@@ -50,7 +50,7 @@ public final class UiActionTool implements Tool {
                 A11yUiExecutor.executeScroll(ctx, svc, params, cb);
                 break;
             case "back":
-                A11yUiExecutor.executeBack(svc, cb);
+                A11yUiExecutor.executeBack(ctx, svc, cb);
                 break;
             default:
                 cb.onError("Action ui_action inconnue : " + action);

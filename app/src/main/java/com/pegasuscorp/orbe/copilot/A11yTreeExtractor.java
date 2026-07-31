@@ -130,14 +130,20 @@ public final class A11yTreeExtractor {
         String combined = "";
         if (text != null && text.length() > 0) combined = text.toString().trim();
         else if (desc != null && desc.length() > 0) combined = desc.toString().trim();
-        if (combined.isEmpty()) return;
+        if (combined.isEmpty()) {
+            String viewIdOnly = node.getViewIdResourceName();
+            if (viewIdOnly == null || viewIdOnly.isEmpty()) return;
+            combined = "";
+        }
         if (combined.length() > MAX_TEXT_LEN) {
             combined = combined.substring(0, MAX_TEXT_LEN) + "…";
         }
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);
         JSONObject o = new JSONObject();
-        o.put("text", combined);
+        if (!combined.isEmpty()) {
+            o.put("text", combined);
+        }
         o.put("class", node.getClassName() != null ? node.getClassName().toString() : "");
         String viewId = node.getViewIdResourceName();
         if (viewId != null && !viewId.isEmpty()) {

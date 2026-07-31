@@ -85,6 +85,11 @@ public final class CopilotController {
                 String error = intent.getStringExtra("error");
                 if (bubbleSink != null && !TextUtils.isEmpty(error)) {
                     bubbleSink.onError(error);
+                    return;
+                }
+                String status = intent.getStringExtra("status");
+                if (bubbleSink != null && !TextUtils.isEmpty(status)) {
+                    bubbleSink.onStatus(status);
                 }
             }
         };
@@ -361,6 +366,7 @@ public final class CopilotController {
             public void onReply(String text, boolean toolFired) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
+                    if (bubbleSink != null) bubbleSink.onStatus(null);
                     if (!toolFired && bubbleSink != null && !TextUtils.isEmpty(text)) {
                         bubbleSink.onAssistantMessage(text);
                     }
@@ -377,9 +383,20 @@ public final class CopilotController {
             }
 
             @Override
+            public void onToolProgress(String message) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    if (bubbleSink != null && !TextUtils.isEmpty(message)) {
+                        bubbleSink.onStatus(message);
+                    }
+                });
+            }
+
+            @Override
             public void onToolResult(ToolResult result) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
+                    if (bubbleSink != null) bubbleSink.onStatus(null);
                     if (bubbleSink != null && result != null && result.text != null) {
                         bubbleSink.onAssistantMessage(result.text);
                     }

@@ -50,6 +50,7 @@ public final class UiSearchTool implements Tool {
       A11yUiExecutor.highlightTarget(ctx, target);
       query = target.text;
     }
+    CopilotUiSupport.notifyActionInProgress(ctx, cb);
     try {
       webSearch.execute(ctx, new JSONObject().put("query", query), cb);
     } catch (Exception e) {

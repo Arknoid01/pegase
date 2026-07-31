@@ -121,17 +121,22 @@ public final class A11yUiMatcher {
     }
 
     static boolean matchesFields(String label, String viewId, String className, Criteria criteria) {
-        String hay = fold(label) + " " + fold(viewId) + " " + fold(className);
-        if (hay.trim().isEmpty()) return false;
-        boolean textOk = TextUtils.isEmpty(criteria.text)
-                || hay.contains(fold(criteria.text));
-        boolean viewOk = TextUtils.isEmpty(criteria.viewId)
-                || fold(viewId).contains(fold(criteria.viewId))
-                || hay.contains(fold(criteria.viewId));
-        if (!TextUtils.isEmpty(criteria.text) && !TextUtils.isEmpty(criteria.viewId)) {
-            return textOk && viewOk;
+        if (criteria == null || criteria.isEmpty()) return false;
+        String fLabel = fold(label);
+        String fViewId = fold(viewId);
+        String fClass = fold(className);
+        String hay = (fLabel + " " + fViewId + " " + fClass).trim();
+        boolean textOnly = !TextUtils.isEmpty(criteria.text) && TextUtils.isEmpty(criteria.viewId);
+        boolean viewOnly = TextUtils.isEmpty(criteria.text) && !TextUtils.isEmpty(criteria.viewId);
+        if (viewOnly) {
+            return fViewId.contains(fold(criteria.viewId)) || hay.contains(fold(criteria.viewId));
         }
-        return textOk || viewOk;
+        if (textOnly) {
+            return !hay.isEmpty() && hay.contains(fold(criteria.text));
+        }
+        boolean textOk = hay.contains(fold(criteria.text));
+        boolean viewOk = fViewId.contains(fold(criteria.viewId)) || hay.contains(fold(criteria.viewId));
+        return textOk && viewOk;
     }
 
     public static Target targetFromNode(AccessibilityNodeInfo node) {

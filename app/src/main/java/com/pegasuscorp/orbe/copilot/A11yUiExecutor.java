@@ -6,6 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
+import com.pegasuscorp.orbe.tools.copilot.CopilotUiSupport;
 
 import org.json.JSONObject;
 
@@ -38,6 +39,7 @@ public final class A11yUiExecutor {
 
     public static void executeClick(Context ctx, PegaseAccessibilityService svc,
             JSONObject params, ToolCallback cb) {
+        CopilotUiSupport.notifyActionInProgress(ctx, cb);
         A11yUiMatcher.Criteria criteria = parseCriteria(params);
         if (criteria.isEmpty()) {
             cb.onError("Indique la cible à cliquer (target ou view_id).");
@@ -61,13 +63,17 @@ public final class A11yUiExecutor {
             }
             String question = A11yClickPolicy.buildConfirmQuestion(target, level);
             cb.onConfirmNeeded(question,
-                    () -> withRoot(svc, r -> performClick(r, criteria, target, cb)),
+                    () -> {
+                        CopilotUiSupport.notifyActionInProgress(ctx, cb);
+                        withRoot(svc, r -> performClick(r, criteria, target, cb));
+                    },
                     () -> cb.onError("Clic annulé."));
         }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
     }
 
     public static void executeType(Context ctx, PegaseAccessibilityService svc,
             JSONObject params, ToolCallback cb) {
+        CopilotUiSupport.notifyActionInProgress(ctx, cb);
         String value = params.optString("value", params.optString("text_value", "")).trim();
         if (value.isEmpty()) {
             cb.onError("Indique le texte à saisir (value).");
@@ -99,6 +105,7 @@ public final class A11yUiExecutor {
 
     public static void executeScroll(Context ctx, PegaseAccessibilityService svc,
             JSONObject params, ToolCallback cb) {
+        CopilotUiSupport.notifyActionInProgress(ctx, cb);
         String direction = params.optString("direction", "down");
         withRoot(svc, root -> {
             if (!isForegroundAllowed(ctx, root)) {
@@ -111,7 +118,8 @@ public final class A11yUiExecutor {
         }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
     }
 
-    public static void executeBack(PegaseAccessibilityService svc, ToolCallback cb) {
+    public static void executeBack(Context ctx, PegaseAccessibilityService svc, ToolCallback cb) {
+        CopilotUiSupport.notifyActionInProgress(ctx, cb);
         if (svc == null) {
             cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
             return;

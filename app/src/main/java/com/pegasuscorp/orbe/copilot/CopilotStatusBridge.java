@@ -20,4 +20,12 @@ public final class CopilotStatusBridge {
         i.putExtra("error", message);
         ctx.getApplicationContext().sendBroadcast(i);
     }
+
+    public static void postStatus(Context ctx, String message) {
+        if (ctx == null || message == null || message.isEmpty()) return;
+        Intent i = new Intent(ACTION_STATUS);
+        i.setPackage(ctx.getPackageName());
+        i.putExtra("status", message);
+        ctx.getApplicationContext().sendBroadcast(i);
+    }
 }

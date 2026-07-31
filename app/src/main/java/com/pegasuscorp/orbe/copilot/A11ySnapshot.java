@@ -71,7 +71,8 @@ public final class A11ySnapshot {
                 JSONObject o = nodes.optJSONObject(i);
                 if (o == null) continue;
                 String text = o.optString("text", "").trim();
-                if (text.isEmpty()) continue;
+                String viewId = o.optString("viewId", "");
+                if (text.isEmpty() && viewId.isEmpty()) continue;
                 out.add(new Node(
                         text,
                         o.optString("viewId", ""),

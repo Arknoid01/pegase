@@ -15,6 +15,7 @@
     <string name="copilot_status_analyzing">Analyse de l\'écran…</string>
     <string name="copilot_status_remembering">Je regarde l\'écran pour retenir…</string>
     <string name="copilot_status_action">Action en cours…</string>
+    <string name="copilot_status_explain_vision">Analyse visuelle de l\'élément…</string>
     <string name="copilot_error_capture_denied">Capture d\'écran refusée.</string>
     <string name="copilot_error_nothing_to_remember">Rien à retenir sur cet écran.</string>
     <string name="copilot_remember_prefix">Je retiens : %1$s</string>

@@ -4,7 +4,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
 
+import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.copilot.AccessibilityAccess;
+import com.pegasuscorp.orbe.copilot.CopilotStatusBridge;
 import com.pegasuscorp.orbe.copilot.PegaseAccessibilityService;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 
@@ -29,5 +31,17 @@ public final class CopilotUiSupport {
             return null;
         }
         return svc;
+    }
+
+    /** Statut « Action en cours » dans la bulle copilote. */
+    public static void notifyActionInProgress(Context ctx, ToolCallback cb) {
+        notifyProgress(ctx, cb, ctx.getString(R.string.copilot_status_action));
+    }
+
+    public static void notifyProgress(Context ctx, ToolCallback cb, String message) {
+        if (cb != null && message != null && !message.isEmpty()) {
+            cb.onProgress(message);
+        }
+        CopilotStatusBridge.postStatus(ctx, message);
     }
 }
