@@ -161,7 +161,7 @@ public final class A11yUiExecutor {
             if (onMissing != null) onMissing.run();
             return;
         }
-        AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+        AccessibilityNodeInfo root = A11yRootPicker.preferAppRoot(svc);
         if (root == null) {
             if (onMissing != null) onMissing.run();
             return;

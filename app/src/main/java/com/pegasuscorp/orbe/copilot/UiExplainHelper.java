@@ -24,7 +24,8 @@ public final class UiExplainHelper {
 
         PegaseAccessibilityService svc = PegaseAccessibilityService.getInstance();
         if (svc != null) {
-            android.view.accessibility.AccessibilityNodeInfo root = svc.getRootInActiveWindow();
+            android.view.accessibility.AccessibilityNodeInfo root =
+                    A11yRootPicker.preferAppRoot(svc);
             if (root != null) {
                 try {
                     if (A11yUiExecutor.isForegroundAllowed(ctx, root)) {

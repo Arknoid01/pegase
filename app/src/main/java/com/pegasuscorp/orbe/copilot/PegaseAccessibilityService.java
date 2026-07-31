@@ -84,7 +84,7 @@ public class PegaseAccessibilityService extends AccessibilityService {
         if (!CopilotPrefs.isPackageAllowed(this, CopilotPrefs.PKG_YOUTUBE)) {
             CopilotPrefs.enableYouTubeCopilot(this);
         }
-        AccessibilityNodeInfo root = getRootInActiveWindow();
+        AccessibilityNodeInfo root = A11yRootPicker.preferAppRoot(this);
         if (root == null) return false;
         try {
             return YouTubeSubtitleAction.toggleSubtitles(root);
@@ -101,21 +101,29 @@ public class PegaseAccessibilityService extends AccessibilityService {
             pendingNotify = null;
             lastNotifiedPackage = pkg;
             IO.execute(() -> {
-                AccessibilityNodeInfo root = getRootInActiveWindow();
+                AccessibilityNodeInfo root = A11yRootPicker.preferAppRoot(
+                        PegaseAccessibilityService.this);
+                String rootPkg = A11yRootPicker.packageOf(root);
+                if (root == null || rootPkg.isEmpty()) {
+                    return;
+                }
                 try {
-                    A11yTreeExtractor.writeSnapshot(PegaseAccessibilityService.this, root, pkg);
+                    A11yTreeExtractor.writeSnapshot(
+                            PegaseAccessibilityService.this, root, rootPkg);
                     if (OcrFallback.needsFallback(PegaseAccessibilityService.this)) {
-                        OcrFallback.tryEnrich(PegaseAccessibilityService.this, pkg);
+                        OcrFallback.tryEnrich(PegaseAccessibilityService.this, rootPkg);
                     }
                 } finally {
-                    if (root != null) root.recycle();
+                    root.recycle();
                 }
+                final String notifyPkg = rootPkg;
                 main.post(() -> {
                     Intent i = new Intent(ACTION_CONTENT_CHANGED);
                     i.setPackage(getPackageName());
-                    i.putExtra("package", pkg);
+                    i.putExtra("package", notifyPkg);
                     sendBroadcast(i);
-                    CopilotClient.notifyContentChanged(PegaseAccessibilityService.this, pkg);
+                    CopilotClient.notifyContentChanged(
+                            PegaseAccessibilityService.this, notifyPkg);
                 });
             });
         };
