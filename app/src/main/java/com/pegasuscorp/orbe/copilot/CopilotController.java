@@ -49,6 +49,8 @@ public final class CopilotController {
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
     private volatile int attachGeneration;
+    /** Ignore les broadcasts de statut postés avant ce timestamp (anti-race). */
+    private volatile long statusClearedAtElapsed;
     private BroadcastReceiver notifReceiver;
     private BroadcastReceiver statusReceiver;
 
@@ -82,13 +84,20 @@ public final class CopilotController {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (intent == null) return;
-                String error = intent.getStringExtra("error");
+                long postedAt = intent.getLongExtra(CopilotStatusBridge.EXTRA_POSTED_AT, 0L);
+                if (intent.getBooleanExtra(CopilotStatusBridge.EXTRA_CLEAR, false)) {
+                    clearBubbleStatus(false);
+                    return;
+                }
+                String error = intent.getStringExtra(CopilotStatusBridge.EXTRA_ERROR);
                 if (bubbleSink != null && !TextUtils.isEmpty(error)) {
+                    if (isStaleStatusBroadcast(postedAt)) return;
                     bubbleSink.onError(error);
                     return;
                 }
-                String status = intent.getStringExtra("status");
+                String status = intent.getStringExtra(CopilotStatusBridge.EXTRA_STATUS);
                 if (bubbleSink != null && !TextUtils.isEmpty(status)) {
+                    if (isStaleStatusBroadcast(postedAt)) return;
                     bubbleSink.onStatus(status);
                 }
             }
@@ -99,6 +108,17 @@ public final class CopilotController {
         } else {
             appContext.registerReceiver(statusReceiver, filter);
         }
+    }
+
+    private boolean isStaleStatusBroadcast(long postedAt) {
+        return postedAt > 0L && postedAt <= statusClearedAtElapsed;
+    }
+
+    /** Efface le bandeau haut ; ignore les broadcasts déjà en file. */
+    private void clearBubbleStatus(boolean alsoBroadcast) {
+        statusClearedAtElapsed = android.os.SystemClock.elapsedRealtime();
+        if (bubbleSink != null) bubbleSink.onStatus(null);
+        if (alsoBroadcast) CopilotStatusBridge.clearStatus(appContext);
     }
 
     private void registerNotifReceiver() {
@@ -366,7 +386,7 @@ public final class CopilotController {
             public void onReply(String text, boolean toolFired) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
-                    if (bubbleSink != null) bubbleSink.onStatus(null);
+                    clearBubbleStatus(true);
                     if (!toolFired && bubbleSink != null && !TextUtils.isEmpty(text)) {
                         bubbleSink.onAssistantMessage(text);
                     }
@@ -396,7 +416,7 @@ public final class CopilotController {
             public void onToolResult(ToolResult result) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
-                    if (bubbleSink != null) bubbleSink.onStatus(null);
+                    clearBubbleStatus(true);
                     if (bubbleSink != null && result != null && result.text != null) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
@@ -408,6 +428,7 @@ public final class CopilotController {
             public void onError(String message) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
+                    clearBubbleStatus(true);
                     if (bubbleSink != null) bubbleSink.onError(message);
                     setSending(false);
                 });
@@ -432,12 +453,12 @@ public final class CopilotController {
                     }
                     BubbleSink sink = bubbleSink;
                     if (sink != null) {
-                        sink.onStatus(null);
+                        clearBubbleStatus(false);
                         sink.onConfirmNeeded(question, () -> {
                             sink.onStatus(appContext.getString(R.string.copilot_status_action));
                             if (onConfirm != null) onConfirm.run();
                         }, () -> {
-                            sink.onStatus(null);
+                            clearBubbleStatus(true);
                             if (onCancel != null) onCancel.run();
                         });
                     } else if (onCancel != null) {

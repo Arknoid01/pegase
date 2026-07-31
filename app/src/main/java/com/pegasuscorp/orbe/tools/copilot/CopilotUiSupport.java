@@ -38,8 +38,16 @@ public final class CopilotUiSupport {
     }
 
     public static void notifyProgress(Context ctx, ToolCallback cb, String message) {
-        if (cb != null && message != null && !message.isEmpty()) {
+        if (message == null || message.isEmpty()) {
+            CopilotStatusBridge.clearStatus(ctx);
+            return;
+        }
+        if (cb != null) {
+            // Un seul chemin : le session observer met à jour le bandeau.
+            // Ne pas aussi broadcaster — sinon le clear onToolResult est écrasé
+            // par un Intent retardé (« Action en cours… » collé).
             cb.onProgress(message);
+            return;
         }
         CopilotStatusBridge.postStatus(ctx, message);
     }

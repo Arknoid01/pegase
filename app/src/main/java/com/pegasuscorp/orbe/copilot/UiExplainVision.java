@@ -11,6 +11,7 @@ import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.chat.OpenRouterVisionClient;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
+import com.pegasuscorp.orbe.tools.copilot.CopilotUiSupport;
 
 import org.json.JSONObject;
 
@@ -134,9 +135,6 @@ public final class UiExplainVision {
     }
 
     private static void postProgress(Context ctx, ToolCallback cb, String message) {
-        if (cb != null && !TextUtils.isEmpty(message)) {
-            cb.onProgress(message);
-        }
-        CopilotStatusBridge.postStatus(ctx, message);
+        CopilotUiSupport.notifyProgress(ctx, cb, message);
     }
 }
