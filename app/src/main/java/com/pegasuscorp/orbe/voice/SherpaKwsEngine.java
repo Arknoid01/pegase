@@ -37,6 +37,8 @@ public final class SherpaKwsEngine {
     private static final String TAG = "SherpaKws";
     private static final int SAMPLE_RATE = 16_000;
     private static final float INTERVAL_SEC = 0.1f;
+    /** Seuil Sherpa — abaissé pour « Pégase » en français (modèle GigaSpeech EN). */
+    private static final float KEYWORDS_THRESHOLD = 0.18f;
     /** ~2 s entre deux logs probe (100 ms × 20). */
     private static final int PROBE_EVERY_READS = 20;
 
@@ -118,14 +120,14 @@ public final class SherpaKwsEngine {
                     .setOnlineModelConfig(model)
                     .setKeywordsFile(kw.getAbsolutePath())
                     .setKeywordsScore(1.0f)
-                    .setKeywordsThreshold(0.25f)
+                    .setKeywordsThreshold(KEYWORDS_THRESHOLD)
                     .setMaxActivePaths(4)
                     .setNumTrailingBlanks(1)
                     .build();
             Log.i(TAG, "creating KeywordSpotter enc=" + enc.getName()
                     + " size=" + enc.length());
             kws = new KeywordSpotter(config);
-            Log.i(TAG, "KeywordSpotter ready (zipformer2) threshold=0.25");
+            Log.i(TAG, "KeywordSpotter ready (zipformer2) threshold=" + KEYWORDS_THRESHOLD);
             return true;
         } catch (UnsatisfiedLinkError e) {
             nativeBroken = true;
@@ -303,10 +305,11 @@ public final class SherpaKwsEngine {
     private boolean openMic() {
         if (routeManager != null && !routeManager.prepareCapture()) {
             Log.w(TAG, "prepareCapture failed — fallback micro téléphone");
+            routeManager.forcePhoneBuiltin();
         }
         int source = routeManager != null
                 ? routeManager.getAudioSource()
-                : android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION;
+                : android.media.MediaRecorder.AudioSource.MIC;
         int min = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,

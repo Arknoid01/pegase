@@ -81,8 +81,17 @@ public final class KwsAudioRouteManager {
             case WIRED_HEADSET:
                 return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
             default:
-                return MediaRecorder.AudioSource.VOICE_RECOGNITION;
+                // MIC = comportement historique (meilleur taux de détection KWS sur plusieurs OEM).
+                return MediaRecorder.AudioSource.MIC;
         }
+    }
+
+    /** Après échec SCO / communication device — forcer le micro téléphone. */
+    public void forcePhoneBuiltin() {
+        activeKind = RouteKind.PHONE_BUILTIN;
+        preferredInput = findBuiltinMic();
+        scoPrepared = false;
+        Log.i(TAG, "forced phone builtin " + describeRoute());
     }
 
     /**
@@ -276,10 +285,15 @@ public final class KwsAudioRouteManager {
 
     private void onDevicesChanged(String reason) {
         RouteKind before = activeKind;
+        int beforeId = preferredInput != null ? preferredInput.getId() : -1;
         releaseCapture();
         refreshRouteKind();
-        Log.i(TAG, "route changed (" + reason + ") " + before + " → " + activeKind
+        int afterId = preferredInput != null ? preferredInput.getId() : -1;
+        boolean changed = before != activeKind || beforeId != afterId;
+        Log.i(TAG, (changed ? "route changed" : "route ping")
+                + " (" + reason + ") " + before + " → " + activeKind
                 + " | " + describeRoute());
+        if (!changed) return;
         RouteChangeListener l = routeChangeListener;
         if (l != null) {
             main.post(l::onAudioRouteChanged);

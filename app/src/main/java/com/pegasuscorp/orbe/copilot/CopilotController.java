@@ -130,6 +130,11 @@ public final class CopilotController implements SessionObserver {
         }
         PegaseSession.get(appContext).removeObserver(this);
         bubbleSink = null;
+        if (!ChatSessionRegistry.get(appContext).isActive()
+                && !PegaseWakeController.isVoiceChatActive()) {
+            PegaseWakeController.setTextDiscussionActive(false);
+            PegaseWakeController.resumeWakeIfAllowed(appContext);
+        }
     }
 
     public boolean isSending() {
@@ -143,10 +148,6 @@ public final class CopilotController implements SessionObserver {
         if (sink != null) sink.onUserMessage(trimmed);
 
         Context ctx = appContext;
-        if (!ChatSessionRegistry.get(ctx).isActive()) {
-            PegaseWakeController.setTextDiscussionActive(true);
-            PegaseWakeController.pauseWake(ctx);
-        }
 
         String payload = buildPayload(trimmed);
         setSending(true);

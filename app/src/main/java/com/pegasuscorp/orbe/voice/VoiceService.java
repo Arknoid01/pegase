@@ -148,7 +148,7 @@ public class VoiceService extends Service {
     private void refreshWakeBackend() {
         useKws = false;
         // Nouvelle config KWS : laisser une chance après les crashs zipformer.
-        KwsCrashGuard.bumpConfigGeneration(this, 4);
+        KwsCrashGuard.bumpConfigGeneration(this, 5);
         if (KwsCrashGuard.shouldDisableKws(this)) {
             Log.e(TAG, "KWS disabled (crash loop) — pas de STT duty-cycle (évite kill micro)");
             destroyRecognizer();
@@ -291,6 +291,7 @@ public class VoiceService extends Service {
     private void onKwsAudioRouteChanged() {
         if (!wantListening || !useKws) return;
         Log.i(TAG, "KWS audio route changed — restarting capture");
+        KwsCrashGuard.onPlannedRestart(this);
         listening = false;
         if (kwsEngine != null) {
             try {
@@ -405,6 +406,7 @@ public class VoiceService extends Service {
         }
         kwsRestartStreak++;
         Log.w(TAG, "KWS not running while wantListening — restart #" + kwsRestartStreak);
+        KwsCrashGuard.onPlannedRestart(this);
         listening = false;
         if (kwsEngine != null) {
             try { kwsEngine.stop(); } catch (Exception ignored) {}
@@ -455,8 +457,9 @@ public class VoiceService extends Service {
         if (!wantListening || !useKws) return;
         if (kwsEngine == null) refreshWakeBackend();
         if (kwsEngine == null || !kwsEngine.isReady()) {
-            useKws = false;
-            Log.w(TAG, "KWS not ready — wake local arrêté (pas de STT)");
+            Log.w(TAG, "KWS not ready — retry in 5s (model=" + KwsModelStore.isModelReady(this)
+                    + " crashGuard=" + KwsCrashGuard.shouldDisableKws(this) + ")");
+            scheduleListen(5_000);
             return;
         }
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
