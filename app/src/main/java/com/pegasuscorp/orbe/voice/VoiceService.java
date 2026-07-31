@@ -58,6 +58,7 @@ public class VoiceService extends Service {
     private final RemoteCallbackList<IWakeWordCallback> callbacks = new RemoteCallbackList<>();
 
     private SpeechRecognizer recognizer;
+    private KwsAudioRouteManager kwsRouteManager;
     private SherpaKwsEngine kwsEngine;
     private boolean useKws;
 
@@ -111,6 +112,7 @@ public class VoiceService extends Service {
         super.onCreate();
         createChannel();
         startAsForeground();
+        kwsRouteManager = new KwsAudioRouteManager(this);
         refreshWakeBackend();
         maybeAutoDownloadKws();
     }
@@ -135,6 +137,10 @@ public class VoiceService extends Service {
             kwsEngine.release();
             kwsEngine = null;
         }
+        if (kwsRouteManager != null) {
+            kwsRouteManager.release();
+            kwsRouteManager = null;
+        }
         callbacks.kill();
         super.onDestroy();
     }
@@ -150,7 +156,20 @@ public class VoiceService extends Service {
         }
         if (KwsModelStore.isModelReady(this)) {
             if (kwsEngine == null) {
-                kwsEngine = new SherpaKwsEngine(this, keyword -> onWakeDetected(""));
+                kwsEngine = new SherpaKwsEngine(this, new SherpaKwsEngine.Listener() {
+                    @Override
+                    public void onKeywordDetected(String keyword) {
+                        onWakeDetected("");
+                    }
+
+                    @Override
+                    public void onAudioRouteChanged() {
+                        onKwsAudioRouteChanged();
+                    }
+                });
+                if (kwsRouteManager != null) {
+                    kwsEngine.setRouteManager(kwsRouteManager);
+                }
             }
             if (kwsEngine.ensureLoaded()) {
                 useKws = true;
@@ -266,6 +285,20 @@ public class VoiceService extends Service {
                 return;
             }
         }
+    }
+
+    /** Casque BT branché/débranché après démarrage du KWS — relance capture sur la nouvelle route. */
+    private void onKwsAudioRouteChanged() {
+        if (!wantListening || !useKws) return;
+        Log.i(TAG, "KWS audio route changed — restarting capture");
+        listening = false;
+        if (kwsEngine != null) {
+            try {
+                kwsEngine.stop();
+            } catch (Exception ignored) {}
+        }
+        releaseListenWakeLock();
+        scheduleListen(400);
     }
 
     private void onWakeDetected(String command) {
