@@ -98,6 +98,12 @@ public final class PegaseWakeController {
         return assistantThinking;
     }
 
+    /** Tests uniquement — sans Log/Looper Android. */
+    static void resetVisualFlagsForTests() {
+        micListening = false;
+        assistantThinking = false;
+    }
+
     public static void setWakeHealthProblem(boolean problem) {
         wakeHealthProblem = problem;
         logState("wakeHealth=" + problem);
@@ -169,9 +175,13 @@ public final class PegaseWakeController {
     }
 
     private static void logState(String change) {
-        if (!Log.isLoggable(TAG, Log.DEBUG)) return;
-        Log.d(TAG, change + " → listen=" + shouldListen()
-                + " blockMic=" + shouldBlockSharedMic()
-                + " phase=" + PegaseVisualStateHub.derivePhase());
+        try {
+            if (!Log.isLoggable(TAG, Log.DEBUG)) return;
+            Log.d(TAG, change + " → listen=" + shouldListen()
+                    + " blockMic=" + shouldBlockSharedMic()
+                    + " phase=" + PegaseVisualStateHub.derivePhase());
+        } catch (RuntimeException ignored) {
+            // JVM unit tests: android.util.Log not mocked
+        }
     }
 }

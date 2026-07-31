@@ -21,6 +21,12 @@ public class LockScreenToolPolicyTest {
     @Test
     public void agendaRequiresSpeakerVerify() {
         assertTrue(LockScreenToolPolicy.requiresSpeakerVerifyOnLock("agenda", null));
+        assertTrue(LockScreenToolPolicy.requiresSpeakerVerifyOnLock("calendar", null));
         assertFalse(LockScreenToolPolicy.requiresSpeakerVerifyOnLock("timer", null));
+    }
+
+    @Test
+    public void calendarAllowedOnLock() {
+        assertTrue(LockScreenToolPolicy.isWhitelistedOnLockScreen("calendar", null));
     }
 }

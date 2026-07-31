@@ -25,8 +25,13 @@ public final class PegaseVisualStateHub {
     private static Handler mainHandler() {
         Handler h = mainHandler;
         if (h != null) return h;
-        Looper looper = Looper.getMainLooper();
-        if (looper == null) return null; // unit tests JVM
+        Looper looper;
+        try {
+            looper = Looper.getMainLooper();
+        } catch (RuntimeException ignored) {
+            return null; // JVM unit tests: Looper not mocked
+        }
+        if (looper == null) return null;
         synchronized (LOCK) {
             if (mainHandler == null) mainHandler = new Handler(looper);
             return mainHandler;
@@ -82,8 +87,8 @@ public final class PegaseVisualStateHub {
         synchronized (LOCK) {
             LISTENERS.clear();
             current = PegaseVisualPhase.IDLE;
+            mainHandler = null;
         }
-        PegaseWakeController.setMicListening(false);
-        PegaseWakeController.setAssistantThinking(false);
+        PegaseWakeController.resetVisualFlagsForTests();
     }
 }

@@ -24,6 +24,8 @@ public final class LockScreenToolPolicy {
             case "réveil":
             case "reveil":
             case "agenda":
+            case "calendar":
+            case "calendrier":
                 return true;
             default:
                 return false;
@@ -32,7 +34,11 @@ public final class LockScreenToolPolicy {
 
     public static boolean requiresSpeakerVerifyOnLock(String intentHint, String toolJson) {
         String tool = normalizeToolId(intentHint, toolJson);
-        return "agenda".equals(tool);
+        return isAgendaTool(tool);
+    }
+
+    private static boolean isAgendaTool(String tool) {
+        return "agenda".equals(tool) || "calendar".equals(tool) || "calendrier".equals(tool);
     }
 
     private static String normalizeToolId(String intentHint, String toolJson) {
