@@ -37,8 +37,9 @@ public final class SherpaKwsEngine {
     private static final String TAG = "SherpaKws";
     private static final int SAMPLE_RATE = 16_000;
     private static final float INTERVAL_SEC = 0.1f;
-    /** Seuil Sherpa — abaissé pour « Pégase » en français (modèle GigaSpeech EN). */
-    private static final float KEYWORDS_THRESHOLD = 0.18f;
+    /** Seuil Sherpa — bas : modèle EN vs « Pégase » FR. */
+    private static final float KEYWORDS_THRESHOLD = 0.10f;
+    private static final float KEYWORDS_SCORE = 2.0f;
     /** ~2 s entre deux logs probe (100 ms × 20). */
     private static final int PROBE_EVERY_READS = 20;
 
@@ -86,6 +87,7 @@ public final class SherpaKwsEngine {
     public synchronized boolean ensureLoaded() {
         if (nativeBroken) return false;
         if (kws != null) return true;
+        KwsModelStore.ensureKeywords(app);
         KwsModelStore.logModelIdentity(app);
         if (!KwsModelStore.isModelReady(app)) {
             Log.w(TAG, "init skipped — model files not ready");
@@ -119,13 +121,15 @@ public final class SherpaKwsEngine {
                     .setFeatureConfig(feat)
                     .setOnlineModelConfig(model)
                     .setKeywordsFile(kw.getAbsolutePath())
-                    .setKeywordsScore(1.0f)
+                    .setKeywordsScore(KEYWORDS_SCORE)
                     .setKeywordsThreshold(KEYWORDS_THRESHOLD)
-                    .setMaxActivePaths(4)
-                    .setNumTrailingBlanks(1)
+                    .setMaxActivePaths(8)
+                    .setNumTrailingBlanks(2)
                     .build();
             Log.i(TAG, "creating KeywordSpotter enc=" + enc.getName()
-                    + " size=" + enc.length());
+                    + " size=" + enc.length()
+                    + " threshold=" + KEYWORDS_THRESHOLD
+                    + " score=" + KEYWORDS_SCORE);
             kws = new KeywordSpotter(config);
             Log.i(TAG, "KeywordSpotter ready (zipformer2) threshold=" + KEYWORDS_THRESHOLD);
             return true;

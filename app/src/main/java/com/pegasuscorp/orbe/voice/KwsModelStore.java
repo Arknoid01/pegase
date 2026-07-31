@@ -39,17 +39,20 @@ public final class KwsModelStore {
     private static final long MIN_KEYWORDS_BYTES = 10L;
 
     /**
-     * Lignes BPE (▁ = U+2581) pour PEGASE / variantes — générées avec bpe.model du pack.
+     * Lignes BPE (▁ = U+2581) + boost Sherpa {@code :score #threshold @id}.
+     * Modèle GigaSpeech EN — « Pégase » FR mal couvert sans boost agressif.
+     * Format : https://k2-fsa.github.io/sherpa/onnx/kws/index.html
      */
     static final String KEYWORDS_CONTENT =
-            "\u2581P E G AS E\n"
-                    + "\u2581P E G A Z\n"
-                    + "\u2581P E G AS\n"
-                    + "\u2581HE Y \u2581P E G AS E\n"
-                    + "\u2581O K \u2581P E G AS E\n"
-                    + "\u2581P E G AS US\n"
-                    + "\u2581HE Y \u2581P E G AS US\n"
-                    + "\u2581BO N J O UR \u2581P E G AS E\n";
+            "\u2581P E G AS E :3.5 #0.10 @PEGASE\n"
+                    + "\u2581P E G A Z :3.5 #0.10 @PEGAZ\n"
+                    + "\u2581P E G AS :3.0 #0.10 @PEGAS\n"
+                    + "\u2581P E G A S E :3.0 #0.10 @PEGASE_CHARS\n"
+                    + "\u2581P E G AS US :3.0 #0.10 @PEGASUS\n"
+                    + "\u2581HE Y \u2581P E G AS E :4.0 #0.08 @HEY_PEGASE\n"
+                    + "\u2581O K \u2581P E G AS E :3.5 #0.10 @OK_PEGASE\n"
+                    + "\u2581BO N J O UR \u2581P E G AS E :3.0 #0.10 @BONJOUR_PEGASE\n"
+                    + "\u2581HE Y \u2581P E G AS US :3.5 #0.10 @HEY_PEGASUS\n";
 
     private KwsModelStore() {}
 
@@ -154,6 +157,17 @@ public final class KwsModelStore {
         if (parent != null && !parent.exists()) parent.mkdirs();
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
             out.write(KEYWORDS_CONTENT.getBytes(StandardCharsets.UTF_8));
+        }
+        Log.i(TAG, "keywords written bytes=" + KEYWORDS_CONTENT.length()
+                + " path=" + f.getAbsolutePath());
+    }
+
+    /** Réécrit keywords.txt à chaque start KWS (boosts / variantes à jour). */
+    public static void ensureKeywords(Context context) {
+        try {
+            writeKeywords(context);
+        } catch (Exception e) {
+            Log.w(TAG, "ensureKeywords failed", e);
         }
     }
 }

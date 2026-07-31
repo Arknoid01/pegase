@@ -11,8 +11,8 @@ import java.util.Locale;
 public final class KwsDiagnostics {
 
     private static final String TAG = "KwsDiagnostics";
-    private static final float KEYWORDS_THRESHOLD = 0.18f;
-    private static final float KEYWORDS_SCORE = 1.0f;
+    private static final float KEYWORDS_THRESHOLD = 0.10f;
+    private static final float KEYWORDS_SCORE = 2.0f;
 
     private static volatile long lastProbeLogMs;
     private static volatile int decodeProbes;
