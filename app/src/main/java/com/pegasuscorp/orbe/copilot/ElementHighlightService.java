@@ -63,6 +63,19 @@ public class ElementHighlightService extends Service {
             return;
         }
         if (!CopilotPrefs.isElementHighlightEnabled(ctx)) return;
+        showInternal(ctx, rects);
+    }
+
+    /** Surlignage ponctuel avant action UI v4 — indépendant du toggle continu. */
+    public static void showActionTarget(Context ctx, int left, int top, int right, int bottom,
+            String label) {
+        if (ctx == null) return;
+        showInternal(ctx, java.util.Collections.singletonList(
+                new HighlightRect(left, top, right, bottom, label)));
+    }
+
+    private static void showInternal(Context ctx, List<HighlightRect> rects) {
+        if (rects == null || rects.isEmpty()) return;
         pendingRects = new ArrayList<>(rects);
         Intent i = new Intent(ctx, ElementHighlightService.class);
         i.setAction("show");

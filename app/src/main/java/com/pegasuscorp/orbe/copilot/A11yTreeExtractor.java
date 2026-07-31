@@ -139,6 +139,10 @@ public final class A11yTreeExtractor {
         JSONObject o = new JSONObject();
         o.put("text", combined);
         o.put("class", node.getClassName() != null ? node.getClassName().toString() : "");
+        String viewId = node.getViewIdResourceName();
+        if (viewId != null && !viewId.isEmpty()) {
+            o.put("viewId", viewId);
+        }
         o.put("clickable", node.isClickable());
         o.put("left", bounds.left);
         o.put("top", bounds.top);

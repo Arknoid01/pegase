@@ -13,6 +13,8 @@ public final class A11ySnapshot {
 
     public static final class Node {
         public final String text;
+        public final String viewId;
+        public final String className;
         public final boolean clickable;
         public final int left;
         public final int top;
@@ -20,11 +22,18 @@ public final class A11ySnapshot {
         public final int bottom;
 
         public Node(String text, int left, int top, int right, int bottom) {
-            this(text, false, left, top, right, bottom);
+            this(text, "", "", false, left, top, right, bottom);
         }
 
         public Node(String text, boolean clickable, int left, int top, int right, int bottom) {
+            this(text, "", "", clickable, left, top, right, bottom);
+        }
+
+        public Node(String text, String viewId, String className, boolean clickable,
+                int left, int top, int right, int bottom) {
             this.text = text != null ? text : "";
+            this.viewId = viewId != null ? viewId : "";
+            this.className = className != null ? className : "";
             this.clickable = clickable;
             this.left = left;
             this.top = top;
@@ -65,6 +74,8 @@ public final class A11ySnapshot {
                 if (text.isEmpty()) continue;
                 out.add(new Node(
                         text,
+                        o.optString("viewId", ""),
+                        o.optString("class", ""),
                         o.optBoolean("clickable", false),
                         o.optInt("left", 0),
                         o.optInt("top", 0),

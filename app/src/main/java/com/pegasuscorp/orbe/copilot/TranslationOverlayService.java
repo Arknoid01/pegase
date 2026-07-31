@@ -68,6 +68,19 @@ public class TranslationOverlayService extends Service {
             return;
         }
         if (!CopilotPrefs.isTranslationOverlayEnabled(ctx)) return;
+        startShow(ctx, blocks);
+    }
+
+    /** Overlay explication v4 — indépendant du toggle traduction. */
+    public static void showExplain(Context ctx, List<TranslatedBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) {
+            hide(ctx);
+            return;
+        }
+        startShow(ctx, blocks);
+    }
+
+    private static void startShow(Context ctx, List<TranslatedBlock> blocks) {
         pendingBlocks = new ArrayList<>(blocks);
         Intent i = new Intent(ctx, TranslationOverlayService.class);
         i.setAction("show");

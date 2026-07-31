@@ -4,6 +4,9 @@ import com.pegasuscorp.orbe.tools.device.AlarmTool;
 import com.pegasuscorp.orbe.tools.device.CalculatorTool;
 import com.pegasuscorp.orbe.tools.device.CallTool;
 import com.pegasuscorp.orbe.tools.copilot.CopilotActionTool;
+import com.pegasuscorp.orbe.tools.copilot.UiActionTool;
+import com.pegasuscorp.orbe.tools.copilot.UiExplainTool;
+import com.pegasuscorp.orbe.tools.copilot.UiSearchTool;
 import com.pegasuscorp.orbe.tools.device.ClipboardTool;
 import com.pegasuscorp.orbe.tools.device.ConnectivityTool;
 import com.pegasuscorp.orbe.tools.device.ContactsTool;
@@ -102,6 +105,9 @@ public class ToolRegistry {
             new SettingsTool(),
             new ClipboardTool(),
             new CopilotActionTool(),
+            new UiActionTool(),
+            new UiExplainTool(),
+            new UiSearchTool(),
             new ContactsTool(),
             new FilesTool()
     );
@@ -292,6 +298,9 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.DEVICE)) {
             sb.append("  Téléphone → {\"tool\":\"device\",\"params\":{\"action\":\"battery\"}} "
                     + "ou action:\"time\" / \"date\"\n");
+            sb.append("  UI copilote→ {\"tool\":\"ui_action\",\"params\":{\"action\":\"click\","
+                    + "\"target\":\"Paramètres\"}} ; type/scroll/back ; "
+                    + "ui_explain / ui_search sur élément visible\n");
         }
         if (tags.contains(ToolTag.NAVIGATION)) {
             sb.append("  Navigation→ {\"tool\":\"navigation\",\"params\":{\"destination\":\"Lyon\"}}\n");

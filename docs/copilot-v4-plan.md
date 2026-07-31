@@ -1,6 +1,6 @@
 # Mode copilote Pégase — Plan v4 : contrôle UI générique
 
-**Statut :** Développement en cours — **branche isolée, ne pas intégrer sans confirmation explicite**
+**Statut :** Développement en cours (étape 1–6 amorcée) — **branche isolée, ne pas intégrer sans confirmation explicite**
 **Branche :** `cursor/v4-copilot-ui-control-14e9`
 **Base de code :** forkée depuis `cursor/v3-p6-location-drive-14e9` (v3 non mergée)
 **Dépendance :** v3 P2–P6 (PR [#17](https://github.com/Arknoid01/pegase/pull/17)) — validation device requise avant merge v3, puis rebase v4 si besoin
@@ -130,6 +130,21 @@ Statut **"Action en cours"** à ajouter dans la bulle, à côté des statuts exi
 6. `ui_search` (via l'outil navigateur existant)
 7. Tests unitaires sur le modèle des tests copilote existants (matcher, denylist, confirmation)
 8. Validation device en usage réel avant d'envisager le multi-étapes
+
+---
+
+## Avancement (branche `cursor/v4-copilot-ui-control-14e9`)
+
+| Étape | Statut | Fichiers |
+|-------|--------|----------|
+| 1. `viewId` dans snapshot | ✅ | `A11yTreeExtractor`, `A11ySnapshot` |
+| 2. Matcher générique | ✅ | `A11yUiMatcher` |
+| 3. Highlight ponctuel | ✅ | `ElementHighlightService.showActionTarget` |
+| 4. `ui_action` | ✅ | `A11yUiExecutor`, `UiActionTool`, `A11yClickPolicy` |
+| 5. `ui_explain` | ✅ (local + overlay, vision repli à venir) | `UiExplainTool`, `UiExplainHelper` |
+| 6. `ui_search` | ✅ | `UiSearchTool` → `WebSearchTool` |
+| 7. Tests unitaires | ✅ | `A11yUiMatcherTest`, `A11yClickPolicyTest` |
+| 8. Validation device | ⏳ | — |
 
 ---
 
