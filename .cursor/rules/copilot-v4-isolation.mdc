@@ -1,0 +1,40 @@
+---
+description: Garde-fou v4 copilote — isolation par rapport à la v3 en cours. À appliquer sur toute branche v4 et avant toute opération git d'intégration.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Copilote v4 — isolation v3 (OBLIGATOIRE)
+
+## Contexte
+
+- **v3** (`cursor/v3-p6-location-drive-14e9`, PR #17) : pas encore mergée sur `main`.
+- **v4** (`cursor/v4-copilot-ui-control-14e9`) : contrôle UI générique — développement **isolé**.
+
+## Règle principale
+
+**Ne jamais intégrer la v4 en parallèle de la v3 sans confirmation explicite de l'utilisateur.**
+
+Avant **merge, rebase sur main, cherry-pick vers main/v3, PR non-draft vers main, fusion v3+v4**, ou **push de commits v4 sur une branche v3** :
+
+1. **STOP**
+2. **Demander confirmation** : « La v3 n'est pas finalisée. Confirme-tu l'intégration de la v4 maintenant ? (oui/non) »
+3. **Attendre un oui explicite** — sinon, ne rien faire.
+
+## Développement autorisé sans confirmation
+
+- Coder, tester, committer, pousser sur `cursor/v4-copilot-ui-control-14e9` uniquement
+- PR **draft** clairement marquée « NE PAS MERGER — v4 isolée »
+- Documentation et tests sur la branche v4
+
+## Ordre d'intégration (ne pas inverser)
+
+1. Merger v3 → `main` (avec accord utilisateur)
+2. Rebaser v4 sur `main`
+3. Merger v4 → `main` (avec accord utilisateur)
+
+## Références
+
+- `docs/V4_INTEGRATION_POLICY.md`
+- `docs/copilot-v4-plan.md`
