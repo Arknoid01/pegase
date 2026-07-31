@@ -360,7 +360,11 @@ public final class KwsAudioRouteManager {
     private AudioDeviceInfo findBuiltinMic() {
         AudioDeviceInfo builtIn = findInputOfType(AudioDeviceInfo.TYPE_BUILTIN_MIC);
         if (builtIn != null) return builtIn;
-        return findInputOfType(AudioDeviceInfo.TYPE_BUILTIN_ECHO_REFERENCE);
+        // TYPE_BUILTIN_ECHO_REFERENCE (= 28) — API 31+ ; littéral pour stubs SDK incomplets
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return findInputOfType(28);
+        }
+        return null;
     }
 
     private AudioDeviceInfo findInputOfType(int type) {

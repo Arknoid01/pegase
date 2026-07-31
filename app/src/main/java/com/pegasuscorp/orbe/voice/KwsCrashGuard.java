@@ -8,7 +8,7 @@ import android.util.Log;
  * Détecte un crash loop KWS (process {@code :voice} qui meurt &lt; 8 s après start)
  * et désactive Sherpa pour stabiliser la notif FGS.
  */
-final class KwsCrashGuard {
+public final class KwsCrashGuard {
 
     private static final String TAG = "KwsCrashGuard";
     private static final String PREF = "kws_crash_guard";
