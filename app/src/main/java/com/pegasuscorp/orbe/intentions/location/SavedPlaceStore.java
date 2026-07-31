@@ -44,7 +44,7 @@ public final class SavedPlaceStore {
         return instance;
     }
 
-    static void resetInstanceForTests() {
+    public static void resetInstanceForTests() {
         instance = null;
     }
 

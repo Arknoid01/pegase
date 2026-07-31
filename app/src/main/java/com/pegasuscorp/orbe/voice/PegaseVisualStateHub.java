@@ -16,11 +16,22 @@ public final class PegaseVisualStateHub {
     }
 
     private static final Object LOCK = new Object();
-    private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final List<Listener> LISTENERS = new CopyOnWriteArrayList<>();
     private static volatile PegaseVisualPhase current = PegaseVisualPhase.IDLE;
+    private static Handler mainHandler;
 
     private PegaseVisualStateHub() {}
+
+    private static Handler mainHandler() {
+        Handler h = mainHandler;
+        if (h != null) return h;
+        Looper looper = Looper.getMainLooper();
+        if (looper == null) return null; // unit tests JVM
+        synchronized (LOCK) {
+            if (mainHandler == null) mainHandler = new Handler(looper);
+            return mainHandler;
+        }
+    }
 
     public static PegaseVisualPhase currentPhase() {
         return current;
@@ -39,7 +50,12 @@ public final class PegaseVisualStateHub {
             if (next == current) return;
             current = next;
         }
-        MAIN.post(() -> dispatchPhase(next));
+        Handler h = mainHandler();
+        if (h == null) {
+            dispatchPhase(next);
+        } else {
+            h.post(() -> dispatchPhase(next));
+        }
     }
 
     private static void dispatchPhase(PegaseVisualPhase phase) {

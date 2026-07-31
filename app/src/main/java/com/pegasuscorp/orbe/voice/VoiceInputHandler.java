@@ -705,7 +705,11 @@ public final class VoiceInputHandler {
 
                                 @Override
                                 public void onSkipped() {
-                                    onVerified();
+                                    // Erreur vérif / skip ≠ succès : ne jamais ouvrir l'agenda verrouillé
+                                    callback.runOnUiThread(() -> {
+                                        LockScreenNotifier.postAgendaDenied(activity);
+                                        scheduleListeningResume();
+                                    });
                                 }
                             }));
             return;
