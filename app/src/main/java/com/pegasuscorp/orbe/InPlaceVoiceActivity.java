@@ -17,14 +17,13 @@ import androidx.core.content.ContextCompat;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.chat.ConversationManager;
+import com.pegasuscorp.orbe.contextstore.ContextEditor;
 import com.pegasuscorp.orbe.conversation.ResponseDelivery;
+import com.pegasuscorp.orbe.diag.CorrectionsEditor;
+import com.pegasuscorp.orbe.memory.MemoryEditor;
+import com.pegasuscorp.orbe.notepad.NotepadEditor;
 import com.pegasuscorp.orbe.session.PegaseSession;
-import com.pegasuscorp.orbe.voice.ContextEditor;
-import com.pegasuscorp.orbe.voice.CorrectionsEditor;
-import com.pegasuscorp.orbe.voice.IntentParser;
 import com.pegasuscorp.orbe.voice.LocalKeywordParser;
-import com.pegasuscorp.orbe.voice.MemoryEditor;
-import com.pegasuscorp.orbe.voice.NotepadEditor;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.SpeechRulesEditor;
 import com.pegasuscorp.orbe.voice.VoiceInputHandler;
@@ -65,7 +64,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
 
         pegaseSession = PegaseSession.get(this);
         conversation = ChatSessionRegistry.get(this);
-        responseDelivery = new ResponseDelivery(this);
+        responseDelivery = new ResponseDelivery();
 
         voiceManager = ChatVoiceBridge.getSharedVoice(this);
         voiceOutput = new VoiceOutputHandler(this, voiceManager, responseDelivery);
@@ -81,7 +80,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         VoiceMuteStore.syncController(this);
 
         voiceInput.handleWakeIntent(getIntent());
-        main.postDelayed(this::moveTaskToBack, 350);
+        main.postDelayed(() -> moveTaskToBack(true), 350);
     }
 
     @Override
@@ -89,7 +88,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         super.onNewIntent(intent);
         setIntent(intent);
         if (voiceInput != null) voiceInput.handleWakeIntent(intent);
-        main.postDelayed(this::moveTaskToBack, 350);
+        main.postDelayed(() -> moveTaskToBack(true), 350);
     }
 
     @Override
@@ -103,7 +102,8 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         super.onDestroy();
     }
 
-  @Override
+    @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
         if (voiceInput != null && voiceInput.isConversationActive()) {
             voiceInput.exitChatMode();
@@ -118,15 +118,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         return !isFinishing() && !isDestroyed();
     }
 
-    @Override
-    public void runOnUiThread(Runnable action) {
-        if (action != null) main.post(action);
-    }
-
-    @Override
-    public void startActivity(Intent intent) {
-        super.startActivity(intent);
-    }
+    // runOnUiThread / startActivity : fournis par Activity (satisfont VoiceInputCallback)
 
     @Override
     public void showToast(String message, int length) {
@@ -153,8 +145,8 @@ public class InPlaceVoiceActivity extends AppCompatActivity
     }
 
     @Override
-    public void executeLauncherCommand(IntentParser.Command cmd, String rawText) {
-        // In-place : pas de navigation launcher — ouvrir Pégase si besoin
+    public void executeLauncherCommand(com.pegasuscorp.orbe.voice.IntentParser.Command cmd,
+            String rawText) {
         PegaseInterfaceActivity.open(this);
     }
 
@@ -181,10 +173,12 @@ public class InPlaceVoiceActivity extends AppCompatActivity
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
+            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_MIC && voiceInput != null
-                && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == REQ_MIC
+                && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && voiceInput != null) {
             voiceInput.handleWakeIntent(getIntent());
         }
     }

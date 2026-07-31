@@ -611,6 +611,12 @@ public class PegaseSession {
                 ChatSendOptions.legacy(Channel.ORION).withMaxTokens(1000), "orion_plan");
     }
 
+    /** Planification cachée copilote — éphémère, hors historique (P3 v3). */
+    public String completeCopilotReflectionSync(String reflectionPrompt) throws Exception {
+        return conversation().completeEphemeralSync(reflectionPrompt, 30,
+                ChatSendOptions.legacy(Channel.TEXT).withMaxTokens(350), "copilot_reflection");
+    }
+
     public Channel getChannel() {
         return sessionContext.channel;
     }
@@ -1690,7 +1696,8 @@ public class PegaseSession {
         if (appContext == null) return;
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
-            ContextSnapshot snap = ContextBuilder.buildSnapshot(appContext, msg, currentTurnIntent);
+            ContextSnapshot snap = ContextBuilder.buildSnapshot(
+                    appContext, msg, currentTurnIntent, sessionContext.channel);
             turnReasoning.applySnapshot(snap);
             turnReasoning.setSessionUsed(msg);
         } catch (Exception ignored) {

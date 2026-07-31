@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.voice;
 
 import com.pegasuscorp.orbe.voice.IWakeWordCallback;
+import com.pegasuscorp.orbe.voice.IWakeHealthCallback;
 
 /**
  * API wake word exposée par {@code VoiceService} (processus {@code :voice}).
@@ -12,4 +13,8 @@ interface IVoiceWakeService {
     void setGentleMode(boolean gentle);
     void registerCallback(IWakeWordCallback callback);
     void unregisterCallback(IWakeWordCallback callback);
+    void registerHealthCallback(IWakeHealthCallback callback);
+    void unregisterHealthCallback(IWakeHealthCallback callback);
+    int getWakeHealthCode();
+    void resetKwsCrashGuard();
 }

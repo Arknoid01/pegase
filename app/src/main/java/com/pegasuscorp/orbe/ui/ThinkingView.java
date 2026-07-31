@@ -108,6 +108,30 @@ public class ThinkingView extends LinearLayout {
         if (spinner != null) spinner.setVisibility(VISIBLE);
     }
 
+    public void onMicListening() {
+        runUi(() -> {
+            if (completing) return;
+            cancelErrorHide();
+            llmPhase = false;
+            tools.clear();
+            stopPulse();
+            showFadeIn();
+            if (thinkingText != null) {
+                thinkingText.setTextColor(CYAN);
+                thinkingText.setText("🎤  J'écoute…");
+            }
+            if (spinner != null) spinner.setVisibility(VISIBLE);
+        });
+    }
+
+    /** Masque l'indicateur micro si aucun outil / LLM en cours. */
+    public void onMicIdle() {
+        runUi(() -> {
+            if (completing || llmPhase || !tools.isEmpty()) return;
+            if (getVisibility() == VISIBLE) onComplete();
+        });
+    }
+
     public void onToolStart(String toolName) {
         runUi(() -> {
             if (completing) return;

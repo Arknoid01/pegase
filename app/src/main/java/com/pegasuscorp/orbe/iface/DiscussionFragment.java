@@ -45,6 +45,8 @@ import com.pegasuscorp.orbe.tools.knowledge.NasaImageHelper;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 import com.pegasuscorp.orbe.ui.PegaseSheets;
 import com.pegasuscorp.orbe.ui.ThinkingView;
+import com.pegasuscorp.orbe.voice.PegaseVisualPhase;
+import com.pegasuscorp.orbe.voice.PegaseVisualStateHub;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.PttTouchHelper;
 import com.pegasuscorp.orbe.voice.VoiceManager;
@@ -92,6 +94,7 @@ public class DiscussionFragment extends Fragment {
     private ThinkingView thinkingView;
     private String lastConversationText = "";
     private MemoryRepository.OnTurnsChangedListener turnsListener;
+    private PegaseVisualStateHub.Listener visualStateListener;
 
     /** Pièce jointe vision en attente (image ou PDF) — envoi au prochain ↗. */
     @Nullable private Uri pendingVisionUri;
@@ -164,6 +167,19 @@ public class DiscussionFragment extends Fragment {
         thinkLp.topMargin = dp(ctx, 6);
         thinkLp.bottomMargin = dp(ctx, 2);
         root.addView(thinkingView, thinkLp);
+
+        visualStateListener = phase -> runOnUi(() -> {
+            if (!isAdded() || thinkingView == null) return;
+            if (host != null && !host.isDiscussionTabVisible()) return;
+            if (phase == PegaseVisualPhase.MIC_LISTENING) {
+                thinkingView.onMicListening();
+            } else if (phase == PegaseVisualPhase.THINKING) {
+                thinkingView.onLlmStart();
+            } else if (phase == PegaseVisualPhase.IDLE) {
+                thinkingView.onMicIdle();
+            }
+        });
+        PegaseVisualStateHub.addListener(visualStateListener);
 
         try {
             MemoryRepository.getInstance(ctx).reloadRecentTurnsFromDisk();
@@ -302,6 +318,10 @@ public class DiscussionFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
+        if (visualStateListener != null) {
+            PegaseVisualStateHub.removeListener(visualStateListener);
+            visualStateListener = null;
+        }
         clearTurnsListener();
         conversationList = null;
         conversationAdapter = null;
@@ -727,6 +747,7 @@ public class DiscussionFragment extends Fragment {
         if (chatSendBtn != null) chatSendBtn.setEnabled(false);
         if (thinkingView != null) {
             thinkingView.reset();
+            PegaseWakeController.setAssistantThinking(true);
             thinkingView.onLlmStart();
         }
         if (host != null) host.updateSubtitle();
@@ -743,6 +764,7 @@ public class DiscussionFragment extends Fragment {
                 lastConversationText = "";
                 refreshConversationIfNeeded();
                 if (thinkingView != null) thinkingView.onComplete();
+                PegaseWakeController.setAssistantThinking(false);
                 try {
                     ChatVoiceBridge.getSharedVoice(requireActivity()).speak(analysis, null);
                 } catch (Exception ignored) {}
@@ -757,6 +779,7 @@ public class DiscussionFragment extends Fragment {
                 lastConversationText = "";
                 refreshConversationIfNeeded();
                 if (thinkingView != null) thinkingView.onError();
+                PegaseWakeController.setAssistantThinking(false);
                 Toast.makeText(requireContext(), err, Toast.LENGTH_LONG).show();
                 finishTextChatReply();
             }
@@ -998,6 +1021,7 @@ public class DiscussionFragment extends Fragment {
                 runOnUi(() -> {
                     if (!isAdded() || thinkingView == null) return;
                     if (host != null && !host.isDiscussionTabVisible()) return;
+                    PegaseWakeController.setAssistantThinking(true);
                     thinkingView.onToolStart(toolId);
                 });
             }
@@ -1016,6 +1040,7 @@ public class DiscussionFragment extends Fragment {
                 runOnUi(() -> {
                     if (!isAdded() || thinkingView == null) return;
                     if (host != null && !host.isDiscussionTabVisible()) return;
+                    PegaseWakeController.setAssistantThinking(true);
                     thinkingView.onLlmStart();
                 });
             }
@@ -1023,10 +1048,10 @@ public class DiscussionFragment extends Fragment {
             @Override
             public void onReply(String reply, boolean toolFired) {
                 runOnUi(() -> {
-                    // Toujours rafraîchir (bulle user / preamble) même si un outil suit.
                     lastConversationText = "";
                     refreshConversationIfNeeded();
                     if (toolFired) return;
+                    PegaseWakeController.setAssistantThinking(false);
                     if (thinkingView != null && isAdded()) thinkingView.onComplete();
                     finishTextChatReply();
                 });
@@ -1040,6 +1065,7 @@ public class DiscussionFragment extends Fragment {
             @Override
             public void onToolExit(ToolResult result) {
                 runOnUi(() -> {
+                    PegaseWakeController.setAssistantThinking(false);
                     if (thinkingView != null && isAdded()) thinkingView.onComplete();
                     handleSessionToolResult(result);
                 });
@@ -1048,6 +1074,7 @@ public class DiscussionFragment extends Fragment {
             @Override
             public void onToolBlocked() {
                 runOnUi(() -> {
+                    PegaseWakeController.setAssistantThinking(false);
                     if (thinkingView != null && isAdded()) thinkingView.onError();
                     if (isAdded()) {
                         Toast.makeText(requireContext(),
@@ -1061,6 +1088,7 @@ public class DiscussionFragment extends Fragment {
             @Override
             public void onError(String message) {
                 runOnUi(() -> {
+                    PegaseWakeController.setAssistantThinking(false);
                     if (thinkingView != null && isAdded()) thinkingView.onError();
                     if (isAdded() && message != null && !message.isEmpty()) {
                         Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show();

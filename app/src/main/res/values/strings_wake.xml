@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wake_notif_title">Pégase</string>
+    <string name="wake_notif_listening">Pégase écoute</string>
+    <string name="wake_notif_problem">Écoute coupée — problème détecté</string>
+    <string name="wake_notif_idle">Service micro</string>
+</resources>

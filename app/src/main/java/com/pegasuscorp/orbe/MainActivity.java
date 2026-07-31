@@ -51,6 +51,9 @@ import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 import com.pegasuscorp.orbe.voice.VoiceMuteStore;
 import com.pegasuscorp.orbe.voice.VoiceOutputHandler;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
+import com.pegasuscorp.orbe.voice.WakeHealthUi;
+import com.pegasuscorp.orbe.voice.PegaseVisualStateHub;
 
 import java.util.concurrent.ExecutorService;
 
@@ -96,6 +99,7 @@ public class MainActivity extends AppCompatActivity
 
     private final ResponseDelivery responseDelivery = new ResponseDelivery();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private PegaseVisualStateHub.Listener visualPhaseListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +111,7 @@ public class MainActivity extends AppCompatActivity
             if (com.pegasuscorp.orbe.intentions.IntentionPrefs.isEnabled(this)) {
                 com.pegasuscorp.orbe.permissions.PermissionFlow.ensureNotifications(this);
             }
+            com.pegasuscorp.orbe.permissions.PermissionFlow.ensureLocation(this);
         } catch (Exception ignored) {}
         try {
             com.pegasuscorp.orbe.f1companion.F1NewsScheduler.ensureScheduled(this);
@@ -202,6 +207,14 @@ public class MainActivity extends AppCompatActivity
         orbUi.refreshShortcutSlots();
         wireOrbGestures();
         orbUi.applyPersonalization();
+        WakeHealthUi.setListener(status -> {
+            if (orbUi != null) orbUi.applyWakeHealth(status);
+        });
+        visualPhaseListener = phase -> {
+            if (orbUi != null) orbUi.applyVisualPhase(phase);
+        };
+        PegaseVisualStateHub.addListener(visualPhaseListener);
+        VoiceWakeClient.get().refreshWakeHealth();
 
         inkManager = DigitalInkManager.getInstance();
         attachInkStatusListener();
@@ -602,6 +615,11 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     protected void onDestroy() {
+        if (visualPhaseListener != null) {
+            PegaseVisualStateHub.removeListener(visualPhaseListener);
+            visualPhaseListener = null;
+        }
+        WakeHealthUi.setListener(null);
         if (lifecycle != null) lifecycle.onDestroy();
         if (homeAssets != null) homeAssets.shutdown();
         super.onDestroy();

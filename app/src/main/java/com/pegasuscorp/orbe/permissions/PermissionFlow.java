@@ -17,6 +17,7 @@ public final class PermissionFlow {
 
     public static final int REQ_CALENDAR = 7101;
     public static final int REQ_NOTIFICATIONS = 7102;
+    public static final int REQ_LOCATION = 7103;
 
     private PermissionFlow() {}
 
@@ -63,6 +64,30 @@ public final class PermissionFlow {
         ActivityCompat.requestPermissions(activity,
                 new String[]{Manifest.permission.POST_NOTIFICATIONS},
                 REQ_NOTIFICATIONS);
+        return false;
+    }
+
+    public static boolean hasLocation(Context ctx) {
+        if (ctx == null) return false;
+        return ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * @return true si déjà accordée ; false si une demande a été lancée (ou impossible).
+     */
+    public static boolean ensureLocation(Context ctx) {
+        if (hasLocation(ctx)) return true;
+        Activity activity = findActivity(ctx);
+        if (activity == null) return false;
+        ActivityCompat.requestPermissions(activity,
+                new String[]{
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                },
+                REQ_LOCATION);
         return false;
     }
 

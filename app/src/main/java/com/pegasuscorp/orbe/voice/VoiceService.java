@@ -56,6 +56,8 @@ public class VoiceService extends Service {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final RemoteCallbackList<IWakeWordCallback> callbacks = new RemoteCallbackList<>();
+    private final RemoteCallbackList<IWakeHealthCallback> healthCallbacks =
+            new RemoteCallbackList<>();
 
     private SpeechRecognizer recognizer;
     private KwsAudioRouteManager kwsRouteManager;
@@ -75,6 +77,8 @@ public class VoiceService extends Service {
     private PowerManager.WakeLock listenWakeLock;
     /** Empreinte notif FGS — un seul startForeground tant que le texte ne change pas. */
     private String lastNotifFingerprint;
+    private boolean foregroundStarted;
+    private WakeHealthStatus lastHealth = WakeHealthStatus.OFF;
 
     private final IVoiceWakeService.Stub binder = new IVoiceWakeService.Stub() {
         @Override
@@ -82,6 +86,7 @@ public class VoiceService extends Service {
             wantListening = true;
             sttBackoffStep = 0;
             kwsRestartStreak = 0;
+            refreshForegroundNotification();
             scheduleListen(START_LISTEN_DELAY_MS);
         }
 
@@ -89,6 +94,7 @@ public class VoiceService extends Service {
         public void stopWakeListening() {
             wantListening = false;
             stopListening();
+            refreshForegroundNotification();
         }
 
         @Override
@@ -105,13 +111,43 @@ public class VoiceService extends Service {
         public void unregisterCallback(IWakeWordCallback callback) {
             if (callback != null) callbacks.unregister(callback);
         }
+
+        @Override
+        public void registerHealthCallback(IWakeHealthCallback callback) {
+            if (callback != null) healthCallbacks.register(callback);
+            if (callback == null) return;
+            try {
+                callback.onWakeHealthChanged(lastHealth.code);
+            } catch (RemoteException ignored) {}
+        }
+
+        @Override
+        public void unregisterHealthCallback(IWakeHealthCallback callback) {
+            if (callback != null) healthCallbacks.unregister(callback);
+        }
+
+        @Override
+        public int getWakeHealthCode() {
+            return currentWakeHealth().code;
+        }
+
+        @Override
+        public void resetKwsCrashGuard() {
+            KwsCrashGuard.resetForUser(VoiceService.this);
+            refreshWakeBackend();
+            if (wantListening) {
+                scheduleListen(START_LISTEN_DELAY_MS);
+            } else {
+                refreshForegroundNotification();
+            }
+        }
     };
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startAsForeground();
+        refreshForegroundNotification();
         kwsRouteManager = new KwsAudioRouteManager(this);
         refreshWakeBackend();
         maybeAutoDownloadKws();
@@ -142,6 +178,7 @@ public class VoiceService extends Service {
             kwsRouteManager = null;
         }
         callbacks.kill();
+        healthCallbacks.kill();
         super.onDestroy();
     }
 
@@ -152,6 +189,7 @@ public class VoiceService extends Service {
         if (KwsCrashGuard.shouldDisableKws(this)) {
             Log.e(TAG, "KWS disabled (crash loop) — pas de STT duty-cycle (évite kill micro)");
             destroyRecognizer();
+            refreshForegroundNotification();
             return;
         }
         if (KwsModelStore.isModelReady(this)) {
@@ -175,12 +213,14 @@ public class VoiceService extends Service {
                 useKws = true;
                 destroyRecognizer();
                 Log.i(TAG, "wake backend = Sherpa KWS");
+                refreshForegroundNotification();
                 return;
             }
         }
         // Pas de fallback STT en boucle : ouvre/ferme le micro → OEM kill + point vert.
         Log.w(TAG, "wake backend = none (KWS indisponible, STT désactivé en arrière-plan)");
         destroyRecognizer();
+        refreshForegroundNotification();
     }
 
     private void maybeAutoDownloadKws() {
@@ -380,6 +420,7 @@ public class VoiceService extends Service {
             if (System.currentTimeMillis() - lastKwsStartMs > 15_000L) {
                 KwsCrashGuard.onKwsHealthy(this);
             }
+            refreshForegroundNotification();
             main.postDelayed(kwsHealthRunnable, KWS_HEALTH_PERIOD_MS);
             return;
         }
@@ -459,6 +500,7 @@ public class VoiceService extends Service {
         if (kwsEngine == null || !kwsEngine.isReady()) {
             Log.w(TAG, "KWS not ready — retry in 5s (model=" + KwsModelStore.isModelReady(this)
                     + " crashGuard=" + KwsCrashGuard.shouldDisableKws(this) + ")");
+            refreshForegroundNotification();
             scheduleListen(5_000);
             return;
         }
@@ -468,6 +510,7 @@ public class VoiceService extends Service {
         }
         if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
+            refreshForegroundNotification();
             return;
         }
         if (kwsEngine.isRunning()) return;
@@ -477,6 +520,7 @@ public class VoiceService extends Service {
         kwsEngine.start();
         main.removeCallbacks(kwsHealthRunnable);
         main.postDelayed(kwsHealthRunnable, KWS_HEALTH_FIRST_MS);
+        refreshForegroundNotification();
     }
 
     private void startSttListen() {
@@ -532,6 +576,67 @@ public class VoiceService extends Service {
             try { recognizer.cancel(); } catch (Exception ignored) {}
         }
         releaseListenWakeLock();
+        refreshForegroundNotification();
+    }
+
+    private WakeHealthStatus currentWakeHealth() {
+        boolean running = useKws && kwsEngine != null && kwsEngine.isRunning();
+        return WakeHealthEvaluator.evaluate(
+                wantListening,
+                KwsCrashGuard.shouldDisableKws(this),
+                running,
+                KwsModelStore.isModelReady(this));
+    }
+
+    private void refreshForegroundNotification() {
+        WakeHealthStatus health = currentWakeHealth();
+        if (health != lastHealth) {
+            lastHealth = health;
+            dispatchHealthChanged(health);
+        }
+        final String title = getString(com.pegasuscorp.orbe.R.string.wake_notif_title);
+        final String text = notificationTextFor(health);
+        String fingerprint = health.name() + '\n' + text;
+        if (fingerprint.equals(lastNotifFingerprint) && foregroundStarted) return;
+
+        Notification n = buildNotification(title, text);
+        if (!foregroundStarted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            } else {
+                startForeground(NOTIF_ID, n);
+            }
+            foregroundStarted = true;
+        } else {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) nm.notify(NOTIF_ID, n);
+        }
+        lastNotifFingerprint = fingerprint;
+    }
+
+    private String notificationTextFor(WakeHealthStatus health) {
+        switch (health) {
+            case LISTENING:
+                return getString(com.pegasuscorp.orbe.R.string.wake_notif_listening);
+            case PROBLEM:
+                return getString(com.pegasuscorp.orbe.R.string.wake_notif_problem);
+            case OFF:
+            default:
+                return getString(com.pegasuscorp.orbe.R.string.wake_notif_idle);
+        }
+    }
+
+    private void dispatchHealthChanged(WakeHealthStatus health) {
+        int n = healthCallbacks.beginBroadcast();
+        try {
+            for (int i = 0; i < n; i++) {
+                try {
+                    healthCallbacks.getBroadcastItem(i).onWakeHealthChanged(health.code);
+                } catch (RemoteException ignored) {}
+            }
+        } finally {
+            healthCallbacks.finishBroadcast();
+        }
     }
 
     private void acquireListenWakeLock() {
@@ -559,24 +664,6 @@ public class VoiceService extends Service {
         } catch (Exception e) {
             Log.w(TAG, "wake lock release", e);
         }
-    }
-
-    /**
-     * Un seul {@code startForeground} tant que le texte affiché ne change pas —
-     * pas de {@code notify()} à chaque cycle KWS/STT (signal OEM).
-     */
-    private void startAsForeground() {
-        final String title = "Pégase";
-        final String text = "Service micro";
-        String fingerprint = title + '\n' + text;
-        if (fingerprint.equals(lastNotifFingerprint)) return;
-        Notification n = buildNotification(title, text);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-        } else {
-            startForeground(NOTIF_ID, n);
-        }
-        lastNotifFingerprint = fingerprint;
     }
 
     private Notification buildNotification(String title, String text) {

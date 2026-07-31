@@ -4,6 +4,10 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.intentions.IntentionIds;
 import com.pegasuscorp.orbe.intentions.IntentionPrefs;
+import com.pegasuscorp.orbe.intentions.PegaseModeStore;
+import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
+import com.pegasuscorp.orbe.intentions.location.SavedPlace;
+import com.pegasuscorp.orbe.intentions.location.SavedPlaceStore;
 import com.pegasuscorp.orbe.life.LifePatternStore;
 
 import org.json.JSONObject;
@@ -27,9 +31,13 @@ public class SituationPromptBuilderTest {
         ctx = RuntimeEnvironment.getApplication();
         LifePatternStore.resetInstanceForTests();
         LearningCandidateStore.resetInstanceForTests();
+        SavedPlaceStore.resetInstanceForTests();
         IntentionPrefs.clearAll(ctx);
         LifePatternStore.getInstance(ctx).clearAll();
         LearningCandidateStore.getInstance(ctx).clearAll();
+        SavedPlaceStore.getInstance(ctx).clearAll();
+        LocationSituationReader.setCurrentPlace(ctx, null);
+        PegaseModeStore.setMode(ctx, PegaseModeStore.Mode.NORMAL);
     }
 
     @Test
@@ -102,5 +110,22 @@ public class SituationPromptBuilderTest {
         String block = SituationPromptBuilder.promptBlock(
                 ctx, System.currentTimeMillis(), "Random");
         assertEquals("", block);
+    }
+
+    @Test
+    public void locationPlace_appearsInSituation() {
+        SavedPlaceStore.getInstance(ctx).upsert(
+                SavedPlace.Type.WORK, "Bureau", 48.85, 2.35, 200f);
+        LocationSituationReader.setCurrentPlace(ctx,
+                new SavedPlace("work", "Bureau", 48.85, 2.35, 200f, SavedPlace.Type.WORK));
+        String block = SituationPromptBuilder.promptBlock(ctx);
+        assertTrue(block.contains("Lieu : travail · Bureau"));
+    }
+
+    @Test
+    public void autoDrive_appearsInSituation() {
+        PegaseModeStore.setModeFromAutoDrive(ctx, PegaseModeStore.Mode.DRIVE);
+        String block = SituationPromptBuilder.promptBlock(ctx);
+        assertTrue(block.contains("Conduite détectée"));
     }
 }

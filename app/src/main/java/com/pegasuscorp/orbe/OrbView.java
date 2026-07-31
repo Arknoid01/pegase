@@ -135,6 +135,9 @@ public class OrbView extends View {
     private float downX, downY;
     private boolean longPressFired;
     private Runnable longPressRunnable;
+    private boolean wakeHealthProblem;
+    private ValueAnimator healthPulseAnim;
+    private float healthPulse;
 
     private static final float SHORTCUT_RING_FACTOR = 3.15f;
 
@@ -236,6 +239,25 @@ public class OrbView extends View {
     public void setOnPhaseClick(Runnable r) { this.onPhaseClick = r; }
 
     public void setOrbColors(int core, int middle, int edge) {
+        if (wakeHealthProblem) return;
+        applyOrbColors(core, middle, edge);
+    }
+
+    /** Orbe rouge + pulse rapide quand le wake est en erreur (P4). */
+    public void setWakeHealthProblem(boolean problem) {
+        if (wakeHealthProblem == problem) return;
+        wakeHealthProblem = problem;
+        if (problem) {
+            OrbThemes.Palette alert = OrbThemes.get(OrbThemes.ALL.length - 1);
+            applyOrbColors(alert.core, alert.middle, alert.edge);
+            startHealthPulse();
+        } else {
+            stopHealthPulse();
+        }
+        invalidate();
+    }
+
+    private void applyOrbColors(int core, int middle, int edge) {
         this.orbColorCore = core;
         this.orbColorMiddle = middle;
         this.orbColorEdge = edge;
@@ -246,6 +268,28 @@ public class OrbView extends View {
         updateWingTint();
         updateOrbShader();
         invalidate();
+    }
+
+    private void startHealthPulse() {
+        stopHealthPulse();
+        healthPulseAnim = ValueAnimator.ofFloat(0f, 1f);
+        healthPulseAnim.setDuration(1200);
+        healthPulseAnim.setRepeatMode(ValueAnimator.REVERSE);
+        healthPulseAnim.setRepeatCount(ValueAnimator.INFINITE);
+        healthPulseAnim.setInterpolator(new AccelerateDecelerateInterpolator());
+        healthPulseAnim.addUpdateListener(v -> {
+            healthPulse = (float) v.getAnimatedValue();
+            invalidateAmbient();
+        });
+        healthPulseAnim.start();
+    }
+
+    private void stopHealthPulse() {
+        if (healthPulseAnim != null) {
+            healthPulseAnim.cancel();
+            healthPulseAnim = null;
+        }
+        healthPulse = 0f;
     }
 
     private void updateWingTint() {
@@ -262,12 +306,17 @@ public class OrbView extends View {
     private void updateOrbShader(float drawRadius) {
         float cx = getOrbCx(), cy = getOrbCy();
         if (cx <= 0 || drawRadius <= 0) return;
-        int core = brightenColor(orbColorCore, orbPulse * 0.2f);
+        int core = brightenColor(orbColorCore, combinedPulse() * 0.2f);
         orbPaint.setShader(new RadialGradient(
                 cx, cy, drawRadius,
                 new int[]{core, orbColorMiddle, orbColorEdge},
-                new float[]{0f, 0.52f + orbPulse * 0.06f, 1f},
+                new float[]{0f, 0.52f + combinedPulse() * 0.06f, 1f},
                 Shader.TileMode.CLAMP));
+    }
+
+    private float combinedPulse() {
+        if (!wakeHealthProblem) return orbPulse;
+        return Math.max(orbPulse, healthPulse * 0.85f);
     }
 
     private static int brightenColor(int color, float amount) {
@@ -503,11 +552,12 @@ public class OrbView extends View {
     }
 
     private void drawMainOrb(Canvas c, float cx, float cy) {
-        float scale = 1f + orbPulse * 0.075f;
+        float pulse = combinedPulse();
+        float scale = 1f + pulse * (wakeHealthProblem ? 0.12f : 0.075f);
         float r = orbRadius * scale;
 
         updateOrbShader(r);
-        orbPaint.setAlpha((int) (232 + orbPulse * 23));
+        orbPaint.setAlpha((int) (232 + pulse * (wakeHealthProblem ? 30 : 23)));
         c.drawCircle(cx, cy, r, orbPaint);
         orbPaint.setAlpha(255);
     }

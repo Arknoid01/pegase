@@ -60,6 +60,9 @@ public final class IntentionEvaluator {
     /** Tick capteurs (~90 min) — re-check F1 si la fiche a changé. */
     public static void evaluateSensors(Context ctx) {
         evaluate(ctx, false);
+        try {
+            com.pegasuscorp.orbe.intentions.location.LocationSituationTracker.evaluate(ctx);
+        } catch (Exception ignored) {}
         checkF1Debrief(ctx);
         checkF1News(ctx);
         checkF1Live(ctx);

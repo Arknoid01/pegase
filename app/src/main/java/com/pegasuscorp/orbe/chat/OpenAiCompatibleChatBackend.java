@@ -242,7 +242,8 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
                 && CloudModelStore.isToolCapableModel(currentModelId());
         JSONArray messages = new JSONArray();
         messages.put(message("system",
-                MemoryPromptBuilder.buildFullSystem(appContext, userMessage, nativeTools)));
+                MemoryPromptBuilder.buildFullSystem(appContext, userMessage, nativeTools, false,
+                        options.channel)));
         List<Turn> promptHistory = ConversationHistorySelector.selectForPrompt(
                 appContext, history, userMessage);
         for (Turn turn : promptHistory) {
@@ -275,7 +276,8 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             throws Exception {
         JSONArray messages = new JSONArray();
         messages.put(message("system", MemoryPromptBuilder.buildFullSystem(
-                appContext, chain.userMessage, options.allowMoreTools, !options.allowMoreTools)));
+                appContext, chain.userMessage, options.allowMoreTools, !options.allowMoreTools,
+                options.channel)));
         List<Turn> promptHistory = ConversationHistorySelector.selectForPrompt(
                 appContext, chain.history, chain.userMessage);
         for (Turn turn : promptHistory) {

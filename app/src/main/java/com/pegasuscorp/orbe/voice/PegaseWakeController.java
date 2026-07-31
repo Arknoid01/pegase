@@ -13,6 +13,11 @@ import android.util.Log;
  * In-place (overlay)     → wake ❌, voix ✅, HOME pas au premier plan
  * Bureau ouvert          → wake ❌, voix ❌, bureau ✅ (push-to-talk)
  * </pre>
+ *
+ * Les flags static restent dans le process launcher ; le process {@code :voice}
+ * ne les lit jamais — start/stop via {@link VoiceWakeClient}.
+ *
+ * L'état visuel écoute/réflexion est propagé via {@link PegaseVisualStateHub}.
  */
 public final class PegaseWakeController {
 
@@ -68,13 +73,15 @@ public final class PegaseWakeController {
         return inPlaceVoiceActive;
     }
 
-  /** Chat vocal classique sur HOME (pas in-place). */
+    /** Chat vocal classique sur HOME (pas in-place). */
     public static boolean isVoiceChatSessionOnHome() {
         return voiceChatActive && !inPlaceVoiceActive;
     }
 
     public static void setMicListening(boolean listening) {
         micListening = listening;
+        PegaseVisualStateHub.refresh();
+        logState("micListen=" + listening);
     }
 
     public static boolean isMicListening() {
@@ -83,6 +90,8 @@ public final class PegaseWakeController {
 
     public static void setAssistantThinking(boolean thinking) {
         assistantThinking = thinking;
+        PegaseVisualStateHub.refresh();
+        logState("thinking=" + thinking);
     }
 
     public static boolean isAssistantThinking() {
@@ -91,6 +100,7 @@ public final class PegaseWakeController {
 
     public static void setWakeHealthProblem(boolean problem) {
         wakeHealthProblem = problem;
+        logState("wakeHealth=" + problem);
     }
 
     public static boolean hasWakeHealthProblem() {
@@ -161,6 +171,7 @@ public final class PegaseWakeController {
     private static void logState(String change) {
         if (!Log.isLoggable(TAG, Log.DEBUG)) return;
         Log.d(TAG, change + " → listen=" + shouldListen()
-                + " blockMic=" + shouldBlockSharedMic());
+                + " blockMic=" + shouldBlockSharedMic()
+                + " phase=" + PegaseVisualStateHub.derivePhase());
     }
 }

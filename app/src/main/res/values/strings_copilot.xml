@@ -24,6 +24,7 @@
     <string name="copilot_settings_title">🛸 Mode copilote</string>
     <string name="copilot_settings_subtitle">Listes blanches strictes — rien ne s\'active sans ton accord</string>
     <string name="copilot_section_general">Général</string>
+    <string name="copilot_section_advanced">Contexte écran &amp; réflexion</string>
     <string name="copilot_section_permissions">Permissions</string>
     <string name="copilot_section_apps_screen">Apps — analyse d\'écran</string>
     <string name="copilot_section_apps_notif">Apps — notifications copilote</string>
@@ -32,6 +33,12 @@
     <string name="copilot_toggle_translation">Traduction à l\'écran</string>
     <string name="copilot_toggle_highlight">Surlignage boutons (a11y)</string>
     <string name="copilot_toggle_notif">Alertes notifications ciblées</string>
+    <string name="copilot_toggle_reflection">Réflexion cachée (intents complexes)</string>
+    <string name="copilot_hint_advanced">Fraîcheur du snapshot écran et plan interne avant réponse copilote.</string>
+    <string name="copilot_value_screen_age">Fraîcheur max snapshot écran</string>
+    <string name="copilot_value_screen_chars">Taille max texte écran</string>
+    <string name="copilot_value_seconds_fmt">%1$d secondes</string>
+    <string name="copilot_invalid_value">Valeur invalide</string>
     <string name="copilot_hint_screen_apps">Seules ces apps déclenchent lecture a11y / traduction / OCR.</string>
     <string name="copilot_hint_notif_apps">Pégase t\'alerte uniquement pour ces apps.</string>
     <string name="copilot_perm_overlay">Afficher par-dessus les apps</string>

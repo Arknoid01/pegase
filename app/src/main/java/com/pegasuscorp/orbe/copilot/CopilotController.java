@@ -21,11 +21,14 @@ import com.pegasuscorp.orbe.session.SessionObserver;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Pont entre l'overlay copilote et {@link PegaseSession}.
  * Gère envoi texte, capture écran + vision, et mémorisation contextuelle.
  */
-public final class CopilotController implements SessionObserver {
+public final class CopilotController {
 
     public interface BubbleSink {
         void onUserMessage(String text);
@@ -38,12 +41,14 @@ public final class CopilotController implements SessionObserver {
     }
 
     private static volatile CopilotController instance;
+    private static final ExecutorService REFLECTION_IO = Executors.newSingleThreadExecutor();
 
     private final Context appContext;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile BubbleSink bubbleSink;
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
+    private volatile int attachGeneration;
     private BroadcastReceiver notifReceiver;
     private BroadcastReceiver statusReceiver;
 
@@ -63,9 +68,9 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void attach(BubbleSink sink) {
+        attachGeneration++;
         bubbleSink = sink;
         PegaseSession session = PegaseSession.get(appContext);
-        session.addObserver(this);
         session.init(new SessionContext(Channel.COPILOT, false));
         registerNotifReceiver();
         registerStatusReceiver();
@@ -116,6 +121,7 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void detach() {
+        attachGeneration++;
         if (statusReceiver != null) {
             try {
                 appContext.unregisterReceiver(statusReceiver);
@@ -128,8 +134,9 @@ public final class CopilotController implements SessionObserver {
             } catch (Exception ignored) {}
             notifReceiver = null;
         }
-        PegaseSession.get(appContext).removeObserver(this);
         bubbleSink = null;
+        sending = false;
+        PegaseWakeController.setAssistantThinking(false);
         if (!ChatSessionRegistry.get(appContext).isActive()
                 && !PegaseWakeController.isVoiceChatActive()) {
             PegaseWakeController.setTextDiscussionActive(false);
@@ -142,16 +149,58 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void sendUserMessage(String text) {
-        if (TextUtils.isEmpty(text)) return;
+        if (TextUtils.isEmpty(text) || sending) return;
         String trimmed = text.trim();
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onUserMessage(trimmed);
 
         Context ctx = appContext;
 
-        String payload = buildPayload(trimmed);
+        String payload = buildPayload(trimmed, null);
         setSending(true);
-        PegaseSession.get(ctx).send(payload, trimmed, sessionObserver());
+        dispatchUserTurn(trimmed, payload);
+    }
+
+    private void dispatchUserTurn(String trimmed, String payloadWithoutReflection) {
+        Context ctx = appContext;
+        final int gen = attachGeneration;
+        if (!CopilotReflectionGate.needsReflection(ctx, trimmed)) {
+            main.post(() -> {
+                if (gen != attachGeneration) {
+                    setSending(false);
+                    return;
+                }
+                PegaseSession.get(ctx).send(payloadWithoutReflection, trimmed, sessionObserver(gen));
+            });
+            return;
+        }
+
+        BubbleSink sink = bubbleSink;
+        if (sink != null) {
+            sink.onStatus(appContext.getString(R.string.copilot_status_thinking));
+        }
+
+        REFLECTION_IO.execute(() -> {
+            if (gen != attachGeneration) return;
+            String reflectionPlan = "";
+            try {
+                CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(ctx);
+                String prompt = CopilotReflectionPlanner.buildReflectionPrompt(snap, trimmed);
+                reflectionPlan = PegaseSession.get(ctx).completeCopilotReflectionSync(prompt);
+            } catch (Exception e) {
+                android.util.Log.w("CopilotReflection", "reflection skipped", e);
+            }
+            if (gen != attachGeneration) return;
+            String prefix = CopilotReflectionPlanner.buildPayloadPrefix(reflectionPlan);
+            String payload = buildPayload(trimmed, prefix.isEmpty() ? null : prefix);
+            main.post(() -> {
+                if (gen != attachGeneration) {
+                    setSending(false);
+                    return;
+                }
+                PegaseSession.get(ctx).send(payload, trimmed, sessionObserver(gen));
+            });
+        });
     }
 
     /** Capture l'écran puis analyse via vision (OpenRouter). */
@@ -293,16 +342,25 @@ public final class CopilotController implements SessionObserver {
         }
     }
 
-    private String buildPayload(String userText) {
-        if (TextUtils.isEmpty(lastScreenContext)) return userText;
-        return "[Contexte écran récent]\n" + lastScreenContext + "\n\n[Question]\n" + userText;
+    private String buildPayload(String userText, String reflectionPrefix) {
+        StringBuilder sb = new StringBuilder();
+        if (!TextUtils.isEmpty(lastScreenContext)) {
+            sb.append("[Capture écran manuelle]\n").append(lastScreenContext).append("\n\n");
+        }
+        if (!TextUtils.isEmpty(reflectionPrefix)) {
+            sb.append(reflectionPrefix);
+        }
+        if (sb.length() == 0) return userText;
+        sb.append("[Question]\n").append(userText);
+        return sb.toString();
     }
 
-    private SessionObserver sessionObserver() {
+    private SessionObserver sessionObserver(int gen) {
         return new SessionObserver() {
             @Override
             public void onReply(String text, boolean toolFired) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (!toolFired && bubbleSink != null && !TextUtils.isEmpty(text)) {
                         bubbleSink.onAssistantMessage(text);
                     }
@@ -313,6 +371,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onPartial(String accumulated) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) bubbleSink.onAssistantPartial(accumulated);
                 });
             }
@@ -320,6 +379,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onToolResult(ToolResult result) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null && result != null && result.text != null) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
@@ -329,6 +389,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onError(String message) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) bubbleSink.onError(message);
                     setSending(false);
                 });
@@ -337,42 +398,30 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onLlmStart() {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) {
                         bubbleSink.onStatus(appContext.getString(R.string.copilot_status_thinking));
                     }
                 });
+            }
+
+            @Override
+            public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    if (bubbleSink != null) {
+                        bubbleSink.onConfirmNeeded(question, onConfirm, onCancel);
+                    }
+                });
+                return true;
             }
         };
     }
 
     private void setSending(boolean value) {
         sending = value;
+        PegaseWakeController.setAssistantThinking(value);
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onSendingChanged(value);
-    }
-
-    @Override
-    public void onReply(String text, boolean toolFired) {
-        if (bubbleSink == null || TextUtils.isEmpty(text)) return;
-        main.post(() -> {
-            if (!toolFired) bubbleSink.onAssistantMessage(text);
-        });
-    }
-
-    @Override
-    public void onToolResult(ToolResult result) {
-    }
-
-    @Override
-    public void onError(String message) {
-        if (bubbleSink == null) return;
-        main.post(() -> bubbleSink.onError(message));
-    }
-
-    @Override
-    public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
-        if (bubbleSink == null || TextUtils.isEmpty(question)) return false;
-        main.post(() -> bubbleSink.onConfirmNeeded(question, onConfirm, onCancel));
-        return true;
     }
 }

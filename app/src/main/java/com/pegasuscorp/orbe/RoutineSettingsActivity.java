@@ -28,6 +28,7 @@ import com.pegasuscorp.orbe.f1companion.F1NewsScheduler;
 import com.pegasuscorp.orbe.intentions.IntentionIds;
 import com.pegasuscorp.orbe.intentions.IntentionPrefs;
 import com.pegasuscorp.orbe.intentions.PegaseModeStore;
+import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 import com.pegasuscorp.orbe.learning.LearningCandidate;
 import com.pegasuscorp.orbe.learning.LearningCandidateStore;
 import com.pegasuscorp.orbe.learning.LearningEngine;
@@ -216,6 +217,16 @@ public class RoutineSettingsActivity extends AppCompatActivity {
         wifiRow.setPadding(0, dp(10), 0, 0);
         wifiRow.setOnClickListener(v -> editWorkWifi(wifiRow));
         section.addView(wifiRow);
+
+        TextView locationRow = new TextView(this);
+        locationRow.setText(locationPlacesRowText());
+        locationRow.setTextColor(Color.parseColor("#35D0DD"));
+        locationRow.setTextSize(13);
+        locationRow.setPadding(0, dp(8), 0, 0);
+        locationRow.setOnClickListener(v ->
+                startActivity(new android.content.Intent(this,
+                        com.pegasuscorp.orbe.intentions.location.SituationSettingsActivity.class)));
+        section.addView(locationRow);
 
         TextView carRow = new TextView(this);
         String car = IntentionPrefs.getCarBtName(this);
@@ -427,6 +438,14 @@ public class RoutineSettingsActivity extends AppCompatActivity {
         if (m == PegaseModeStore.Mode.DRIVE) return "Conduite";
         if (m == PegaseModeStore.Mode.WORK) return "Travail";
         return "Normal";
+    }
+
+    private String locationPlacesRowText() {
+        String current = LocationSituationReader.getCurrentPlaceLabel(this);
+        if (current != null && !current.isEmpty()) {
+            return "Localisation : " + current + " (tap = réglages)";
+        }
+        return "Localisation & conduite (tap = réglages)";
     }
 
     private void editWorkWifi(TextView label) {

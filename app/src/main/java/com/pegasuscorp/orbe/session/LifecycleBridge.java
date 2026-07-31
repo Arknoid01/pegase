@@ -11,6 +11,7 @@ import com.pegasuscorp.orbe.AppListCache;
 import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
 import com.pegasuscorp.orbe.PegaseWakeService;
+import com.pegasuscorp.orbe.permissions.PermissionFlow;
 import com.pegasuscorp.orbe.PersonalizationStore;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
@@ -22,6 +23,7 @@ import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.PegaseWakeStore;
 import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 import com.pegasuscorp.orbe.voice.VoiceManager;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 /**
  * Pont lifecycle Activity ↔ orbe / voix / prefetch / LLM idle unload.
@@ -119,6 +121,12 @@ public final class LifecycleBridge {
             } else {
                 host.onMicGrantedStartListening();
             }
+        } else if (requestCode == PermissionFlow.REQ_LOCATION && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            try {
+                com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap
+                        .ensureStarted(host.activity());
+            } catch (Exception ignored) {}
         }
     }
 
@@ -205,11 +213,13 @@ public final class LifecycleBridge {
         // STT Google sous low-mem au retour HOME = hitch + RAM — reporter via sync léger seul.
         if (lowMemAtSchedule || MemoryPressure.isLow(a)) {
             PegaseWakeService.sync(a);
+            VoiceWakeClient.get().refreshWakeHealth();
             return;
         }
 
         VoiceInputHandler voice = host.voiceInput();
         PegaseWakeService.sync(a);
+        VoiceWakeClient.get().refreshWakeHealth();
         if ((voice == null || !voice.isConversationActive())
                 && PegaseWakeStore.isEnabled(a)
                 && PegaseWakeController.shouldListen()) {

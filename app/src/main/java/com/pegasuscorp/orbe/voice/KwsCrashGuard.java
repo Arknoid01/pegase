@@ -69,6 +69,7 @@ public final class KwsCrashGuard {
     /** Exposé pour l'UI diagnostic (réinitialiser après faux positifs crash guard). */
     public static void resetForUser(Context ctx) {
         reset(ctx);
+        Log.i(TAG, "manual reset");
     }
 
     private static SharedPreferences prefs(Context ctx) {

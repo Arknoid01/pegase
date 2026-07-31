@@ -240,6 +240,9 @@ public class PersonalizationPanel extends FrameLayout {
         addActionRow("Routines du matin", () ->
                 getContext().startActivity(
                         new android.content.Intent(getContext(), RoutineSettingsActivity.class)));
+        addActionRow("Localisation & conduite", () ->
+                getContext().startActivity(new android.content.Intent(getContext(),
+                        com.pegasuscorp.orbe.intentions.location.SituationSettingsActivity.class)));
 
         // ── 3. Pégase Cerveau ───────────────────────────────────────────────────
         addSectionSeparator(context);
@@ -441,6 +444,20 @@ public class PersonalizationPanel extends FrameLayout {
                             });
                         }
                     });
+        });
+        addActionRow("Réinitialiser le coupe-circuit wake", () -> {
+            if (!com.pegasuscorp.orbe.voice.VoiceWakeClient.get()
+                    .getCachedWakeHealth().isProblem()) {
+                android.widget.Toast.makeText(context,
+                        "Aucun problème wake détecté pour l'instant",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            com.pegasuscorp.orbe.voice.VoiceWakeClient.get().resetKwsCrashGuard(context);
+            android.widget.Toast.makeText(context,
+                    "Coupe-circuit réinitialisé — relance du wake…",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            PegaseWakeService.sync(context);
         });
 
         body.addView(spacer(context, (int) (12 * density)));

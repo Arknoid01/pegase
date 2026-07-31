@@ -29,6 +29,7 @@ public final class ReasoningTurnCollector {
     private final List<String> atlasUsed = new ArrayList<>();
     private final List<String> profileUsed = new ArrayList<>();
     private String sessionUsed = "";
+    private String screenContextUsed = "";
     private final Set<String> webSources = new LinkedHashSet<>();
     private String tavilyQuery = "";
     private int contextChunks;
@@ -62,6 +63,7 @@ public final class ReasoningTurnCollector {
         atlasUsed.clear();
         profileUsed.clear();
         sessionUsed = "";
+        screenContextUsed = "";
         if (snap == null) return;
         for (String m : snap.memories) {
             if (m != null && !m.trim().isEmpty()) memoriesUsed.add(clip(m.trim(), 100));
@@ -76,8 +78,16 @@ public final class ReasoningTurnCollector {
             if (c != null && !c.trim().isEmpty()) contextsLoaded.add(c.trim());
         }
         if (snap.sessionTopic != null) sessionUsed = clip(snap.sessionTopic.trim(), 100);
+        if (snap.screenContextLabel != null && !snap.screenContextLabel.trim().isEmpty()) {
+            screenContextUsed = clip(snap.screenContextLabel.trim(), 80);
+        }
         contextChunks = Math.max(contextChunks,
-                memoriesUsed.size() + atlasUsed.size() + contextsLoaded.size());
+                memoriesUsed.size() + atlasUsed.size() + contextsLoaded.size()
+                        + (screenContextUsed.isEmpty() ? 0 : 1));
+    }
+
+    public String screenContextUsed() {
+        return screenContextUsed;
     }
 
     /** Sujet du tour en cours (carte 🔍) — remplace le résumé de session archivé injecté. */
