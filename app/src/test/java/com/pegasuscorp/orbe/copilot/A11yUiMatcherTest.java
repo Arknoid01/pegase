@@ -32,6 +32,13 @@ public class A11yUiMatcherTest {
     }
 
     @Test
+    public void matchesFields_viewIdOnly() {
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromViewId("play_button");
+        assertTrue(A11yUiMatcher.matchesFields("", "com.app:id/play_button", "", c));
+        assertFalse(A11yUiMatcher.matchesFields("", "other", "", c));
+    }
+
+    @Test
     public void criteriaEmpty() {
         assertTrue(new A11yUiMatcher.Criteria().isEmpty());
         assertFalse(A11yUiMatcher.Criteria.fromText("x").isEmpty());
