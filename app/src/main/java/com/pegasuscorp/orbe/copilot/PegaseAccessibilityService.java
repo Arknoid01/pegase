@@ -90,7 +90,7 @@ public class PegaseAccessibilityService extends AccessibilityService {
 
     /**
      * Tap écran (gesture) — repli quand ACTION_CLICK a11y échoue (WebView / sections Wiki).
-     * Passe l'overlay en NOT_TOUCHABLE le temps du geste (sinon la bulle absorbe le tap).
+     * Si le tap tombe dans la bulle : la replie (NOT_TOUCHABLE seul insuffisant sur Nothing).
      */
     public boolean tapScreen(float x, float y) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
@@ -108,15 +108,21 @@ public class PegaseAccessibilityService extends AccessibilityService {
                 new GestureDescription.StrokeDescription(path, 0, 60);
         GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
 
-        FloatingOrbService.setTouchPassthrough(true);
-        schedulePassthroughRestore(500L);
+        boolean evacuated = FloatingOrbService.evacuateForScreenTap(x, y);
+        schedulePassthroughRestore(evacuated ? 900L : 500L);
 
-        // Si le tap tombe dans la bulle, laisser le WM appliquer NOT_TOUCHABLE
-        // avant d'injecter le geste (sinon absorption).
-        if (hitOverlay) {
-            main.post(() -> dispatchTapGesture(gesture, x, y, true));
+        if (evacuated || hitOverlay) {
+            main.postDelayed(() -> {
+                Rect after = FloatingOrbService.getOverlayScreenBounds();
+                boolean stillHit = FloatingOrbService.containsScreenPoint(x, y);
+                Log.i(TAG, "tapScreen afterEvacuate overlay="
+                        + (after != null ? after.toShortString() : "none")
+                        + " stillHit=" + stillHit);
+                dispatchTapGesture(gesture, x, y, hitOverlay);
+            }, 80L);
             return true;
         }
+        FloatingOrbService.setTouchPassthrough(true);
         return dispatchTapGesture(gesture, x, y, false);
     }
 
@@ -158,7 +164,7 @@ public class PegaseAccessibilityService extends AccessibilityService {
             main.removeCallbacks(pendingPassthroughRestore);
             pendingPassthroughRestore = null;
         }
-        FloatingOrbService.setTouchPassthrough(false);
+        FloatingOrbService.restoreAfterScreenGesture();
     }
 
     /** Active les sous-titres YouTube (action locale, sans cloud). */

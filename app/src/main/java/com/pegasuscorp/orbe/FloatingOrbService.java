@@ -80,6 +80,8 @@ public class FloatingOrbService extends Service {
     private CopilotController copilotController;
     private boolean bubbleExpanded;
     private boolean foregroundStarted;
+    /** Bulle repliée temporairement pour laisser passer un geste a11y. */
+    private boolean gestureCollapsedBubble;
     private float density;
     /** Hauteur IME (px) — pour remonter / réduire la bulle au-dessus du clavier. */
     private int imeBottomPx;
@@ -697,10 +699,67 @@ public class FloatingOrbService extends Service {
                 s.updateWindowFocus();
             }
         };
+        runOnMain(apply);
+    }
+
+    /**
+     * Si le tap tombe dans la bulle : la replie (orbe seule) + passthrough.
+     * FLAG_NOT_TOUCHABLE seul ne suffit pas sur certains OEM (geste absorbé quand même).
+     * @return true si évacuation faite (attendre 1–2 frames avant dispatchGesture)
+     */
+    public static boolean evacuateForScreenTap(float x, float y) {
+        FloatingOrbService s = instance;
+        if (s == null) return false;
+        boolean[] evacuated = {false};
+        runOnMain(() -> {
+            if (s.overlayRoot == null || s.layoutParams == null) return;
+            boolean hit = containsScreenPoint(x, y);
+            if (!hit && !(s.bubbleExpanded && currentMode == OverlayMode.COPILOT)) {
+                setTouchPassthrough(true);
+                return;
+            }
+            if (s.bubbleExpanded) {
+                s.gestureCollapsedBubble = true;
+                s.bubbleExpanded = false;
+                s.hideBubble();
+                android.util.Log.i("FloatingOrb",
+                        "evacuateForScreenTap collapsed bubble for tap "
+                                + Math.round(x) + "," + Math.round(y));
+                evacuated[0] = true;
+            }
+            setTouchPassthrough(true);
+            if (hit) evacuated[0] = true;
+        });
+        return evacuated[0];
+    }
+
+    /** Remet la bulle après un geste (si on l'avait repliée). */
+    public static void restoreAfterScreenGesture() {
+        FloatingOrbService s = instance;
+        if (s == null) {
+            setTouchPassthrough(false);
+            return;
+        }
+        runOnMain(() -> {
+            setTouchPassthrough(false);
+            if (s.gestureCollapsedBubble) {
+                s.gestureCollapsedBubble = false;
+                if (currentMode == OverlayMode.COPILOT) {
+                    s.bubbleExpanded = true;
+                    CopilotPrefs.setBubbleOpen(s, true);
+                    s.showBubble();
+                    android.util.Log.i("FloatingOrb", "restoreAfterScreenGesture reopened bubble");
+                }
+            }
+        });
+    }
+
+    private static void runOnMain(Runnable r) {
+        if (r == null) return;
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            apply.run();
+            r.run();
         } else {
-            new Handler(Looper.getMainLooper()).post(apply);
+            new Handler(Looper.getMainLooper()).post(r);
         }
     }
 
