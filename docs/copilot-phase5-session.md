@@ -1,8 +1,6 @@
 # Phase 5 — Mode copilote : récap session
 
-**Branche :** `cursor/v2-copilot-overlay-14e9`  
-**PR :** [#8](https://github.com/Arknoid01/pegase/pull/8) (draft)  
-**Base :** `main`  
+**Statut :** ✅ Mergé sur `main` (PR [#8](https://github.com/Arknoid01/pegase/pull/8), [#9](https://github.com/Arknoid01/pegase/pull/9))  
 **Date :** 30 juillet 2026
 
 ---
@@ -359,27 +357,17 @@ Exécutables localement si Android SDK / Gradle configuré :
 
 ---
 
-## Ce qui reste pour plus tard
+## Suite (hors scope Phase 5)
 
-- Merge et test device des PRs #4–#9
-- `open_url` minimal, browser complet (hors scope copilote)
-
-## Livré depuis la spec initiale
-
-- Résumé notif Pégase (`CopilotNotificationSummarizer`)
-- OCR fallback (`OcrFallback`)
-- Surlignage éléments (`ElementHighlightService`)
-- Picker apps installées (`CopilotAppPickerActivity`)
-- Polish complet (PR #9) — voir `docs/copilot-done.md`
+- Checks visuels device : YouTube CC, Chrome trad, notif WhatsApp
+- `open_url` minimal, browser complet
 
 ---
 
-## Merge suggéré
+## Historique merge v2
 
-Cette PR est indépendante des PRs mémoire (#6) et utility actions (#7). Peut merger sur `main` après tests device.
-
-**Ordre suggéré avec le reste du v2 :** #4 → #5 → #6 / #7 en parallèle → **#8 (cette PR)**
+Toutes les PRs #4–#9 sont mergées sur `main`. Branches feature supprimées sur GitHub.
 
 ---
 
-*Document généré à l’issue de la session Cloud Agent — branche `cursor/v2-copilot-overlay-14e9`.*
+*Document historique Phase 5 — code actuel sur `main`.*
