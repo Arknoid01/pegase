@@ -18,8 +18,12 @@ import com.pegasuscorp.orbe.session.Channel;
 import com.pegasuscorp.orbe.session.PegaseSession;
 import com.pegasuscorp.orbe.session.SessionContext;
 import com.pegasuscorp.orbe.session.SessionObserver;
+import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
+import com.pegasuscorp.orbe.tools.copilot.UiActionTool;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
+
+import org.json.JSONObject;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,6 +52,7 @@ public final class CopilotController {
     private volatile BubbleSink bubbleSink;
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
+    private volatile String lastUserText = "";
     private volatile int attachGeneration;
     /** Ignore les broadcasts de statut postés avant ce timestamp (anti-race). */
     private volatile long statusClearedAtElapsed;
@@ -176,6 +181,7 @@ public final class CopilotController {
     public void sendUserMessage(String text) {
         if (TextUtils.isEmpty(text) || sending) return;
         String trimmed = text.trim();
+        lastUserText = trimmed;
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onUserMessage(trimmed);
 
@@ -386,6 +392,7 @@ public final class CopilotController {
             public void onReply(String text, boolean toolFired) {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
+                    if (interceptTechnicalViewIdAsk(text, toolFired)) return;
                     clearBubbleStatus(true);
                     if (!toolFired && bubbleSink != null && !TextUtils.isEmpty(text)) {
                         bubbleSink.onAssistantMessage(text);
@@ -468,6 +475,79 @@ public final class CopilotController {
                 return true;
             }
         };
+    }
+
+    /**
+     * Si le LLM demande un viewId technique : ne montre pas la question,
+     * relance {@code ui_action} avec le libellé libre de l'utilisateur.
+     */
+    private boolean interceptTechnicalViewIdAsk(String reply, boolean toolFired) {
+        if (toolFired || !CopilotUiAskGuard.asksForTechnicalViewId(reply)) return false;
+        String target = CopilotUiAskGuard.inferUiTarget(lastUserText);
+        if (TextUtils.isEmpty(target)) return false;
+        android.util.Log.w("CopilotUi",
+                "LLM asked for technical view id — auto click target=\"" + target + "\"");
+        clearBubbleStatus(false);
+        if (bubbleSink != null) {
+            bubbleSink.onStatus(appContext.getString(R.string.copilot_status_action));
+        }
+        JSONObject params = new JSONObject();
+        try {
+            params.put("action", "click");
+            params.put("target", target);
+        } catch (Exception e) {
+            return false;
+        }
+        final int gen = attachGeneration;
+        new UiActionTool().execute(appContext, params, new ToolCallback() {
+            @Override
+            public void onSuccess(ToolResult result) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    clearBubbleStatus(true);
+                    if (bubbleSink != null && result != null && !TextUtils.isEmpty(result.text)) {
+                        bubbleSink.onAssistantMessage(result.text);
+                    }
+                    setSending(false);
+                });
+            }
+
+            @Override
+            public void onError(String error) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    clearBubbleStatus(true);
+                    if (bubbleSink != null) bubbleSink.onError(error);
+                    setSending(false);
+                });
+            }
+
+            @Override
+            public void onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
+                main.post(() -> {
+                    if (gen != attachGeneration) {
+                        if (onCancel != null) onCancel.run();
+                        return;
+                    }
+                    if (bubbleSink != null) {
+                        bubbleSink.onConfirmNeeded(question, onConfirm, onCancel);
+                    } else if (onCancel != null) {
+                        onCancel.run();
+                    }
+                });
+            }
+
+            @Override
+            public void onProgress(String message) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    if (bubbleSink != null && !TextUtils.isEmpty(message)) {
+                        bubbleSink.onStatus(message);
+                    }
+                });
+            }
+        });
+        return true;
     }
 
     private void setSending(boolean value) {

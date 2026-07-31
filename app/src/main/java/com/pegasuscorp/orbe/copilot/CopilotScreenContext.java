@@ -65,9 +65,10 @@ public final class CopilotScreenContext {
         sb.append(snap.text).append("\n");
         sb.append("Ce texte vient de l'accessibilité/OCR local — pas d'image envoyée.\n");
         sb.append("Pour cliquer / expliquer / chercher : appelle ui_action, ui_explain ou ")
-                .append("ui_search avec target = un libellé visible ci-dessus. ")
-                .append("Agis tout de suite — ne demande jamais d'identifiant technique ")
-                .append("à l'utilisateur.\n");
+                .append("ui_search avec target = un libellé visible ci-dessus ")
+                .append("(ex. Astronomie et espace). Le matching est local sur l'appareil. ")
+                .append("Si hésitation, réessaie avec un autre libellé — ")
+                .append("n'interroge pas l'utilisateur, agis.\n");
         return sb.toString();
     }
 

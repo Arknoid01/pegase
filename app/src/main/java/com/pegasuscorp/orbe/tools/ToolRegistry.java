@@ -299,8 +299,8 @@ public class ToolRegistry {
             sb.append("  Téléphone → {\"tool\":\"device\",\"params\":{\"action\":\"battery\"}} "
                     + "ou action:\"time\" / \"date\"\n");
             sb.append("  UI copilote→ {\"tool\":\"ui_action\",\"params\":{\"action\":\"click\","
-                    + "\"target\":\"Astronomie\"}} — target = libellé visible ; "
-                    + "agir sans poser de question technique ; type/scroll/back ; "
+                    + "\"target\":\"Astronomie et espace\"}} — un seul champ target "
+                    + "(libellé visible) ; le device matche tout seul ; type/scroll/back ; "
                     + "ui_explain / ui_search sur élément visible\n");
         }
         if (tags.contains(ToolTag.NAVIGATION)) {

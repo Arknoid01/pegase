@@ -21,13 +21,15 @@ public final class A11yUiExecutor {
         A11yUiMatcher.Criteria c = new A11yUiMatcher.Criteria();
         if (params == null) return c;
         c.text = params.optString("target", params.optString("text", "")).trim();
-        // Si le modèle envoie encore un id technique, le traiter comme libellé flou
-        // (jamais exiger ça de l'utilisateur ; matching texte seul sur l'arbre).
-        String rawId = params.optString("view_id", params.optString("viewId", "")).trim();
-        if (c.text.isEmpty() && !rawId.isEmpty()) {
-            String human = UiExplainHelper.humanizeViewId(rawId);
-            c.text = !TextUtils.isEmpty(human) ? human : rawId;
+        // Compat : si un vieux prompt LLM envoie encore view_id, le traiter comme libellé.
+        if (c.text.isEmpty()) {
+            String rawId = params.optString("view_id", params.optString("viewId", "")).trim();
+            if (!rawId.isEmpty()) {
+                String human = UiExplainHelper.humanizeViewId(rawId);
+                c.text = !TextUtils.isEmpty(human) ? human : rawId;
+            }
         }
+        // Jamais de critère viewId côté LLM — matching texte seul (scanne aussi les ids nœuds).
         c.viewId = "";
         return c;
     }

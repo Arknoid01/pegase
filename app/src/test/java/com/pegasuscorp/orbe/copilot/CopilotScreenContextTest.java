@@ -72,6 +72,7 @@ public class CopilotScreenContextTest {
         assertTrue(block.contains("Écran actif"));
         assertTrue(block.contains(PKG));
         assertTrue(block.contains("Contenu écran"));
-        assertTrue(block.contains("ne demande jamais d'identifiant technique"));
+        assertTrue(block.contains("matching est local"));
+        assertFalse(block.toLowerCase().contains("identifiant"));
     }
 }

@@ -52,4 +52,20 @@ public class OpenAiToolSchemaBuilderTest {
                 OpenAiToolSchemaBuilder.inferTypeHint("action:\"battery\"|\"time\"|\"date\""));
         assertEquals("int", OpenAiToolSchemaBuilder.inferTypeHint("days:int"));
     }
+
+    @Test
+    public void uiAction_schemaHasTarget_notViewId() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        JSONObject ui = OpenAiToolSchemaBuilder.toOpenAiTool(registry.findById("ui_action"));
+        JSONObject properties = ui.getJSONObject("function")
+                .getJSONObject("parameters")
+                .getJSONObject("properties");
+        assertTrue(properties.has("target"));
+        assertTrue(properties.has("action"));
+        assertFalse(properties.has("view_id"));
+        assertFalse(properties.has("viewId"));
+        String desc = ui.getJSONObject("function").getString("description").toLowerCase();
+        assertFalse(desc.contains("view_id"));
+        assertFalse(desc.contains("viewid"));
+    }
 }
