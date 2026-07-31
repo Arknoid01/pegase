@@ -30,6 +30,7 @@ public final class CopilotReflectionGate {
 
     public static boolean needsReflection(Context ctx, String userText) {
         if (ctx == null || TextUtils.isEmpty(userText)) return false;
+        if (!CopilotPrefs.isReflectionEnabled(ctx)) return false;
         if (CopilotScreenContext.readFresh(ctx) == null) return false;
 
         String fold = fold(userText);

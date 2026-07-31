@@ -5,7 +5,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.content.pm.PackageManager;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,7 +15,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -30,11 +28,7 @@ import com.pegasuscorp.orbe.f1companion.F1NewsScheduler;
 import com.pegasuscorp.orbe.intentions.IntentionIds;
 import com.pegasuscorp.orbe.intentions.IntentionPrefs;
 import com.pegasuscorp.orbe.intentions.PegaseModeStore;
-import com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap;
 import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
-import com.pegasuscorp.orbe.intentions.location.SavedPlace;
-import com.pegasuscorp.orbe.intentions.location.SavedPlaceStore;
-import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import com.pegasuscorp.orbe.learning.LearningCandidate;
 import com.pegasuscorp.orbe.learning.LearningCandidateStore;
 import com.pegasuscorp.orbe.learning.LearningEngine;
@@ -135,16 +129,6 @@ public class RoutineSettingsActivity extends AppCompatActivity {
         rebuildList();
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-            @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PermissionFlow.REQ_LOCATION && grantResults.length > 0
-                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            LocationSituationBootstrap.ensureStarted(this);
-        }
-    }
-
     private View buildAlarmTimeRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
@@ -239,7 +223,9 @@ public class RoutineSettingsActivity extends AppCompatActivity {
         locationRow.setTextColor(Color.parseColor("#35D0DD"));
         locationRow.setTextSize(13);
         locationRow.setPadding(0, dp(8), 0, 0);
-        locationRow.setOnClickListener(v -> showLocationPlacesMenu(locationRow));
+        locationRow.setOnClickListener(v ->
+                startActivity(new android.content.Intent(this,
+                        com.pegasuscorp.orbe.intentions.location.SituationSettingsActivity.class)));
         section.addView(locationRow);
 
         TextView carRow = new TextView(this);
@@ -457,86 +443,9 @@ public class RoutineSettingsActivity extends AppCompatActivity {
     private String locationPlacesRowText() {
         String current = LocationSituationReader.getCurrentPlaceLabel(this);
         if (current != null && !current.isEmpty()) {
-            return "Lieu actuel : " + current + " (tap = lieux)";
+            return "Localisation : " + current + " (tap = réglages)";
         }
-        return "Lieux GPS : maison / travail (tap)";
-    }
-
-    private void showLocationPlacesMenu(TextView label) {
-        if (!PermissionFlow.ensureLocation(this)) {
-            Toast.makeText(this, "Autorise la localisation pour les lieux",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        LocationSituationBootstrap.ensureStarted(this);
-        String[] items = {
-                "Définir maison (position actuelle)",
-                "Définir travail (position actuelle)",
-                "Définir depuis coordonnées météo",
-                "Effacer les lieux enregistrés"
-        };
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Lieux GPS")
-                .setItems(items, (d, which) -> {
-                    switch (which) {
-                        case 0:
-                            savePlaceFromSnapshot(SavedPlace.Type.HOME, "Maison", label);
-                            break;
-                        case 1:
-                            savePlaceFromSnapshot(SavedPlace.Type.WORK, "Travail", label);
-                            break;
-                        case 2:
-                            savePlaceFromCoords(label);
-                            break;
-                        case 3:
-                            SavedPlaceStore.getInstance(this).clearAll();
-                            LocationSituationReader.setCurrentPlace(this, null);
-                            label.setText(locationPlacesRowText());
-                            Toast.makeText(this, "Lieux effacés", Toast.LENGTH_SHORT).show();
-                            break;
-                        default:
-                            break;
-                    }
-                })
-                .setNegativeButton("Annuler", null)
-                .show();
-    }
-
-    private void savePlaceFromSnapshot(SavedPlace.Type type, String defaultLabel, TextView label) {
-        LocationSituationReader.Snapshot snap = LocationSituationReader.read(this);
-        if (!snap.hasCoords) {
-            Toast.makeText(this, "Position indisponible — attends le GPS ou utilise les coordonnées météo",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        SavedPlaceStore.getInstance(this).upsert(type, defaultLabel, snap.lat, snap.lon, 120f);
-        com.pegasuscorp.orbe.intentions.location.LocationSituationTracker.evaluate(this);
-        label.setText(locationPlacesRowText());
-        Toast.makeText(this, defaultLabel + " enregistré", Toast.LENGTH_SHORT).show();
-    }
-
-    private void savePlaceFromCoords(TextView label) {
-        double[] coords = LocationSituationReader.parseCoords(ApiKeyStore.getUserCoords(this));
-        if (coords == null) {
-            Toast.makeText(this, "Coordonnées météo vides (réglages API)",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Enregistrer depuis coordonnées")
-                .setItems(new String[]{"Maison", "Travail"}, (d, which) -> {
-                    SavedPlace.Type type = which == 0
-                            ? SavedPlace.Type.HOME : SavedPlace.Type.WORK;
-                    String name = which == 0 ? "Maison" : "Travail";
-                    SavedPlaceStore.getInstance(this).upsert(
-                            type, name, coords[0], coords[1], 120f);
-                    LocationSituationReader.persist(this, coords[0], coords[1], 0f);
-                    com.pegasuscorp.orbe.intentions.location.LocationSituationTracker.evaluate(this);
-                    label.setText(locationPlacesRowText());
-                    Toast.makeText(this, name + " enregistré", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Annuler", null)
-                .show();
+        return "Localisation & conduite (tap = réglages)";
     }
 
     private void editWorkWifi(TextView label) {

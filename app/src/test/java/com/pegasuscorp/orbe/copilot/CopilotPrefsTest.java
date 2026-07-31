@@ -39,4 +39,12 @@ public class CopilotPrefsTest {
         assertEquals(120, CopilotPrefs.getOrbX(ctx));
         assertEquals(340, CopilotPrefs.getOrbY(ctx));
     }
+
+    @Test
+    public void advancedDefaults() {
+        Context ctx = ApplicationProvider.getApplicationContext();
+        assertTrue(CopilotPrefs.isReflectionEnabled(ctx));
+        assertEquals(45, CopilotPrefs.getScreenMaxAgeSec(ctx));
+        assertEquals(2000, CopilotPrefs.getScreenMaxChars(ctx));
+    }
 }

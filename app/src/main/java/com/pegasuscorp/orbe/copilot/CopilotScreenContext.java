@@ -47,9 +47,9 @@ public final class CopilotScreenContext {
         long ts = ScreenContextStore.getLastTimestampMs(ctx);
         if (ts <= 0L) return null;
         long ageMs = System.currentTimeMillis() - ts;
-        if (ageMs > MAX_AGE_MS) return null;
+        if (ageMs > CopilotPrefs.getScreenMaxAgeMs(ctx)) return null;
 
-        return new Snapshot(pkg, clip(text, MAX_TEXT_CHARS), ageMs);
+        return new Snapshot(pkg, clip(text, CopilotPrefs.getScreenMaxChars(ctx)), ageMs);
     }
 
     /** Bloc prompt injecté dans le system message. */

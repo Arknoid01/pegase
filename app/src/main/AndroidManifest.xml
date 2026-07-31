@@ -245,6 +245,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".intentions.location.SituationSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".OrionSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe"

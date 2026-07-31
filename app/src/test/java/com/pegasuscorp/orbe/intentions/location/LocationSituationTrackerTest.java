@@ -85,7 +85,8 @@ public class LocationSituationTrackerTest {
 
     @Test
     public void staleSpeed_doesNotTriggerAutoDrive() {
-        long stale = System.currentTimeMillis() - LocationSituationReader.MAX_SPEED_AGE_MS - 5_000L;
+        long stale = System.currentTimeMillis()
+                - LocationSituationPrefs.getSpeedMaxAgeMs(ctx) - 5_000L;
         LocationSituationReader.setTestOverride(
                 new LocationSituationReader.Snapshot(48.8, 2.3, 6.5f, stale, true));
         LocationSituationTracker.evaluate(ctx);

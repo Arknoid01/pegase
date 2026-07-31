@@ -28,6 +28,12 @@ public final class CopilotPrefs {
     private static final String KEY_NOTIF_ENABLED = "notif_copilot";
     private static final String KEY_NOTIF_WHITELIST = "notif_whitelist";
     private static final String KEY_ELEMENT_HIGHLIGHT = "element_highlight";
+    private static final String KEY_REFLECTION_ENABLED = "reflection_enabled";
+    private static final String KEY_SCREEN_MAX_AGE_SEC = "screen_max_age_sec";
+    private static final String KEY_SCREEN_MAX_CHARS = "screen_max_chars";
+
+    public static final long DEFAULT_SCREEN_MAX_AGE_MS = 45_000L;
+    public static final int DEFAULT_SCREEN_MAX_CHARS = 2_000;
 
     private CopilotPrefs() {}
 
@@ -192,5 +198,45 @@ public final class CopilotPrefs {
 
     public static void setBubbleOpen(Context ctx, boolean open) {
         prefs(ctx).edit().putBoolean(KEY_BUBBLE_OPEN, open).apply();
+    }
+
+    public static boolean isReflectionEnabled(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_REFLECTION_ENABLED, true);
+    }
+
+    public static void setReflectionEnabled(Context ctx, boolean on) {
+        prefs(ctx).edit().putBoolean(KEY_REFLECTION_ENABLED, on).apply();
+    }
+
+    public static int getScreenMaxAgeSec(Context ctx) {
+        int sec = prefs(ctx).getInt(KEY_SCREEN_MAX_AGE_SEC, (int) (DEFAULT_SCREEN_MAX_AGE_MS / 1000L));
+        if (sec < 10) return 10;
+        if (sec > 300) return 300;
+        return sec;
+    }
+
+    public static long getScreenMaxAgeMs(Context ctx) {
+        return getScreenMaxAgeSec(ctx) * 1000L;
+    }
+
+    public static void setScreenMaxAgeSec(Context ctx, int seconds) {
+        int sec = seconds;
+        if (sec < 10) sec = 10;
+        if (sec > 300) sec = 300;
+        prefs(ctx).edit().putInt(KEY_SCREEN_MAX_AGE_SEC, sec).apply();
+    }
+
+    public static int getScreenMaxChars(Context ctx) {
+        int n = prefs(ctx).getInt(KEY_SCREEN_MAX_CHARS, DEFAULT_SCREEN_MAX_CHARS);
+        if (n < 200) return 200;
+        if (n > 8000) return 8000;
+        return n;
+    }
+
+    public static void setScreenMaxChars(Context ctx, int chars) {
+        int n = chars;
+        if (n < 200) n = 200;
+        if (n > 8000) n = 8000;
+        prefs(ctx).edit().putInt(KEY_SCREEN_MAX_CHARS, n).apply();
     }
 }

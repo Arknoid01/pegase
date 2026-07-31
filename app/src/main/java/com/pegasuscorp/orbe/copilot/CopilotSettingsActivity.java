@@ -112,8 +112,8 @@ public class CopilotSettingsActivity extends AppCompatActivity {
 
   private void rebuild() {
     contentHost.removeAllViews();
-    addSectionTitle(getString(R.string.copilot_section_general));
-    addSwitch(getString(R.string.copilot_toggle_always_on), CopilotPrefs.isAlwaysOn(this), (on) -> {
+        addSectionTitle(getString(R.string.copilot_section_general));
+        addSwitch(getString(R.string.copilot_toggle_always_on), CopilotPrefs.isAlwaysOn(this), (on) -> {
       CopilotPrefs.setAlwaysOn(this, on);
     });
     addSwitch(getString(R.string.copilot_toggle_screen_analysis), CopilotPrefs.isScreenAnalysisEnabled(this), (on) -> {
@@ -131,6 +131,26 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     addSwitch(getString(R.string.copilot_toggle_notif), CopilotPrefs.isNotificationCopilotEnabled(this), (on) -> {
       CopilotPrefs.setNotificationCopilotEnabled(this, on);
     });
+
+    addSectionTitle(getString(R.string.copilot_section_advanced));
+    addHint(getString(R.string.copilot_hint_advanced));
+    addSwitch(getString(R.string.copilot_toggle_reflection), CopilotPrefs.isReflectionEnabled(this), (on) -> {
+      CopilotPrefs.setReflectionEnabled(this, on);
+    });
+    addValueRow(getString(R.string.copilot_value_screen_age),
+        getString(R.string.copilot_value_seconds_fmt, CopilotPrefs.getScreenMaxAgeSec(this)),
+        () -> editInt(getString(R.string.copilot_value_screen_age),
+            10, 300, CopilotPrefs.getScreenMaxAgeSec(this), v -> {
+              CopilotPrefs.setScreenMaxAgeSec(this, v);
+              rebuild();
+            }));
+    addValueRow(getString(R.string.copilot_value_screen_chars),
+        String.valueOf(CopilotPrefs.getScreenMaxChars(this)),
+        () -> editInt(getString(R.string.copilot_value_screen_chars),
+            200, 8000, CopilotPrefs.getScreenMaxChars(this), v -> {
+              CopilotPrefs.setScreenMaxChars(this, v);
+              rebuild();
+            }));
 
     addSectionTitle(getString(R.string.copilot_section_permissions));
     addPermissionRow(getString(R.string.copilot_perm_overlay),
@@ -302,6 +322,47 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
     lp.bottomMargin = dp(6);
     contentHost.addView(btn, lp);
+  }
+
+  private void addValueRow(String label, String value, Runnable onClick) {
+    TextView btn = new TextView(this);
+    btn.setText(label + "\n" + value);
+    btn.setTextColor(OrbeTokens.COLOR_TEXT);
+    btn.setTextSize(14);
+    btn.setPadding(dp(12), dp(10), dp(12), dp(10));
+    btn.setBackground(cardBg());
+    if (onClick != null) btn.setOnClickListener(v -> onClick.run());
+    LinearLayout.LayoutParams lp = IfaceUi.matchWrap();
+    lp.bottomMargin = dp(6);
+    contentHost.addView(btn, lp);
+  }
+
+  private interface IntSetter {
+    void set(int v);
+  }
+
+  private void editInt(String title, int min, int max, int current, IntSetter setter) {
+    android.widget.EditText input = new android.widget.EditText(this);
+    input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+    input.setText(String.valueOf(current));
+    input.setTextColor(OrbeTokens.COLOR_TEXT);
+    new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+        .setTitle(title)
+        .setView(input)
+        .setPositiveButton(android.R.string.ok, (d, w) -> {
+          try {
+            int v = Integer.parseInt(input.getText() != null
+                    ? input.getText().toString().trim() : "");
+            if (v < min || v > max) throw new NumberFormatException();
+            setter.set(v);
+          } catch (Exception e) {
+            android.widget.Toast.makeText(this,
+                    getString(R.string.copilot_invalid_value), android.widget.Toast.LENGTH_SHORT)
+                    .show();
+          }
+        })
+        .setNegativeButton(android.R.string.cancel, null)
+        .show();
   }
 
   private GradientDrawable cardBg() {

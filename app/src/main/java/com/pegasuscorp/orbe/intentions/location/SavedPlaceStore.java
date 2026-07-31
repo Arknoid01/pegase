@@ -70,9 +70,10 @@ public final class SavedPlaceStore {
     public synchronized SavedPlace upsert(SavedPlace.Type type, String label,
             double lat, double lon, float radiusM) {
         if (type == null || !isValidCoord(lat, lon)) return null;
+        float r = radiusM > 0 ? radiusM : DEFAULT_RADIUS_M;
         String id = type.name().toLowerCase(Locale.US);
         String trimmed = label != null ? label.trim() : "";
-        SavedPlace place = new SavedPlace(id, trimmed, lat, lon, radiusM, type);
+        SavedPlace place = new SavedPlace(id, trimmed, lat, lon, r, type);
         List<SavedPlace> next = new ArrayList<>();
         boolean replaced = false;
         for (SavedPlace p : cache) {
@@ -87,6 +88,42 @@ public final class SavedPlaceStore {
         cache = Collections.unmodifiableList(next);
         persist();
         return place;
+    }
+
+    public synchronized SavedPlace addPlace(SavedPlace.Type type, String label,
+            double lat, double lon, float radiusM) {
+        if (type == SavedPlace.Type.HOME || type == SavedPlace.Type.WORK) {
+            return upsert(type, label, lat, lon, radiusM);
+        }
+        if (!isValidCoord(lat, lon)) return null;
+        float r = radiusM > 0 ? radiusM : DEFAULT_RADIUS_M;
+        String id = type.name().toLowerCase(Locale.US) + "_"
+                + UUID.randomUUID().toString().substring(0, 8);
+        SavedPlace place = new SavedPlace(id, label, lat, lon, r, type);
+        List<SavedPlace> next = new ArrayList<>(cache);
+        next.add(place);
+        cache = Collections.unmodifiableList(next);
+        persist();
+        return place;
+    }
+
+    public synchronized SavedPlace getByType(SavedPlace.Type type) {
+        if (type == null) return null;
+        for (SavedPlace p : cache) {
+            if (type == p.type) return p;
+        }
+        return null;
+    }
+
+    public synchronized void removeById(String id) {
+        if (id == null || id.isEmpty()) return;
+        List<SavedPlace> next = new ArrayList<>();
+        for (SavedPlace p : cache) {
+            if (!id.equals(p.id)) next.add(p);
+        }
+        if (next.size() == cache.size()) return;
+        cache = Collections.unmodifiableList(next);
+        persist();
     }
 
     public synchronized SavedPlace addOther(String label, double lat, double lon, float radiusM) {

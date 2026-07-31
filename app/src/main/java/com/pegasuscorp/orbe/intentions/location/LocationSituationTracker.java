@@ -7,14 +7,11 @@ import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.intentions.PegaseModeStore;
 
 /**
- * Vitesse &gt; 20 km/h → mode DRIVE auto ; résolution de zone → contexte lieu.
+ * Vitesse &gt; seuil → mode DRIVE auto ; résolution de zone → contexte lieu.
  */
 public final class LocationSituationTracker {
 
     private static final String TAG = "LocationSituation";
-
-    public static final float DRIVE_ENTER_KMH = 20f;
-    public static final float DRIVE_EXIT_KMH = 15f;
 
     private LocationSituationTracker() {}
 
@@ -39,16 +36,21 @@ public final class LocationSituationTracker {
     }
 
     static void applyDriveMode(Context app, LocationSituationReader.Snapshot snap) {
-        if (!snap.hasCoords) return;
-        float kmh = snap.effectiveSpeedKmh(System.currentTimeMillis());
-        if (kmh >= DRIVE_ENTER_KMH) {
-            if (!PegaseModeStore.isAutoDriveActive(app)) {
+        if (!snap.hasCoords || !LocationSituationPrefs.isAutoDriveEnabled(app)) return;
+        long now = System.currentTimeMillis();
+        float kmh = snap.effectiveSpeedKmh(app, now);
+        float enter = LocationSituationPrefs.getDriveEnterKmh(app);
+        float exit = LocationSituationPrefs.getDriveExitKmh(app);
+        if (exit >= enter) exit = Math.max(5f, enter - 5f);
+        if (kmh >= enter) {
+            if (!PegaseModeStore.isAutoDriveActive(app)
+                    && LocationSituationPrefs.hideCopilotOnAutoDrive(app)) {
                 try {
                     FloatingOrbService.hide(app);
                 } catch (Exception ignored) {}
             }
             PegaseModeStore.setModeFromAutoDrive(app, PegaseModeStore.Mode.DRIVE);
-        } else if (kmh < DRIVE_EXIT_KMH && PegaseModeStore.isAutoDriveActive(app)) {
+        } else if (kmh < exit && PegaseModeStore.isAutoDriveActive(app)) {
             PegaseModeStore.exitAutoDrive(app);
         }
     }

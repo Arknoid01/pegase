@@ -240,6 +240,9 @@ public class PersonalizationPanel extends FrameLayout {
         addActionRow("Routines du matin", () ->
                 getContext().startActivity(
                         new android.content.Intent(getContext(), RoutineSettingsActivity.class)));
+        addActionRow("Localisation & conduite", () ->
+                getContext().startActivity(new android.content.Intent(getContext(),
+                        com.pegasuscorp.orbe.intentions.location.SituationSettingsActivity.class)));
 
         // ── 3. Pégase Cerveau ───────────────────────────────────────────────────
         addSectionSeparator(context);
