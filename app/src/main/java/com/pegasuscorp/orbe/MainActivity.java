@@ -53,6 +53,7 @@ import com.pegasuscorp.orbe.voice.VoiceMuteStore;
 import com.pegasuscorp.orbe.voice.VoiceOutputHandler;
 import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 import com.pegasuscorp.orbe.voice.WakeHealthUi;
+import com.pegasuscorp.orbe.voice.PegaseVisualStateHub;
 
 import java.util.concurrent.ExecutorService;
 
@@ -206,6 +207,9 @@ public class MainActivity extends AppCompatActivity
         orbUi.applyPersonalization();
         WakeHealthUi.setListener(status -> {
             if (orbUi != null) orbUi.applyWakeHealth(status);
+        });
+        PegaseVisualStateHub.addListener(phase -> {
+            if (orbUi != null) orbUi.applyVisualPhase(phase);
         });
         VoiceWakeClient.get().refreshWakeHealth();
 

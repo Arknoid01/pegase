@@ -385,6 +385,7 @@ public final class CopilotController implements SessionObserver {
 
     private void setSending(boolean value) {
         sending = value;
+        PegaseWakeController.setAssistantThinking(value);
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onSendingChanged(value);
     }

@@ -36,6 +36,9 @@ import androidx.core.app.NotificationCompat;
 import com.pegasuscorp.orbe.copilot.CopilotBubblePanel;
 import com.pegasuscorp.orbe.copilot.CopilotController;
 import com.pegasuscorp.orbe.copilot.CopilotPrefs;
+import com.pegasuscorp.orbe.voice.PegaseWakeController;
+import com.pegasuscorp.orbe.voice.PegaseVisualPhase;
+import com.pegasuscorp.orbe.voice.PegaseVisualStateHub;
 
 /**
  * Orbe flottante par-dessus toutes les apps.
@@ -72,6 +75,7 @@ public class FloatingOrbService extends Service {
     private boolean bubbleExpanded;
     private boolean foregroundStarted;
     private float density;
+    private PegaseVisualStateHub.Listener visualStateListener;
 
     @Override
     public void onCreate() {
@@ -84,6 +88,8 @@ public class FloatingOrbService extends Service {
         }
         showOverlay();
         running = true;
+        visualStateListener = phase -> applyOrbVisualPhase(phase);
+        PegaseVisualStateHub.addListener(visualStateListener);
     }
 
     @Override
@@ -110,6 +116,10 @@ public class FloatingOrbService extends Service {
 
     @Override
     public void onDestroy() {
+        if (visualStateListener != null) {
+            PegaseVisualStateHub.removeListener(visualStateListener);
+            visualStateListener = null;
+        }
         detachCopilot();
         removeOverlay();
         foregroundStarted = false;
@@ -228,13 +238,13 @@ public class FloatingOrbService extends Service {
             @Override
             public void onAssistantMessage(String text) {
                 if (bubblePanel != null) bubblePanel.addAssistantMessage(text);
-                setOrbActive(false);
+                PegaseWakeController.setAssistantThinking(false);
             }
 
             @Override
             public void onAssistantPartial(String text) {
                 if (bubblePanel != null) bubblePanel.updateAssistantPartial(text);
-                setOrbActive(true);
+                PegaseWakeController.setAssistantThinking(true);
             }
 
             @Override
@@ -245,13 +255,13 @@ public class FloatingOrbService extends Service {
             @Override
             public void onError(String message) {
                 if (bubblePanel != null) bubblePanel.showError(message);
-                setOrbActive(false);
+                PegaseWakeController.setAssistantThinking(false);
             }
 
             @Override
             public void onSendingChanged(boolean sending) {
                 if (bubblePanel != null) bubblePanel.setSending(sending);
-                setOrbActive(sending);
+                PegaseWakeController.setAssistantThinking(sending);
             }
 
             @Override
@@ -332,10 +342,9 @@ public class FloatingOrbService extends Service {
         updateWindowFocus();
     }
 
-    private void setOrbActive(boolean active) {
-        if (orbView instanceof MiniOrbView) {
-            ((MiniOrbView) orbView).setActive(active);
-        }
+    private void applyOrbVisualPhase(PegaseVisualPhase phase) {
+        if (!(orbView instanceof MiniOrbView)) return;
+        ((MiniOrbView) orbView).applyVisualPhase(phase);
     }
 
     private void applyExpandedWindowSize() {
@@ -516,6 +525,7 @@ public class FloatingOrbService extends Service {
 
         private boolean discreet;
         private boolean active;
+        private boolean micListening;
         private float breath;
         private float haloPhase;
         private float orbitAngle;
@@ -546,6 +556,18 @@ public class FloatingOrbService extends Service {
             if (this.active == active) return;
             this.active = active;
             invalidate();
+        }
+
+        void setMicListening(boolean listening) {
+            if (micListening == listening) return;
+            micListening = listening;
+            invalidate();
+        }
+
+        void applyVisualPhase(PegaseVisualPhase phase) {
+            PegaseVisualPhase p = phase != null ? phase : PegaseVisualPhase.IDLE;
+            setMicListening(p.isListening());
+            setActive(p.isThinking());
         }
 
         @Override
@@ -652,7 +674,8 @@ public class FloatingOrbService extends Service {
             float cx = w / 2f;
             float cy = h / 2f;
             float base = baseRadius(w, h);
-            float pulseAmp = active ? 0.11f : (discreet ? 0.055f : 0.08f);
+            float pulseAmp = active ? 0.11f
+                    : (micListening ? 0.095f : (discreet ? 0.055f : 0.08f));
             float r = base * (1f + breath * pulseAmp);
 
             // Halo respirant / onde qui s'étend

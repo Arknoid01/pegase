@@ -21,6 +21,7 @@ import com.pegasuscorp.orbe.OrbThemes;
 import com.pegasuscorp.orbe.OrbView;
 import com.pegasuscorp.orbe.PersonalizationStore;
 import com.pegasuscorp.orbe.ShortcutStore;
+import com.pegasuscorp.orbe.voice.PegaseVisualPhase;
 import com.pegasuscorp.orbe.voice.WakeHealthStatus;
 
 import java.util.ArrayList;
@@ -73,6 +74,13 @@ public final class OrbUiController {
 
     public int getColorIndex() {
         return colorIndex;
+    }
+
+    public void applyVisualPhase(PegaseVisualPhase phase) {
+        if (orbView == null) return;
+        PegaseVisualPhase p = phase != null ? phase : PegaseVisualPhase.IDLE;
+        orbView.setListening(p.isListening());
+        orbView.setThinking(p.isThinking());
     }
 
     public void setListening(boolean active) {

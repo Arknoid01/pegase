@@ -147,9 +147,8 @@ public final class VoiceInputHandler {
         if (voiceManager != null) {
             voiceManager.attachHost(activity);
             voiceManager.setOnListenFailed(this::onVoiceListenFailed);
-            voiceManager.setOnListeningStateListener(active -> {
-                if (orbUi != null) orbUi.setListening(active);
-            });
+            voiceManager.setOnListeningStateListener(active ->
+                    PegaseWakeController.setMicListening(active));
         }
     }
 
@@ -674,14 +673,14 @@ public final class VoiceInputHandler {
         }
 
         final int requestId = ++chatRequestId;
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         InteractionStateStore interaction = InteractionStateStore.getInstance(activity);
         interaction.onUserMessage(userLine);
         VoiceSessionContext.get().recordExecution(
                 new VoiceIntentRouter.RoutedIntent(userLine, toolJson, intentHint, 1.0, false));
 
         if (!pegaseSession.executeToolFromJson(toolJson, userLine, voiceToolObserver(requestId, interaction))) {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             sendChatMessage(userLine);
         }
     }
@@ -695,7 +694,7 @@ public final class VoiceInputHandler {
         if (!VoiceOutputHandler.readyForStreamTts(accumulated)) return;
         if (!stream.started) {
             stream.started = true;
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             output.beginSpeakStream(null);
         }
         output.feedSpeakStream(accumulated);
@@ -704,7 +703,7 @@ public final class VoiceInputHandler {
     private void deliverVoiceReply(int requestId, VoiceStreamState stream, String text,
             com.pegasuscorp.orbe.conversation.InteractionMood mood, Runnable onComplete) {
         if (requestId != chatRequestId) return;
-        if (orbUi != null) orbUi.setThinking(false);
+        PegaseWakeController.setAssistantThinking(false);
         if (text != null && !text.trim().isEmpty()) {
             VoiceSessionContext.get().onAssistantReply(text);
         }
@@ -732,21 +731,21 @@ public final class VoiceInputHandler {
             @Override
             public void onToolResult(ToolResult result) {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 handleVoiceToolResult(result, interaction);
             }
 
             @Override
             public void onToolExit(ToolResult result) {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 handleVoiceToolExit(result);
             }
 
             @Override
             public void onError(String error) {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 String userMsg = ChatSpokenErrors.toUserMessage(error);
                 conversation.recordToolReply(userMsg);
                 output.speak(userMsg, VoiceInputHandler.this::scheduleListeningResume);
@@ -773,7 +772,7 @@ public final class VoiceInputHandler {
                 if (requestId != chatRequestId) return;
                 if (message == null || message.isEmpty()) return;
                 callback.runOnUiThread(() -> {
-                    if (orbUi != null) orbUi.setThinking(true);
+                    PegaseWakeController.setAssistantThinking(true);
                     callback.showToast(message, Toast.LENGTH_SHORT);
                 });
             }
@@ -781,9 +780,9 @@ public final class VoiceInputHandler {
     }
 
     private void tryNotepadEdit(String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         notepadEditor.process(transcript, result -> callback.runOnUiThread(() -> {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             if (result.fallbackToChat) {
                 sendChatMessage(transcript);
                 return;
@@ -800,9 +799,9 @@ public final class VoiceInputHandler {
     }
 
     private void tryCorrectionsEdit(String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         correctionsEditor.process(transcript, result -> callback.runOnUiThread(() -> {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             if (result.fallbackToChat) {
                 sendChatMessage(transcript);
                 return;
@@ -819,9 +818,9 @@ public final class VoiceInputHandler {
     }
 
     private void tryContextEdit(String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         contextEditor.process(transcript, result -> callback.runOnUiThread(() -> {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             if (result.fallbackToChat) {
                 sendChatMessage(transcript);
                 return;
@@ -838,9 +837,9 @@ public final class VoiceInputHandler {
     }
 
     private void trySpeechRuleEdit(String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         speechRulesEditor.process(transcript, result -> callback.runOnUiThread(() -> {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             if (result.fallbackToChat) {
                 sendChatMessage(transcript);
                 return;
@@ -895,9 +894,9 @@ public final class VoiceInputHandler {
     }
 
     private void tryMemoryEdit(String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         memoryEditor.process(transcript, result -> callback.runOnUiThread(() -> {
-            if (orbUi != null) orbUi.setThinking(false);
+            PegaseWakeController.setAssistantThinking(false);
             if (result.fallbackToChat) {
                 sendChatMessage(transcript);
                 return;
@@ -931,7 +930,7 @@ public final class VoiceInputHandler {
     }
 
     private void dispatchChatMessage(int requestId, String transcript) {
-        if (orbUi != null) orbUi.setThinking(true);
+        PegaseWakeController.setAssistantThinking(true);
         InteractionStateStore interaction = InteractionStateStore.getInstance(activity);
         interaction.onUserMessage(transcript);
         String payload = lockedChatMode
@@ -954,21 +953,21 @@ public final class VoiceInputHandler {
             @Override
             public void onToolResult(ToolResult result) {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 handleVoiceToolResult(result, interaction);
             }
 
             @Override
             public void onToolExit(ToolResult result) {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 handleVoiceToolExit(result);
             }
 
             @Override
             public void onToolBlocked() {
                 if (requestId != chatRequestId) return;
-                if (orbUi != null) orbUi.setThinking(false);
+                PegaseWakeController.setAssistantThinking(false);
                 speakUnlockRequired();
             }
 
@@ -986,7 +985,7 @@ public final class VoiceInputHandler {
 
     private void handleChatError(int requestId, boolean fromStream, String error) {
         if (requestId != chatRequestId) return;
-        if (orbUi != null) orbUi.setThinking(false);
+        PegaseWakeController.setAssistantThinking(false);
         isFirstLocalExchange = true;
         if (fromStream) output.stopSpeaking();
         output.speak(error, VoiceInputHandler.this::scheduleListeningResume);
@@ -1151,10 +1150,8 @@ public final class VoiceInputHandler {
         PegaseWakeController.setVoiceChatActive(false);
         PegaseWakeController.resumeWakeIfAllowed(activity);
         boolean saved = conversation.exit();
-        if (orbUi != null) {
-            orbUi.setThinking(false);
-            orbUi.setListening(false);
-        }
+        PegaseWakeController.setAssistantThinking(false);
+        PegaseWakeController.setMicListening(false);
         cancelResumeChatListening();
         if (voiceManager != null) {
             voiceManager.cancelScheduledListening();
