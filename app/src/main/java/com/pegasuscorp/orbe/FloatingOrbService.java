@@ -17,7 +17,9 @@ import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -68,6 +70,7 @@ public class FloatingOrbService extends Service {
 
     private static volatile boolean running;
     private static volatile OverlayMode currentMode = OverlayMode.VOICE;
+    private static volatile FloatingOrbService instance;
 
     private WindowManager wm;
     private FrameLayout overlayRoot;
@@ -86,6 +89,7 @@ public class FloatingOrbService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         density = getResources().getDisplayMetrics().density;
         createNotificationChannel();
         if (!startAsForeground()) {
@@ -130,6 +134,7 @@ public class FloatingOrbService extends Service {
         removeOverlay();
         foregroundStarted = false;
         running = false;
+        if (instance == this) instance = null;
         super.onDestroy();
     }
 
@@ -651,6 +656,52 @@ public class FloatingOrbService extends Service {
 
     public static OverlayMode getMode() {
         return currentMode;
+    }
+
+    /** Bounds écran de la fenêtre overlay (orbe ± bulle), ou null si absente. */
+    public static android.graphics.Rect getOverlayScreenBounds() {
+        FloatingOrbService s = instance;
+        if (s == null || s.overlayRoot == null) return null;
+        int w = s.overlayRoot.getWidth();
+        int h = s.overlayRoot.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        int[] loc = new int[2];
+        s.overlayRoot.getLocationOnScreen(loc);
+        return new android.graphics.Rect(loc[0], loc[1], loc[0] + w, loc[1] + h);
+    }
+
+    public static boolean containsScreenPoint(float x, float y) {
+        android.graphics.Rect r = getOverlayScreenBounds();
+        return r != null && r.contains(Math.round(x), Math.round(y));
+    }
+
+    /**
+     * Pendant un geste a11y : la bulle ne doit pas absorber le tap.
+     * {@code dispatchGesture} est async — appeler {@code false} dans le callback / timeout.
+     */
+    public static void setTouchPassthrough(boolean passthrough) {
+        FloatingOrbService s = instance;
+        if (s == null || s.layoutParams == null || s.wm == null || s.overlayRoot == null) {
+            return;
+        }
+        Runnable apply = () -> {
+            if (s.layoutParams == null || s.wm == null || s.overlayRoot == null) return;
+            if (passthrough) {
+                s.layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+                try {
+                    s.wm.updateViewLayout(s.overlayRoot, s.layoutParams);
+                } catch (Exception ignored) {}
+            } else {
+                s.updateWindowFocus();
+            }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            apply.run();
+        } else {
+            new Handler(Looper.getMainLooper()).post(apply);
+        }
     }
 
     /**

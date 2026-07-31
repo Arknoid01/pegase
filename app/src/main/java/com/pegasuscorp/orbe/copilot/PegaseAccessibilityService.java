@@ -4,12 +4,16 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
+import android.graphics.Path;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.copilot.apps.YouTubeSubtitleAction;
 
 import java.util.concurrent.ExecutorService;
@@ -25,6 +29,8 @@ public class PegaseAccessibilityService extends AccessibilityService {
     public static final String ACTION_CONTENT_CHANGED =
             "com.pegasuscorp.orbe.copilot.CONTENT_CHANGED";
 
+    private static final String TAG = "PegaseA11y";
+
     private static volatile PegaseAccessibilityService instance;
 
     private static final ExecutorService IO = Executors.newSingleThreadExecutor();
@@ -32,6 +38,7 @@ public class PegaseAccessibilityService extends AccessibilityService {
     private final Handler main = new Handler(Looper.getMainLooper());
     private Runnable pendingNotify;
     private String lastNotifiedPackage = "";
+    private Runnable pendingPassthroughRestore;
 
     public static PegaseAccessibilityService getInstance() {
         return instance;
@@ -83,16 +90,75 @@ public class PegaseAccessibilityService extends AccessibilityService {
 
     /**
      * Tap écran (gesture) — repli quand ACTION_CLICK a11y échoue (WebView / sections Wiki).
+     * Passe l'overlay en NOT_TOUCHABLE le temps du geste (sinon la bulle absorbe le tap).
      */
     public boolean tapScreen(float x, float y) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
         if (x < 0 || y < 0) return false;
-        android.graphics.Path path = new android.graphics.Path();
+
+        Rect overlay = FloatingOrbService.getOverlayScreenBounds();
+        boolean hitOverlay = FloatingOrbService.containsScreenPoint(x, y);
+        Log.i(TAG, "tapScreen x=" + Math.round(x) + " y=" + Math.round(y)
+                + " overlay=" + (overlay != null ? overlay.toShortString() : "none")
+                + " hitOverlay=" + hitOverlay);
+
+        Path path = new Path();
         path.moveTo(x, y);
         GestureDescription.StrokeDescription stroke =
                 new GestureDescription.StrokeDescription(path, 0, 60);
         GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
-        return dispatchGesture(gesture, null, null);
+
+        FloatingOrbService.setTouchPassthrough(true);
+        schedulePassthroughRestore(500L);
+
+        // Si le tap tombe dans la bulle, laisser le WM appliquer NOT_TOUCHABLE
+        // avant d'injecter le geste (sinon absorption).
+        if (hitOverlay) {
+            main.post(() -> dispatchTapGesture(gesture, x, y, true));
+            return true;
+        }
+        return dispatchTapGesture(gesture, x, y, false);
+    }
+
+    private boolean dispatchTapGesture(GestureDescription gesture, float x, float y,
+            boolean wasHitOverlay) {
+        boolean dispatched = dispatchGesture(gesture, new GestureResultCallback() {
+            @Override
+            public void onCompleted(GestureDescription gestureDescription) {
+                Log.i(TAG, "tapScreen completed x=" + Math.round(x) + " y=" + Math.round(y)
+                        + " (wasHitOverlay=" + wasHitOverlay + ")");
+                restorePassthroughSoon();
+            }
+
+            @Override
+            public void onCancelled(GestureDescription gestureDescription) {
+                Log.w(TAG, "tapScreen cancelled x=" + Math.round(x) + " y=" + Math.round(y)
+                        + " (wasHitOverlay=" + wasHitOverlay + ")");
+                restorePassthroughSoon();
+            }
+        }, null);
+
+        if (!dispatched) {
+            Log.w(TAG, "tapScreen dispatchGesture=false");
+            restorePassthroughSoon();
+        }
+        return dispatched;
+    }
+
+    private void schedulePassthroughRestore(long delayMs) {
+        if (pendingPassthroughRestore != null) {
+            main.removeCallbacks(pendingPassthroughRestore);
+        }
+        pendingPassthroughRestore = this::restorePassthroughSoon;
+        main.postDelayed(pendingPassthroughRestore, delayMs);
+    }
+
+    private void restorePassthroughSoon() {
+        if (pendingPassthroughRestore != null) {
+            main.removeCallbacks(pendingPassthroughRestore);
+            pendingPassthroughRestore = null;
+        }
+        FloatingOrbService.setTouchPassthrough(false);
     }
 
     /** Active les sous-titres YouTube (action locale, sans cloud). */

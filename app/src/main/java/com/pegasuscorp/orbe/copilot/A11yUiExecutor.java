@@ -159,14 +159,25 @@ public final class A11yUiExecutor {
             return;
         }
         try {
-            boolean ok = A11yUiMatcher.performClick(node);
-            if (!ok && preview != null) {
-                ok = tapTarget(preview);
+            android.graphics.Rect live = new android.graphics.Rect();
+            node.getBoundsInScreen(live);
+            // Sections Wiki (hauteur 0) / nœuds non cliquables : ACTION_CLICK sur le
+            // WebView parent renvoie souvent true sans effet → succès fantôme.
+            boolean preferGesture = live.height() <= 0 || !node.isClickable();
+            boolean ok = false;
+            String via = "";
+            if (!preferGesture) {
+                ok = A11yUiMatcher.performClick(node);
+                if (ok) via = "a11y";
             }
             if (!ok) {
-                android.graphics.Rect b = new android.graphics.Rect();
-                node.getBoundsInScreen(b);
-                ok = tapBounds(b);
+                // Bounds fraîches du nœud (pas le preview snapshot).
+                ok = tapBounds(headerBand(live));
+                if (ok) via = "gesture";
+            }
+            if (!ok && preview != null) {
+                ok = tapTarget(preview);
+                if (ok) via = "gesture-preview";
             }
             ElementHighlightService.hide(ctx);
             if (ok) {
@@ -174,7 +185,10 @@ public final class A11yUiExecutor {
                         ? preview.text
                         : (preview != null ? UiExplainHelper.humanizeViewId(preview.viewId) : "l'élément");
                 if (TextUtils.isEmpty(label)) label = "l'élément";
-                cb.onSuccess(ToolResult.text("Clic sur « " + label + " »."));
+                android.util.Log.i("A11yUi", "click ok via=" + via
+                        + " live=" + live.toShortString()
+                        + " label=" + label);
+                cb.onSuccess(ToolResult.text("Clic envoyé sur « " + label + " »."));
             } else {
                 cb.onError("Le clic n'a pas abouti — l'élément n'est peut-être pas cliquable.");
             }
@@ -183,18 +197,24 @@ public final class A11yUiExecutor {
         }
     }
 
-    private static boolean tapTarget(A11yUiMatcher.Target target) {
-        if (target == null) return false;
-        int left = target.left;
-        int top = target.top;
-        int right = target.right;
-        int bottom = target.bottom;
+    /** Bande d'en-tête cliquable au-dessus d'un nœud content hauteur 0. */
+    private static android.graphics.Rect headerBand(android.graphics.Rect b) {
+        if (b == null) return new android.graphics.Rect();
+        int left = b.left;
+        int top = b.top;
+        int right = b.right;
+        int bottom = b.bottom;
         if (bottom <= top && right > left) {
-            // Bande d'en-tête collapsible au-dessus du content viewId.
             bottom = top;
             top = Math.max(0, top - 56);
         }
-        android.graphics.Rect b = new android.graphics.Rect(left, top, right, bottom);
+        return new android.graphics.Rect(left, top, right, bottom);
+    }
+
+    private static boolean tapTarget(A11yUiMatcher.Target target) {
+        if (target == null) return false;
+        android.graphics.Rect b = headerBand(new android.graphics.Rect(
+                target.left, target.top, target.right, target.bottom));
         return tapBounds(b);
     }
 
