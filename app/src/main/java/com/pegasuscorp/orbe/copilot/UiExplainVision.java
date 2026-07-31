@@ -94,8 +94,8 @@ public final class UiExplainVision {
         StringBuilder sb = new StringBuilder();
         sb.append("Tu es le copilote Pégase. L'utilisateur regarde une autre application.\n");
         sb.append("Tu reçois un extrait recadré de l'écran (zone ciblée");
-        if (!TextUtils.isEmpty(target.viewId)) {
-            sb.append(", id ").append(target.viewId);
+        if (!TextUtils.isEmpty(target.text)) {
+            sb.append(", libellé « ").append(target.text).append(" »");
         }
         sb.append(").\n");
         if (!TextUtils.isEmpty(question)) {

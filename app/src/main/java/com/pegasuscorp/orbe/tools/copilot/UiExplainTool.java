@@ -31,8 +31,9 @@ public final class UiExplainTool implements Tool {
 
     @Override
     public String description() {
-        return "ui_explain(target:str, question:str) — Explique un élément visible via "
-                + "son texte à l'écran (jamais demander un view_id). Ne ouvre jamais de page web.";
+        return "ui_explain(target:str, question:str) — Explique un élément via son "
+                + "libellé visible à l'écran. Agis directement, sans question technique. "
+                + "Ne ouvre jamais de page web.";
     }
 
     @Override

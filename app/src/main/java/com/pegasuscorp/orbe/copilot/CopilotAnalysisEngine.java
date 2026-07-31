@@ -92,13 +92,18 @@ public final class CopilotAnalysisEngine {
         return out;
     }
 
-    private static String joinText(List<A11ySnapshot.Node> nodes) {
+    /** Texte écran pour le LLM : libellés visibles + titres issus des ids techniques. */
+    static String joinText(List<A11ySnapshot.Node> nodes) {
         if (nodes == null || nodes.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         for (A11ySnapshot.Node n : nodes) {
-            if (n.text.isEmpty()) continue;
+            String line = n.text;
+            if (line.isEmpty() && !n.viewId.isEmpty()) {
+                line = UiExplainHelper.humanizeViewId(n.viewId);
+            }
+            if (line.isEmpty()) continue;
             if (sb.length() > 0) sb.append('\n');
-            sb.append(n.text);
+            sb.append(line);
         }
         return sb.toString().trim();
     }

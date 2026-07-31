@@ -57,4 +57,25 @@ public class A11yUiMatcherTest {
         assertTrue(new A11yUiMatcher.Criteria().isEmpty());
         assertFalse(A11yUiMatcher.Criteria.fromText("x").isEmpty());
     }
+
+    @Test
+    public void parseCriteria_ignoresViewIdParam_usesAsTextWhenTargetEmpty() throws Exception {
+        org.json.JSONObject p = new org.json.JSONObject()
+                .put("view_id", "Astronomie_et_espace-collapsible-content");
+        A11yUiMatcher.Criteria c = A11yUiExecutor.parseCriteria(p);
+        assertEquals("Astronomie et espace", c.text);
+        assertTrue(c.viewId.isEmpty());
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "Astronomie_et_espace-collapsible-content", "", c));
+    }
+
+    @Test
+    public void parseCriteria_prefersTargetOverViewId() throws Exception {
+        org.json.JSONObject p = new org.json.JSONObject()
+                .put("target", "Astronomie")
+                .put("view_id", "ignored_id");
+        A11yUiMatcher.Criteria c = A11yUiExecutor.parseCriteria(p);
+        assertEquals("Astronomie", c.text);
+        assertTrue(c.viewId.isEmpty());
+    }
 }

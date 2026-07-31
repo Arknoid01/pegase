@@ -29,7 +29,8 @@ public final class UiActionTool implements Tool {
     public String description() {
         return "ui_action(action:\"click\"|\"type\"|\"scroll\"|\"back\", target:str, "
                 + "value:str, direction:\"up\"|\"down\") — Contrôle l'écran de l'app "
-                + "autorisée. target = texte visible (jamais demander un view_id à l'utilisateur). "
+                + "autorisée. target = libellé visible (ex. « Astronomie »). "
+                + "Clique directement — aucune question technique à l'utilisateur. "
                 + "click peut demander confirmation.";
     }
 

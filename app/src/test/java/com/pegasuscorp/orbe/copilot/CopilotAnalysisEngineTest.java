@@ -37,11 +37,23 @@ public class CopilotAnalysisEngineTest {
     @Test
     public void buildHighlightRects_clickableOnly() {
         java.util.List<A11ySnapshot.Node> nodes = new java.util.ArrayList<>();
-        nodes.add(new A11ySnapshot.Node("OK", true, 10, 20, 80, 60));
-        nodes.add(new A11ySnapshot.Node("Texte", false, 0, 0, 100, 40));
+        nodes.add(new A11ySnapshot.Node("OK", true, 10, 300, 80, 360));
+        nodes.add(new A11ySnapshot.Node("Texte", false, 0, 300, 100, 340));
         java.util.List<ElementHighlightService.HighlightRect> rects =
                 CopilotAnalysisEngine.buildHighlightRects(nodes);
         assertEquals(1, rects.size());
         assertEquals(10, rects.get(0).left);
+    }
+
+    @Test
+    public void joinText_humanizesEmptyTextViewIds() {
+        java.util.List<A11ySnapshot.Node> nodes = new java.util.ArrayList<>();
+        nodes.add(new A11ySnapshot.Node(
+                "", "Astronomie_et_espace-collapsible-content", "", false,
+                0, 100, 200, 100));
+        nodes.add(new A11ySnapshot.Node("Paragraphe", true, 0, 120, 200, 180));
+        String text = CopilotAnalysisEngine.joinText(nodes);
+        assertTrue(text.contains("Astronomie et espace"));
+        assertTrue(text.contains("Paragraphe"));
     }
 }

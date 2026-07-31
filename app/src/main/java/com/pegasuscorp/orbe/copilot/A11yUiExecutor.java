@@ -19,8 +19,16 @@ public final class A11yUiExecutor {
 
     public static A11yUiMatcher.Criteria parseCriteria(JSONObject params) {
         A11yUiMatcher.Criteria c = new A11yUiMatcher.Criteria();
+        if (params == null) return c;
         c.text = params.optString("target", params.optString("text", "")).trim();
-        c.viewId = params.optString("view_id", params.optString("viewId", "")).trim();
+        // Si le modèle envoie encore un id technique, le traiter comme libellé flou
+        // (jamais exiger ça de l'utilisateur ; matching texte seul sur l'arbre).
+        String rawId = params.optString("view_id", params.optString("viewId", "")).trim();
+        if (c.text.isEmpty() && !rawId.isEmpty()) {
+            String human = UiExplainHelper.humanizeViewId(rawId);
+            c.text = !TextUtils.isEmpty(human) ? human : rawId;
+        }
+        c.viewId = "";
         return c;
     }
 
