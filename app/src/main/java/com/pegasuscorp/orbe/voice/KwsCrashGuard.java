@@ -16,7 +16,7 @@ final class KwsCrashGuard {
     private static final String KEY_START_MS = "start_ms";
     private static final String KEY_CONFIG_GEN = "config_gen";
     private static final long CRASH_WINDOW_MS = 8_000L;
-    private static final int MAX_FAILS = 2;
+    private static final int MAX_FAILS = 5;
 
     private KwsCrashGuard() {}
 
@@ -34,6 +34,13 @@ final class KwsCrashGuard {
 
     static boolean shouldDisableKws(Context ctx) {
         return prefs(ctx).getInt(KEY_FAILS, 0) >= MAX_FAILS;
+    }
+
+    /**
+     * Redémarrage volontaire (changement route, watchdog) — ne pas compter comme crash.
+     */
+    static void onPlannedRestart(Context ctx) {
+        prefs(ctx).edit().putLong(KEY_START_MS, 0L).apply();
     }
 
     /** Appeler juste avant de démarrer le thread KWS. */
@@ -56,6 +63,12 @@ final class KwsCrashGuard {
 
     static void reset(Context ctx) {
         prefs(ctx).edit().clear().apply();
+        Log.i(TAG, "manual reset");
+    }
+
+    /** Exposé pour l'UI diagnostic (réinitialiser après faux positifs crash guard). */
+    public static void resetForUser(Context ctx) {
+        reset(ctx);
     }
 
     private static SharedPreferences prefs(Context ctx) {

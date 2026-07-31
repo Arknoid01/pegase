@@ -58,6 +58,7 @@ public class VoiceService extends Service {
     private final RemoteCallbackList<IWakeWordCallback> callbacks = new RemoteCallbackList<>();
 
     private SpeechRecognizer recognizer;
+    private KwsAudioRouteManager kwsRouteManager;
     private SherpaKwsEngine kwsEngine;
     private boolean useKws;
 
@@ -111,6 +112,7 @@ public class VoiceService extends Service {
         super.onCreate();
         createChannel();
         startAsForeground();
+        kwsRouteManager = new KwsAudioRouteManager(this);
         refreshWakeBackend();
         maybeAutoDownloadKws();
     }
@@ -135,6 +137,10 @@ public class VoiceService extends Service {
             kwsEngine.release();
             kwsEngine = null;
         }
+        if (kwsRouteManager != null) {
+            kwsRouteManager.release();
+            kwsRouteManager = null;
+        }
         callbacks.kill();
         super.onDestroy();
     }
@@ -142,7 +148,7 @@ public class VoiceService extends Service {
     private void refreshWakeBackend() {
         useKws = false;
         // Nouvelle config KWS : laisser une chance après les crashs zipformer.
-        KwsCrashGuard.bumpConfigGeneration(this, 4);
+        KwsCrashGuard.bumpConfigGeneration(this, 5);
         if (KwsCrashGuard.shouldDisableKws(this)) {
             Log.e(TAG, "KWS disabled (crash loop) — pas de STT duty-cycle (évite kill micro)");
             destroyRecognizer();
@@ -150,7 +156,20 @@ public class VoiceService extends Service {
         }
         if (KwsModelStore.isModelReady(this)) {
             if (kwsEngine == null) {
-                kwsEngine = new SherpaKwsEngine(this, keyword -> onWakeDetected(""));
+                kwsEngine = new SherpaKwsEngine(this, new SherpaKwsEngine.Listener() {
+                    @Override
+                    public void onKeywordDetected(String keyword) {
+                        onWakeDetected("");
+                    }
+
+                    @Override
+                    public void onAudioRouteChanged() {
+                        onKwsAudioRouteChanged();
+                    }
+                });
+                if (kwsRouteManager != null) {
+                    kwsEngine.setRouteManager(kwsRouteManager);
+                }
             }
             if (kwsEngine.ensureLoaded()) {
                 useKws = true;
@@ -268,6 +287,21 @@ public class VoiceService extends Service {
         }
     }
 
+    /** Casque BT branché/débranché après démarrage du KWS — relance capture sur la nouvelle route. */
+    private void onKwsAudioRouteChanged() {
+        if (!wantListening || !useKws) return;
+        Log.i(TAG, "KWS audio route changed — restarting capture");
+        KwsCrashGuard.onPlannedRestart(this);
+        listening = false;
+        if (kwsEngine != null) {
+            try {
+                kwsEngine.stop();
+            } catch (Exception ignored) {}
+        }
+        releaseListenWakeLock();
+        scheduleListen(400);
+    }
+
     private void onWakeDetected(String command) {
         long now = System.currentTimeMillis();
         if (now - lastWakeDetectedMs < WAKE_DEBOUNCE_MS) {
@@ -372,6 +406,7 @@ public class VoiceService extends Service {
         }
         kwsRestartStreak++;
         Log.w(TAG, "KWS not running while wantListening — restart #" + kwsRestartStreak);
+        KwsCrashGuard.onPlannedRestart(this);
         listening = false;
         if (kwsEngine != null) {
             try { kwsEngine.stop(); } catch (Exception ignored) {}
@@ -422,8 +457,9 @@ public class VoiceService extends Service {
         if (!wantListening || !useKws) return;
         if (kwsEngine == null) refreshWakeBackend();
         if (kwsEngine == null || !kwsEngine.isReady()) {
-            useKws = false;
-            Log.w(TAG, "KWS not ready — wake local arrêté (pas de STT)");
+            Log.w(TAG, "KWS not ready — retry in 5s (model=" + KwsModelStore.isModelReady(this)
+                    + " crashGuard=" + KwsCrashGuard.shouldDisableKws(this) + ")");
+            scheduleListen(5_000);
             return;
         }
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
