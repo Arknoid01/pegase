@@ -545,3 +545,5 @@ Ce audit pose la question : **où gagner le plus sans empiler de nouveaux module
 ---
 
 *Document généré pour préparation v3 — à valider ensemble avant roadmap détaillée.*
+
+**Suite :** programme validé → [`v3-plan-consolide.md`](./v3-plan-consolide.md)
