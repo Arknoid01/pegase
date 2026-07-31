@@ -30,6 +30,7 @@ public final class CopilotCloudBridge {
         List<A11ySnapshot.Node> foreign = CopilotLocaleFilter.foreignBlocks(nodes);
         if (foreign.isEmpty()) {
             translating.set(false);
+            TranslationOverlayService.hide(app);
             return;
         }
 

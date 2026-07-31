@@ -28,8 +28,9 @@ public final class UiActionTool implements Tool {
     @Override
     public String description() {
         return "ui_action(action:\"click\"|\"type\"|\"scroll\"|\"back\", target:str, "
-                + "view_id:str, value:str, direction:\"up\"|\"down\") — Contrôle l'écran "
-                + "de l'app autorisée (accessibility). click peut demander confirmation.";
+                + "value:str, direction:\"up\"|\"down\") — Contrôle l'écran de l'app "
+                + "autorisée. target = texte visible (jamais demander un view_id à l'utilisateur). "
+                + "click peut demander confirmation.";
     }
 
     @Override

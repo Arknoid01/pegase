@@ -33,8 +33,8 @@ public final class UiSearchTool implements Tool {
 
   @Override
   public String description() {
-    return "ui_search(target:str, view_id:str, query:str) — Recherche web sur un mot "
-        + "visible à l'écran (ouvre le navigateur).";
+    return "ui_search(target:str, query:str) — Recherche web sur un mot visible à l'écran "
+        + "(ouvre le navigateur). target = texte vu, jamais un view_id.";
   }
 
   @Override

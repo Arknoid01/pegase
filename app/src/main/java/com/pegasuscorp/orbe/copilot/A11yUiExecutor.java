@@ -42,7 +42,7 @@ public final class A11yUiExecutor {
         CopilotUiSupport.notifyActionInProgress(ctx, cb);
         A11yUiMatcher.Criteria criteria = parseCriteria(params);
         if (criteria.isEmpty()) {
-            cb.onError("Indique la cible à cliquer (target ou view_id).");
+            cb.onError("Indique la cible à cliquer (texte visible à l'écran).");
             return;
         }
         withRoot(svc, root -> {

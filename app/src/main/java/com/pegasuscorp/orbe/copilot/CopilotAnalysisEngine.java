@@ -55,7 +55,9 @@ public final class CopilotAnalysisEngine {
             ScreenContextStore.update(ctx, packageName, text);
             maybeShowElementHighlights(ctx, nodes);
             List<A11ySnapshot.Node> foreign = CopilotLocaleFilter.foreignBlocks(nodes);
-            if (!foreign.isEmpty()) {
+            if (foreign.isEmpty()) {
+                MAIN.post(() -> TranslationOverlayService.hide(ctx));
+            } else {
                 CloudSink sink = cloudSink;
                 if (sink != null) {
                     MAIN.post(() -> sink.onFilteredText(packageName, text, "langue_etrangere"));
@@ -80,6 +82,9 @@ public final class CopilotAnalysisEngine {
         if (nodes == null) return out;
         for (A11ySnapshot.Node n : nodes) {
             if (!n.clickable || !n.hasBounds()) continue;
+            if (n.top < 220 && n.height() < 120) continue; // barre navigateur
+            if (CopilotLocaleFilter.isBrowserChromeLabel(n.text)) continue;
+            if (n.width() < 40 || n.height() < 24) continue;
             out.add(new ElementHighlightService.HighlightRect(
                     n.left, n.top, n.right, n.bottom, n.text));
             if (out.size() >= MAX_HIGHLIGHTS) break;

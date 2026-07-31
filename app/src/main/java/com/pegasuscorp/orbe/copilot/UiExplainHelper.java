@@ -41,8 +41,28 @@ public final class UiExplainHelper {
     }
 
     public static String localAnswer(A11yUiMatcher.Target target, String question) {
-        if (target == null || TextUtils.isEmpty(target.text)) return "";
-        return target.text;
+        if (target == null) return "";
+        if (!TextUtils.isEmpty(target.text)) return target.text;
+        // viewId technique (ex. Astronomie_et_espace-collapsible) → libellé lisible
+        if (!TextUtils.isEmpty(target.viewId)) {
+            return humanizeViewId(target.viewId);
+        }
+        return "";
+    }
+
+    static String humanizeViewId(String viewId) {
+        if (viewId == null || viewId.isEmpty()) return "";
+        String s = viewId;
+        int slash = s.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < s.length()) s = s.substring(slash + 1);
+        s = s.replace("-collapsible-content", "")
+                .replace("-collapsible-heading", "")
+                .replace("-collapsible-toggle", "")
+                .replace('_', ' ')
+                .replace('-', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
+        return s;
     }
 
     public static void showOverlay(Context ctx, A11yUiMatcher.Target target, String answer) {
