@@ -4,7 +4,8 @@ import android.app.KeyguardManager;
 import android.content.Context;
 
 /**
- * Règles quand le téléphone est verrouillé : discussion seule, pas d'outils.
+ * Règles quand le téléphone est verrouillé.
+ * v3 P1 : liste blanche d'outils vocaux (calcul, minuteur, alarme, agenda vérifié).
  */
 public final class LockSessionPolicy {
 
@@ -21,7 +22,18 @@ public final class LockSessionPolicy {
         return km != null && km.isKeyguardLocked();
     }
 
+    /** Tous les outils (écran déverrouillé, session non verrouillée). */
     public static boolean allowsTools(Context context, boolean lockedChatMode) {
-        return !lockedChatMode && !isDeviceLocked(context);
+        if (!isDeviceLocked(context) && !lockedChatMode) return true;
+        if (!isDeviceLocked(context)) return true;
+        return false;
+    }
+
+    /** Outil direct autorisé (whitelist écran verrouillé). */
+    public static boolean allowsTool(Context context, boolean lockedChatMode,
+            String intentHint, String toolJson) {
+        if (!isDeviceLocked(context) && !lockedChatMode) return true;
+        if (!isDeviceLocked(context)) return true;
+        return LockScreenToolPolicy.isWhitelistedOnLockScreen(intentHint, toolJson);
     }
 }

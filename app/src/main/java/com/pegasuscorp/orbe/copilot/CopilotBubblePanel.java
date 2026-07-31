@@ -14,6 +14,8 @@ import android.widget.TextView;
 
 import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
+import com.pegasuscorp.orbe.voice.PttTouchHelper;
+import com.pegasuscorp.orbe.voice.VoicePushToTalk;
 
 /**
  * Bulle messenger attachée à l'orbe copilote — messages + saisie + actions rapides.
@@ -30,6 +32,8 @@ public final class CopilotBubblePanel extends FrameLayout {
         void onRememberScreen();
         void onClose();
         void onOpenPegase();
+        /** PTT transcript depuis la bulle. */
+        default void onPttTranscript(String text) {}
     }
 
     private final float density;
@@ -135,6 +139,23 @@ public final class CopilotBubblePanel extends FrameLayout {
         });
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         inputRow.addView(input, inputLp);
+
+        TextView pttBtn = actionChip(ctx, "🎤");
+        pttBtn.setContentDescription(ctx.getString(R.string.voice_ptt_mic));
+        PttTouchHelper.attach(pttBtn, ctx, null, VoicePushToTalk.Channel.COPILOT,
+                new VoicePushToTalk.Callback() {
+                    @Override
+                    public void onTranscript(String text) {
+                        if (listener != null) listener.onPttTranscript(text);
+                    }
+
+                    @Override
+                    public void onListeningChanged(boolean listening) {
+                        pttBtn.setAlpha(listening ? 1f : 0.6f);
+                    }
+                });
+        LinearLayout.LayoutParams pttLp = actionLp();
+        inputRow.addView(pttBtn, pttLp);
 
         TextView sendBtn = actionChip(ctx, "➤");
         sendBtn.setOnClickListener(v -> submitInput());

@@ -8,6 +8,7 @@ import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
 import com.pegasuscorp.orbe.PegaseWakeService;
 import com.pegasuscorp.orbe.bureau.BureauHost;
+import com.pegasuscorp.orbe.voice.VoicePushToTalk;
 import com.pegasuscorp.orbe.voice.AssistantVolumeGuard;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.VoiceSessionContext;
@@ -182,6 +183,9 @@ public final class ChatVoiceBridge {
     public static void deliverTranscript(String transcript) {
         if (transcript == null || transcript.trim().isEmpty()) return;
         String trimmed = transcript.trim();
+        if (VoicePushToTalk.get().deliverTranscript(trimmed)) {
+            return;
+        }
         BureauHost bureau = bureauHost != null ? bureauHost.get() : null;
         if (bureau != null) {
             bureau.runOnUiThread(() -> bureau.handleBureauVoice(trimmed));

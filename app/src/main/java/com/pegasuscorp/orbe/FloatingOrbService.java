@@ -214,6 +214,11 @@ public class FloatingOrbService extends Service {
             public void onOpenPegase() {
                 PegaseInterfaceActivity.open(FloatingOrbService.this);
             }
+
+            @Override
+            public void onPttTranscript(String text) {
+                if (copilotController != null) copilotController.sendUserMessage(text);
+            }
         });
     }
 
