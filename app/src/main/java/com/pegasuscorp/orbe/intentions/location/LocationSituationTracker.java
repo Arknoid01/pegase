@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.intentions.location;
 import android.content.Context;
 import android.util.Log;
 
+import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.intentions.PegaseModeStore;
 
 /**
@@ -39,12 +40,16 @@ public final class LocationSituationTracker {
 
     static void applyDriveMode(Context app, LocationSituationReader.Snapshot snap) {
         if (!snap.hasCoords) return;
-        float kmh = snap.speedKmh();
+        float kmh = snap.effectiveSpeedKmh(System.currentTimeMillis());
         if (kmh >= DRIVE_ENTER_KMH) {
+            if (!PegaseModeStore.isAutoDriveActive(app)) {
+                try {
+                    FloatingOrbService.hide(app);
+                } catch (Exception ignored) {}
+            }
             PegaseModeStore.setModeFromAutoDrive(app, PegaseModeStore.Mode.DRIVE);
         } else if (kmh < DRIVE_EXIT_KMH && PegaseModeStore.isAutoDriveActive(app)) {
-            PegaseModeStore.clearAutoDrive(app);
-            PegaseModeStore.setMode(app, PegaseModeStore.Mode.NORMAL);
+            PegaseModeStore.exitAutoDrive(app);
         }
     }
 

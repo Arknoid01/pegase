@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.content.pm.PackageManager;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -15,6 +16,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -131,6 +133,16 @@ public class RoutineSettingsActivity extends AppCompatActivity {
         super.onResume();
         refreshAlarmTimeLabel();
         rebuildList();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PermissionFlow.REQ_LOCATION && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            LocationSituationBootstrap.ensureStarted(this);
+        }
     }
 
     private View buildAlarmTimeRow() {
@@ -433,13 +445,6 @@ public class RoutineSettingsActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Annuler", null)
                 .show();
-    }
-
-    private String modeLabel() {
-        PegaseModeStore.Mode m = PegaseModeStore.getMode(this);
-        if (m == PegaseModeStore.Mode.DRIVE) return "Conduite";
-        if (m == PegaseModeStore.Mode.WORK) return "Travail";
-        return "Normal";
     }
 
     private String modeLabel() {

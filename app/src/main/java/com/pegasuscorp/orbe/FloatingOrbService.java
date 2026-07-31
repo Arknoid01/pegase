@@ -238,13 +238,11 @@ public class FloatingOrbService extends Service {
             @Override
             public void onAssistantMessage(String text) {
                 if (bubblePanel != null) bubblePanel.addAssistantMessage(text);
-                PegaseWakeController.setAssistantThinking(false);
             }
 
             @Override
             public void onAssistantPartial(String text) {
                 if (bubblePanel != null) bubblePanel.updateAssistantPartial(text);
-                PegaseWakeController.setAssistantThinking(true);
             }
 
             @Override
@@ -255,7 +253,6 @@ public class FloatingOrbService extends Service {
             @Override
             public void onError(String message) {
                 if (bubblePanel != null) bubblePanel.showError(message);
-                PegaseWakeController.setAssistantThinking(false);
             }
 
             @Override
@@ -477,7 +474,7 @@ public class FloatingOrbService extends Service {
     public static void showCopilot(Context ctx) {
         if (!CopilotPrefs.isAlwaysOn(ctx)) return;
         if (!android.provider.Settings.canDrawOverlays(ctx)) return;
-        if (com.pegasuscorp.orbe.intentions.PegaseModeStore.isDrive(ctx)) return;
+        if (com.pegasuscorp.orbe.intentions.PegaseModeStore.isAutoDriveActive(ctx)) return;
         show(ctx, OverlayMode.COPILOT);
     }
 

@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
  * Pont entre l'overlay copilote et {@link PegaseSession}.
  * Gère envoi texte, capture écran + vision, et mémorisation contextuelle.
  */
-public final class CopilotController implements SessionObserver {
+public final class CopilotController {
 
     public interface BubbleSink {
         void onUserMessage(String text);
@@ -48,6 +48,7 @@ public final class CopilotController implements SessionObserver {
     private volatile BubbleSink bubbleSink;
     private volatile boolean sending;
     private volatile String lastScreenContext = "";
+    private volatile int attachGeneration;
     private BroadcastReceiver notifReceiver;
     private BroadcastReceiver statusReceiver;
 
@@ -67,9 +68,9 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void attach(BubbleSink sink) {
+        attachGeneration++;
         bubbleSink = sink;
         PegaseSession session = PegaseSession.get(appContext);
-        session.addObserver(this);
         session.init(new SessionContext(Channel.COPILOT, false));
         registerNotifReceiver();
         registerStatusReceiver();
@@ -120,6 +121,7 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void detach() {
+        attachGeneration++;
         if (statusReceiver != null) {
             try {
                 appContext.unregisterReceiver(statusReceiver);
@@ -132,8 +134,9 @@ public final class CopilotController implements SessionObserver {
             } catch (Exception ignored) {}
             notifReceiver = null;
         }
-        PegaseSession.get(appContext).removeObserver(this);
         bubbleSink = null;
+        sending = false;
+        PegaseWakeController.setAssistantThinking(false);
     }
 
     public boolean isSending() {
@@ -141,7 +144,7 @@ public final class CopilotController implements SessionObserver {
     }
 
     public void sendUserMessage(String text) {
-        if (TextUtils.isEmpty(text)) return;
+        if (TextUtils.isEmpty(text) || sending) return;
         String trimmed = text.trim();
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onUserMessage(trimmed);
@@ -159,8 +162,15 @@ public final class CopilotController implements SessionObserver {
 
     private void dispatchUserTurn(String trimmed, String payloadWithoutReflection) {
         Context ctx = appContext;
+        final int gen = attachGeneration;
         if (!CopilotReflectionGate.needsReflection(ctx, trimmed)) {
-            PegaseSession.get(ctx).send(payloadWithoutReflection, trimmed, sessionObserver());
+            main.post(() -> {
+                if (gen != attachGeneration) {
+                    setSending(false);
+                    return;
+                }
+                PegaseSession.get(ctx).send(payloadWithoutReflection, trimmed, sessionObserver(gen));
+            });
             return;
         }
 
@@ -170,6 +180,7 @@ public final class CopilotController implements SessionObserver {
         }
 
         REFLECTION_IO.execute(() -> {
+            if (gen != attachGeneration) return;
             String reflectionPlan = "";
             try {
                 CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(ctx);
@@ -178,9 +189,16 @@ public final class CopilotController implements SessionObserver {
             } catch (Exception e) {
                 android.util.Log.w("CopilotReflection", "reflection skipped", e);
             }
+            if (gen != attachGeneration) return;
             String prefix = CopilotReflectionPlanner.buildPayloadPrefix(reflectionPlan);
             String payload = buildPayload(trimmed, prefix.isEmpty() ? null : prefix);
-            PegaseSession.get(ctx).send(payload, trimmed, sessionObserver());
+            main.post(() -> {
+                if (gen != attachGeneration) {
+                    setSending(false);
+                    return;
+                }
+                PegaseSession.get(ctx).send(payload, trimmed, sessionObserver(gen));
+            });
         });
     }
 
@@ -336,11 +354,12 @@ public final class CopilotController implements SessionObserver {
         return sb.toString();
     }
 
-    private SessionObserver sessionObserver() {
+    private SessionObserver sessionObserver(int gen) {
         return new SessionObserver() {
             @Override
             public void onReply(String text, boolean toolFired) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (!toolFired && bubbleSink != null && !TextUtils.isEmpty(text)) {
                         bubbleSink.onAssistantMessage(text);
                     }
@@ -351,6 +370,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onPartial(String accumulated) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) bubbleSink.onAssistantPartial(accumulated);
                 });
             }
@@ -358,6 +378,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onToolResult(ToolResult result) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null && result != null && result.text != null) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
@@ -367,6 +388,7 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onError(String message) {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) bubbleSink.onError(message);
                     setSending(false);
                 });
@@ -375,10 +397,22 @@ public final class CopilotController implements SessionObserver {
             @Override
             public void onLlmStart() {
                 main.post(() -> {
+                    if (gen != attachGeneration) return;
                     if (bubbleSink != null) {
                         bubbleSink.onStatus(appContext.getString(R.string.copilot_status_thinking));
                     }
                 });
+            }
+
+            @Override
+            public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    if (bubbleSink != null) {
+                        bubbleSink.onConfirmNeeded(question, onConfirm, onCancel);
+                    }
+                });
+                return true;
             }
         };
     }
@@ -388,30 +422,5 @@ public final class CopilotController implements SessionObserver {
         PegaseWakeController.setAssistantThinking(value);
         BubbleSink sink = bubbleSink;
         if (sink != null) sink.onSendingChanged(value);
-    }
-
-    @Override
-    public void onReply(String text, boolean toolFired) {
-        if (bubbleSink == null || TextUtils.isEmpty(text)) return;
-        main.post(() -> {
-            if (!toolFired) bubbleSink.onAssistantMessage(text);
-        });
-    }
-
-    @Override
-    public void onToolResult(ToolResult result) {
-    }
-
-    @Override
-    public void onError(String message) {
-        if (bubbleSink == null) return;
-        main.post(() -> bubbleSink.onError(message));
-    }
-
-    @Override
-    public boolean onConfirmNeeded(String question, Runnable onConfirm, Runnable onCancel) {
-        if (bubbleSink == null || TextUtils.isEmpty(question)) return false;
-        main.post(() -> bubbleSink.onConfirmNeeded(question, onConfirm, onCancel));
-        return true;
     }
 }

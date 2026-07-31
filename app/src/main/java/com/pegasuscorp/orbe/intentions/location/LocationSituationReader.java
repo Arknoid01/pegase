@@ -20,6 +20,9 @@ public final class LocationSituationReader {
     private static final String KEY_PLACE_TYPE = "place_type";
     private static final String KEY_PLACE_SEARCH = "place_search";
 
+    /** Vitesse ignorée au-delà de cet âge (évite faux positifs sur tick capteurs). */
+    public static final long MAX_SPEED_AGE_MS = 10L * 60L * 1000L;
+
     private static volatile Snapshot testOverride;
 
     private LocationSituationReader() {}
@@ -41,6 +44,13 @@ public final class LocationSituationReader {
 
         public float speedKmh() {
             return speedMps * 3.6f;
+        }
+
+        /** Vitesse effective (0 si coordonnées ou relevé trop ancien). */
+        public float effectiveSpeedKmh(long nowMs) {
+            if (!hasCoords) return 0f;
+            if (updatedMs <= 0L || nowMs - updatedMs > MAX_SPEED_AGE_MS) return 0f;
+            return speedKmh();
         }
     }
 

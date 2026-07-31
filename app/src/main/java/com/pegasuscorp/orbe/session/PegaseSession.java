@@ -614,7 +614,7 @@ public class PegaseSession {
     /** Planification cachée copilote — éphémère, hors historique (P3 v3). */
     public String completeCopilotReflectionSync(String reflectionPrompt) throws Exception {
         return conversation().completeEphemeralSync(reflectionPrompt, 30,
-                ChatSendOptions.legacy(Channel.COPILOT).withMaxTokens(350), "copilot_reflection");
+                ChatSendOptions.legacy(Channel.TEXT).withMaxTokens(350), "copilot_reflection");
     }
 
     public Channel getChannel() {

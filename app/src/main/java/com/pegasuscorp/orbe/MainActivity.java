@@ -99,6 +99,7 @@ public class MainActivity extends AppCompatActivity
 
     private final ResponseDelivery responseDelivery = new ResponseDelivery();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private PegaseVisualStateHub.Listener visualPhaseListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -209,9 +210,10 @@ public class MainActivity extends AppCompatActivity
         WakeHealthUi.setListener(status -> {
             if (orbUi != null) orbUi.applyWakeHealth(status);
         });
-        PegaseVisualStateHub.addListener(phase -> {
+        visualPhaseListener = phase -> {
             if (orbUi != null) orbUi.applyVisualPhase(phase);
-        });
+        };
+        PegaseVisualStateHub.addListener(visualPhaseListener);
         VoiceWakeClient.get().refreshWakeHealth();
 
         inkManager = DigitalInkManager.getInstance();
@@ -613,6 +615,11 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     protected void onDestroy() {
+        if (visualPhaseListener != null) {
+            PegaseVisualStateHub.removeListener(visualPhaseListener);
+            visualPhaseListener = null;
+        }
+        WakeHealthUi.setListener(null);
         if (lifecycle != null) lifecycle.onDestroy();
         if (homeAssets != null) homeAssets.shutdown();
         super.onDestroy();

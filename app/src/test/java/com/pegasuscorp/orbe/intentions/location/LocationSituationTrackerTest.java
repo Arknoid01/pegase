@@ -69,6 +69,31 @@ public class LocationSituationTrackerTest {
     }
 
     @Test
+    public void autoDriveExit_restoresPreviousMode() {
+        PegaseModeStore.setMode(ctx, PegaseModeStore.Mode.WORK);
+        LocationSituationReader.setTestOverride(
+                new LocationSituationReader.Snapshot(48.8, 2.3, 6.5f, System.currentTimeMillis(), true));
+        LocationSituationTracker.evaluate(ctx);
+        assertEquals(PegaseModeStore.Mode.DRIVE, PegaseModeStore.getMode(ctx));
+
+        LocationSituationReader.setTestOverride(
+                new LocationSituationReader.Snapshot(48.8, 2.3, 3f, System.currentTimeMillis(), true));
+        LocationSituationTracker.evaluate(ctx);
+        assertEquals(PegaseModeStore.Mode.WORK, PegaseModeStore.getMode(ctx));
+        assertFalse(PegaseModeStore.isAutoDriveActive(ctx));
+    }
+
+    @Test
+    public void staleSpeed_doesNotTriggerAutoDrive() {
+        long stale = System.currentTimeMillis() - LocationSituationReader.MAX_SPEED_AGE_MS - 5_000L;
+        LocationSituationReader.setTestOverride(
+                new LocationSituationReader.Snapshot(48.8, 2.3, 6.5f, stale, true));
+        LocationSituationTracker.evaluate(ctx);
+        assertEquals(PegaseModeStore.Mode.NORMAL, PegaseModeStore.getMode(ctx));
+        assertFalse(PegaseModeStore.isAutoDriveActive(ctx));
+    }
+
+    @Test
     public void placeResolved_whenInsideRadius() {
         SavedPlaceStore.getInstance(ctx).upsert(
                 SavedPlace.Type.HOME, "Maison", 48.8566, 2.3522, 200f);

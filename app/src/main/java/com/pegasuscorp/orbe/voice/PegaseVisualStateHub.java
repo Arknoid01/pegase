@@ -1,5 +1,8 @@
 package com.pegasuscorp.orbe.voice;
 
+import android.os.Handler;
+import android.os.Looper;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -12,6 +15,8 @@ public final class PegaseVisualStateHub {
         void onPhaseChanged(PegaseVisualPhase phase);
     }
 
+    private static final Object LOCK = new Object();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final List<Listener> LISTENERS = new CopyOnWriteArrayList<>();
     private static volatile PegaseVisualPhase current = PegaseVisualPhase.IDLE;
 
@@ -28,12 +33,19 @@ public final class PegaseVisualStateHub {
     }
 
     public static void refresh() {
-        PegaseVisualPhase next = derivePhase();
-        if (next == current) return;
-        current = next;
+        final PegaseVisualPhase next;
+        synchronized (LOCK) {
+            next = derivePhase();
+            if (next == current) return;
+            current = next;
+        }
+        MAIN.post(() -> dispatchPhase(next));
+    }
+
+    private static void dispatchPhase(PegaseVisualPhase phase) {
         for (Listener listener : LISTENERS) {
             try {
-                listener.onPhaseChanged(next);
+                listener.onPhaseChanged(phase);
             } catch (Exception ignored) {
             }
         }
@@ -51,8 +63,10 @@ public final class PegaseVisualStateHub {
 
     /** Tests uniquement. */
     static void resetForTests() {
-        LISTENERS.clear();
-        current = PegaseVisualPhase.IDLE;
+        synchronized (LOCK) {
+            LISTENERS.clear();
+            current = PegaseVisualPhase.IDLE;
+        }
         PegaseWakeController.setMicListening(false);
         PegaseWakeController.setAssistantThinking(false);
     }

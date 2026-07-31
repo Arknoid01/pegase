@@ -80,7 +80,7 @@ public final class ContextBuilder {
         appendAtlas(sb, entities, atlasOut);
         appendLoadedNamedContexts(sb, context, contextsOut);
         sessionTopic = appendSessionContext(sb, repo, intent);
-        appendMemories(sb, repo, userMessage, entities, intent, memoriesOut);
+        appendMemories(sb, context, repo, userMessage, entities, intent, memoriesOut);
         screenLabel = appendCopilotScreenContext(sb, context, channel);
 
         return new ContextSnapshot(sb.toString(), intent.intent,
@@ -196,7 +196,7 @@ public final class ContextBuilder {
         sb.append("\n");
     }
 
-    private static void appendMemories(StringBuilder sb, MemoryRepository repo,
+    private static void appendMemories(StringBuilder sb, Context context, MemoryRepository repo,
             String userMessage, EntityResolver.Resolution entities, ContextIntent intent,
             List<String> memoriesOut) {
         if ("fresh_data".equals(intent.intent) || "music".equals(intent.intent)) {

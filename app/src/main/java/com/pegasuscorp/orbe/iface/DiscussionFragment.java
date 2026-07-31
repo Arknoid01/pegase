@@ -170,6 +170,8 @@ public class DiscussionFragment extends Fragment {
             if (host != null && !host.isDiscussionTabVisible()) return;
             if (phase == PegaseVisualPhase.MIC_LISTENING) {
                 thinkingView.onMicListening();
+            } else if (phase == PegaseVisualPhase.THINKING) {
+                thinkingView.onLlmStart();
             } else if (phase == PegaseVisualPhase.IDLE) {
                 thinkingView.onMicIdle();
             }

@@ -465,6 +465,7 @@ public class VoiceService extends Service {
         if (kwsEngine == null || !kwsEngine.isReady()) {
             useKws = false;
             Log.w(TAG, "KWS not ready — wake local arrêté (pas de STT)");
+            refreshForegroundNotification();
             return;
         }
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
@@ -473,6 +474,7 @@ public class VoiceService extends Service {
         }
         if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
+            refreshForegroundNotification();
             return;
         }
         if (kwsEngine.isRunning()) return;
