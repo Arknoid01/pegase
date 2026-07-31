@@ -21,6 +21,9 @@ import com.pegasuscorp.orbe.session.SessionObserver;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Pont entre l'overlay copilote et {@link PegaseSession}.
  * Gère envoi texte, capture écran + vision, et mémorisation contextuelle.
@@ -38,6 +41,7 @@ public final class CopilotController implements SessionObserver {
     }
 
     private static volatile CopilotController instance;
+    private static final ExecutorService REFLECTION_IO = Executors.newSingleThreadExecutor();
 
     private final Context appContext;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -148,9 +152,36 @@ public final class CopilotController implements SessionObserver {
             PegaseWakeController.pauseWake(ctx);
         }
 
-        String payload = buildPayload(trimmed);
+        String payload = buildPayload(trimmed, null);
         setSending(true);
-        PegaseSession.get(ctx).send(payload, trimmed, sessionObserver());
+        dispatchUserTurn(trimmed, payload);
+    }
+
+    private void dispatchUserTurn(String trimmed, String payloadWithoutReflection) {
+        Context ctx = appContext;
+        if (!CopilotReflectionGate.needsReflection(ctx, trimmed)) {
+            PegaseSession.get(ctx).send(payloadWithoutReflection, trimmed, sessionObserver());
+            return;
+        }
+
+        BubbleSink sink = bubbleSink;
+        if (sink != null) {
+            sink.onStatus(appContext.getString(R.string.copilot_status_thinking));
+        }
+
+        REFLECTION_IO.execute(() -> {
+            String reflectionPlan = "";
+            try {
+                CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(ctx);
+                String prompt = CopilotReflectionPlanner.buildReflectionPrompt(snap, trimmed);
+                reflectionPlan = PegaseSession.get(ctx).completeCopilotReflectionSync(prompt);
+            } catch (Exception e) {
+                android.util.Log.w("CopilotReflection", "reflection skipped", e);
+            }
+            String prefix = CopilotReflectionPlanner.buildPayloadPrefix(reflectionPlan);
+            String payload = buildPayload(trimmed, prefix.isEmpty() ? null : prefix);
+            PegaseSession.get(ctx).send(payload, trimmed, sessionObserver());
+        });
     }
 
     /** Capture l'écran puis analyse via vision (OpenRouter). */
@@ -292,9 +323,17 @@ public final class CopilotController implements SessionObserver {
         }
     }
 
-    private String buildPayload(String userText) {
-        if (TextUtils.isEmpty(lastScreenContext)) return userText;
-        return "[Capture écran manuelle]\n" + lastScreenContext + "\n\n[Question]\n" + userText;
+    private String buildPayload(String userText, String reflectionPrefix) {
+        StringBuilder sb = new StringBuilder();
+        if (!TextUtils.isEmpty(lastScreenContext)) {
+            sb.append("[Capture écran manuelle]\n").append(lastScreenContext).append("\n\n");
+        }
+        if (!TextUtils.isEmpty(reflectionPrefix)) {
+            sb.append(reflectionPrefix);
+        }
+        if (sb.length() == 0) return userText;
+        sb.append("[Question]\n").append(userText);
+        return sb.toString();
     }
 
     private SessionObserver sessionObserver() {
