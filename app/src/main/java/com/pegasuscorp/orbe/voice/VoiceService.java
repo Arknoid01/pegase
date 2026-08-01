@@ -241,7 +241,7 @@ public class VoiceService extends Service {
                 main.post(() -> {
                     boolean wasListening = wantListening;
                     if (wasListening) {
-                        KwsCrashGuard.onPlannedRestart(this);
+                        KwsCrashGuard.onPlannedRestart(VoiceService.this);
                     }
                     stopListening();
                     refreshWakeBackend();
