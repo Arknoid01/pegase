@@ -339,7 +339,7 @@ public class PersonalizationPanel extends FrameLayout {
                 "Écoute locale Sherpa (« Pégase ») dans un service dédié. "
                         + "Activez l'écoute ci-dessous ; le modèle (~17 Mo) se télécharge au premier usage. "
                         + "Pendant une vidéo ou de la musique, l'écoute se met en pause. "
-                        + "Logcat : KwsDiagnostics, SherpaKws, VoiceService."));
+                        + "Logs locaux : diag/kws_lifecycle.jsonl — export ci-dessous."));
         addActionRow(com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context), () ->
                 android.widget.Toast.makeText(context,
                         com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context),
@@ -351,6 +351,8 @@ public class PersonalizationPanel extends FrameLayout {
                     "Garde KWS réinitialisée — relance de l'écoute",
                     android.widget.Toast.LENGTH_SHORT).show();
         });
+        addActionRow("Exporter logs KWS / crash (JSONL)", () ->
+                com.pegasuscorp.orbe.diag.PegaseDiagLog.shareLogs(context));
         addActionRow(com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context)
                 ? "Désactiver l'écoute « Pégase »"
                 : "Activer l'écoute « Pégase »", () -> {

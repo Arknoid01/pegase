@@ -4,6 +4,10 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import com.pegasuscorp.orbe.diag.PegaseDiagLog;
+
+import org.json.JSONObject;
+
 /**
  * Détecte un crash loop KWS (process {@code :voice} qui meurt &lt; 8 s après start)
  * et désactive Sherpa pour stabiliser la notif FGS.
@@ -30,10 +34,15 @@ final class KwsCrashGuard {
                 .putLong(KEY_START_MS, 0L)
                 .apply();
         Log.i(TAG, "reset after config gen=" + generation);
+        log(ctx, "crash_guard_config_bump", generation, 0, false);
     }
 
     static boolean shouldDisableKws(Context ctx) {
-        return prefs(ctx).getInt(KEY_FAILS, 0) >= MAX_FAILS;
+        boolean disabled = fails(ctx) >= MAX_FAILS;
+        if (disabled) {
+            log(ctx, "crash_guard_tripped", generation(ctx), fails(ctx), true);
+        }
+        return disabled;
     }
 
     /**
@@ -41,6 +50,7 @@ final class KwsCrashGuard {
      */
     static void onPlannedRestart(Context ctx) {
         prefs(ctx).edit().putLong(KEY_START_MS, 0L).apply();
+        log(ctx, "crash_guard_planned_restart", generation(ctx), fails(ctx), false);
     }
 
     /** Appeler juste avant de démarrer le thread KWS. */
@@ -48,22 +58,25 @@ final class KwsCrashGuard {
         SharedPreferences p = prefs(ctx);
         long now = System.currentTimeMillis();
         long last = p.getLong(KEY_START_MS, 0L);
-        int fails = p.getInt(KEY_FAILS, 0);
+        int failCount = p.getInt(KEY_FAILS, 0);
         if (last > 0L && now - last < CRASH_WINDOW_MS) {
-            fails++;
-            Log.w(TAG, "KWS died quickly — fail #" + fails);
+            failCount++;
+            Log.w(TAG, "KWS died quickly — fail #" + failCount);
+            log(ctx, "crash_guard_quick_death", generation(ctx), failCount, false);
         }
-        p.edit().putInt(KEY_FAILS, fails).putLong(KEY_START_MS, now).apply();
+        p.edit().putInt(KEY_FAILS, failCount).putLong(KEY_START_MS, now).apply();
     }
 
     /** Appeler après ~15 s d'écoute KWS stable. */
     static void onKwsHealthy(Context ctx) {
         prefs(ctx).edit().putInt(KEY_FAILS, 0).putLong(KEY_START_MS, 0L).apply();
+        log(ctx, "crash_guard_healthy", generation(ctx), 0, false);
     }
 
     static void reset(Context ctx) {
         prefs(ctx).edit().clear().apply();
         Log.i(TAG, "manual reset");
+        log(ctx, "crash_guard_reset", 0, 0, false);
     }
 
     /** Exposé pour l'UI diagnostic (réinitialiser après faux positifs crash guard). */
@@ -73,5 +86,24 @@ final class KwsCrashGuard {
 
     private static SharedPreferences prefs(Context ctx) {
         return ctx.getApplicationContext().getSharedPreferences(PREF, Context.MODE_PRIVATE);
+    }
+
+    private static int generation(Context ctx) {
+        return prefs(ctx).getInt(KEY_CONFIG_GEN, 0);
+    }
+
+    private static int fails(Context ctx) {
+        return prefs(ctx).getInt(KEY_FAILS, 0);
+    }
+
+    private static void log(Context ctx, String event, int configGen, int fails, boolean tripped) {
+        try {
+            JSONObject f = new JSONObject();
+            f.put("config_gen", configGen);
+            f.put("fails", fails);
+            f.put("max_fails", MAX_FAILS);
+            f.put("tripped", tripped);
+            PegaseDiagLog.kws(ctx, event, f);
+        } catch (Exception ignored) {}
     }
 }

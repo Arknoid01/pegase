@@ -290,8 +290,11 @@ public final class SherpaKwsEngine {
         } catch (UnsatisfiedLinkError e) {
             nativeBroken = true;
             Log.e(TAG, "native in loop", e);
+            KwsDiagnostics.logLoopError(routeDescription(), "native", e.getMessage());
         } catch (Throwable e) {
             Log.e(TAG, "loop error", e);
+            KwsDiagnostics.logLoopError(routeDescription(), e.getClass().getSimpleName(),
+                    e.getMessage());
         } finally {
             closeMic();
             if (stream != null) {

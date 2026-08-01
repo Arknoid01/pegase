@@ -15,6 +15,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.pegasuscorp.orbe.diag.PegaseDiagLog;
+
+import org.json.JSONObject;
+
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -294,6 +298,14 @@ public final class KwsAudioRouteManager {
                 + " (" + reason + ") " + before + " → " + activeKind
                 + " | " + describeRoute());
         if (!changed) return;
+        try {
+            JSONObject f = new JSONObject();
+            f.put("reason", reason);
+            f.put("before", before.name());
+            f.put("after", activeKind.name());
+            f.put("route", describeRoute());
+            PegaseDiagLog.kws(app, "audio_route_changed", f);
+        } catch (Exception ignored) {}
         RouteChangeListener l = routeChangeListener;
         if (l != null) {
             main.post(l::onAudioRouteChanged);
