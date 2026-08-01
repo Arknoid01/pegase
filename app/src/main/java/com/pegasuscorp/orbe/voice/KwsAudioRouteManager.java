@@ -32,6 +32,8 @@ public final class KwsAudioRouteManager {
 
     private static final String TAG = "KwsAudioRoute";
     private static final long SCO_WAIT_MS = 4_000L;
+    /** Évite les rafales SCO CONNECTING→CONNECTED sur le même device. */
+    private static final long ROUTE_NOTIFY_DEBOUNCE_MS = 300L;
 
     public interface RouteChangeListener {
         void onAudioRouteChanged();
@@ -58,6 +60,7 @@ public final class KwsAudioRouteManager {
 
     private AudioDeviceCallback deviceCallback;
     private BroadcastReceiver scoReceiver;
+    private Runnable pendingRouteNotify;
 
     public KwsAudioRouteManager(Context context) {
         app = context.getApplicationContext();
@@ -133,6 +136,10 @@ public final class KwsAudioRouteManager {
     }
 
     public void release() {
+        if (pendingRouteNotify != null) {
+            main.removeCallbacks(pendingRouteNotify);
+            pendingRouteNotify = null;
+        }
         releaseCapture();
         unregisterObservers();
     }
@@ -290,26 +297,42 @@ public final class KwsAudioRouteManager {
     private void onDevicesChanged(String reason) {
         RouteKind before = activeKind;
         int beforeId = preferredInput != null ? preferredInput.getId() : -1;
-        releaseCapture();
+        // Ne pas appeler releaseCapture() ici — le thread KWS peut être dans AudioRecord.read().
+        // La libération SCO/mode se fait dans SherpaKwsEngine.closeMic() après routeChanged.
         refreshRouteKind();
         int afterId = preferredInput != null ? preferredInput.getId() : -1;
         boolean changed = before != activeKind || beforeId != afterId;
         Log.i(TAG, (changed ? "route changed" : "route ping")
                 + " (" + reason + ") " + before + " → " + activeKind
                 + " | " + describeRoute());
-        if (!changed) return;
-        try {
-            JSONObject f = new JSONObject();
-            f.put("reason", reason);
-            f.put("before", before.name());
-            f.put("after", activeKind.name());
-            f.put("route", describeRoute());
-            PegaseDiagLog.kws(app, "audio_route_changed", f);
-        } catch (Exception ignored) {}
-        RouteChangeListener l = routeChangeListener;
-        if (l != null) {
-            main.post(l::onAudioRouteChanged);
+        if (!changed) {
+            try {
+                JSONObject f = new JSONObject();
+                f.put("reason", reason);
+                f.put("route", describeRoute());
+                PegaseDiagLog.kws(app, "audio_route_ping", f);
+            } catch (Exception ignored) {}
+            return;
         }
+        if (pendingRouteNotify != null) {
+            main.removeCallbacks(pendingRouteNotify);
+        }
+        pendingRouteNotify = () -> {
+            pendingRouteNotify = null;
+            try {
+                JSONObject f = new JSONObject();
+                f.put("reason", reason);
+                f.put("before", before.name());
+                f.put("after", activeKind.name());
+                f.put("route", describeRoute());
+                PegaseDiagLog.kws(app, "audio_route_changed", f);
+            } catch (Exception ignored) {}
+            RouteChangeListener l = routeChangeListener;
+            if (l != null) {
+                l.onAudioRouteChanged();
+            }
+        };
+        main.postDelayed(pendingRouteNotify, ROUTE_NOTIFY_DEBOUNCE_MS);
     }
 
     private void refreshRouteKind() {

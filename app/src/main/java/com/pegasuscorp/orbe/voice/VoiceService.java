@@ -200,6 +200,9 @@ public class VoiceService extends Service {
                 if (!success) return;
                 main.post(() -> {
                     boolean wasListening = wantListening;
+                    if (wasListening) {
+                        KwsCrashGuard.onPlannedRestart(this);
+                    }
                     stopListening();
                     refreshWakeBackend();
                     // Pas de nm.notify — évite le spam / clignotement FGS
@@ -298,6 +301,12 @@ public class VoiceService extends Service {
         Log.i(TAG, "KWS audio route changed — restarting capture");
         diag("kws_route_changed", kwsRouteManager != null
                 ? kwsRouteManager.describeRoute() : "", null);
+        stopKwsPlanned();
+        scheduleListen(400);
+    }
+
+    /** Arrêt KWS volontaire (redémarrage prévu) — ne pas compter comme crash natif. */
+    private void stopKwsPlanned() {
         KwsCrashGuard.onPlannedRestart(this);
         listening = false;
         if (kwsEngine != null) {
@@ -306,7 +315,6 @@ public class VoiceService extends Service {
             } catch (Exception ignored) {}
         }
         releaseListenWakeLock();
-        scheduleListen(400);
     }
 
     private void onWakeDetected(String command) {
@@ -401,11 +409,7 @@ public class VoiceService extends Service {
             Log.w(TAG, "KWS dead ×5 — pause " + (KWS_RETRY_AFTER_FAIL_MS / 1000)
                     + "s puis nouvel essai KWS (pas de STT)");
             kwsRestartStreak = 0;
-            listening = false;
-            if (kwsEngine != null) {
-                try { kwsEngine.stop(); } catch (Exception ignored) {}
-            }
-            releaseListenWakeLock();
+            stopKwsPlanned();
             main.removeCallbacks(kwsHealthRunnable);
             main.postDelayed(() -> {
                 if (wantListening && useKws) scheduleListen(0);
@@ -414,12 +418,7 @@ public class VoiceService extends Service {
         }
         kwsRestartStreak++;
         Log.w(TAG, "KWS not running while wantListening — restart #" + kwsRestartStreak);
-        KwsCrashGuard.onPlannedRestart(this);
-        listening = false;
-        if (kwsEngine != null) {
-            try { kwsEngine.stop(); } catch (Exception ignored) {}
-        }
-        releaseListenWakeLock();
+        stopKwsPlanned();
         scheduleListen(2_500);
     }
 
