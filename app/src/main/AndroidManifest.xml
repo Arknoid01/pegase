@@ -132,7 +132,7 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@style/Theme.Orbe.Translucent" />
 
         <activity
             android:name=".SpotifyAuthActivity"

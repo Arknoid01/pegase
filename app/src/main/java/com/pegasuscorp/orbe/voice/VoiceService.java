@@ -375,6 +375,7 @@ public class VoiceService extends Service {
 
     private void notifyWake(String command) {
         int n = callbacks.beginBroadcast();
+        Log.i(TAG, "notifyWake callbacks=" + n + " cmd=" + (command == null ? "" : command));
         try {
             for (int i = 0; i < n; i++) {
                 try {
@@ -383,6 +384,24 @@ public class VoiceService extends Service {
             }
         } finally {
             callbacks.finishBroadcast();
+        }
+        // FGS peut démarrer l'activité même si le launcher n'est pas bindé.
+        launchInPlaceVoice(command);
+    }
+
+    private void launchInPlaceVoice(String command) {
+        try {
+            Intent i = new Intent(this, com.pegasuscorp.orbe.InPlaceVoiceActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_NO_ANIMATION
+                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+                    .putExtra("wake_activate", true)
+                    .putExtra("wake_command", command == null ? "" : command)
+                    .putExtra("wake_speaker_verified", false);
+            startActivity(i);
+            Log.i(TAG, "InPlaceVoiceActivity started from VoiceService");
+        } catch (Exception e) {
+            Log.e(TAG, "launchInPlaceVoice failed", e);
         }
     }
 

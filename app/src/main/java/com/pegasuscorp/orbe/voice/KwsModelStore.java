@@ -40,19 +40,20 @@ public final class KwsModelStore {
 
     /**
      * Lignes BPE (▁ = U+2581) + boost Sherpa {@code :score #threshold @id}.
-     * Modèle GigaSpeech EN — « Pégase » FR mal couvert sans boost agressif.
-     * Format : https://k2-fsa.github.io/sherpa/onnx/kws/index.html
+     * Chaque token doit exister dans tokens.txt — sinon Sherpa abort natif.
+     * Modèle GigaSpeech EN — « Pégase » FR : score haut + seuil bas.
      */
     static final String KEYWORDS_CONTENT =
-            "\u2581P E G AS E :3.5 #0.10 @PEGASE\n"
-                    + "\u2581P E G A Z :3.5 #0.10 @PEGAZ\n"
-                    + "\u2581P E G AS :3.0 #0.10 @PEGAS\n"
-                    + "\u2581P E G A S E :3.0 #0.10 @PEGASE_CHARS\n"
-                    + "\u2581P E G AS US :3.0 #0.10 @PEGASUS\n"
-                    + "\u2581HE Y \u2581P E G AS E :4.0 #0.08 @HEY_PEGASE\n"
-                    + "\u2581O K \u2581P E G AS E :3.5 #0.10 @OK_PEGASE\n"
-                    + "\u2581BO N J O UR \u2581P E G AS E :3.0 #0.10 @BONJOUR_PEGASE\n"
-                    + "\u2581HE Y \u2581P E G AS US :3.5 #0.10 @HEY_PEGASUS\n";
+            "\u2581P E G AS E :6.0 #0.05 @PEGASE\n"
+                    + "\u2581P E G A Z :6.0 #0.05 @PEGAZ\n"
+                    + "\u2581P E G AS :5.0 #0.05 @PEGAS\n"
+                    + "\u2581P E G A S E :5.0 #0.05 @PEGASE_CHARS\n"
+                    + "\u2581P E G A SE :5.5 #0.05 @PEGA_SE\n"
+                    + "\u2581P E G AS US :5.0 #0.05 @PEGASUS\n"
+                    + "\u2581HE Y \u2581P E G AS E :7.0 #0.04 @HEY_PEGASE\n"
+                    + "\u2581O K \u2581P E G AS E :6.0 #0.05 @OK_PEGASE\n"
+                    + "\u2581BO N J O UR \u2581P E G AS E :5.0 #0.05 @BONJOUR_PEGASE\n"
+                    + "\u2581HE Y \u2581P E G AS US :6.0 #0.05 @HEY_PEGASUS\n";
 
     private KwsModelStore() {}
 

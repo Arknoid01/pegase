@@ -37,9 +37,9 @@ public final class SherpaKwsEngine {
     private static final String TAG = "SherpaKws";
     private static final int SAMPLE_RATE = 16_000;
     private static final float INTERVAL_SEC = 0.1f;
-    /** Seuil Sherpa — bas : modèle EN vs « Pégase » FR. */
-    private static final float KEYWORDS_THRESHOLD = 0.10f;
-    private static final float KEYWORDS_SCORE = 2.0f;
+    /** Seuil Sherpa — très bas : modèle EN vs « Pégase » FR. */
+    private static final float KEYWORDS_THRESHOLD = 0.05f;
+    private static final float KEYWORDS_SCORE = 4.0f;
     /** ~2 s entre deux logs probe (100 ms × 20). */
     private static final int PROBE_EVERY_READS = 20;
 
@@ -125,8 +125,8 @@ public final class SherpaKwsEngine {
                     .setKeywordsFile(kw.getAbsolutePath())
                     .setKeywordsScore(KEYWORDS_SCORE)
                     .setKeywordsThreshold(KEYWORDS_THRESHOLD)
-                    .setMaxActivePaths(8)
-                    .setNumTrailingBlanks(2)
+                    .setMaxActivePaths(16)
+                    .setNumTrailingBlanks(1)
                     .build();
             Log.i(TAG, "creating KeywordSpotter enc=" + enc.getName()
                     + " size=" + enc.length()

@@ -11,9 +11,6 @@ import android.os.Looper;
 import android.os.RemoteException;
 import android.util.Log;
 
-import com.pegasuscorp.orbe.InPlaceVoiceActivity;
-import com.pegasuscorp.orbe.MainActivity;
-
 /**
  * Client launcher → {@link VoiceService} ({@code :voice}).
  * Binding paresseux : pas de bind au boot, seulement au premier besoin.
@@ -258,18 +255,9 @@ public final class VoiceWakeClient {
         }
     }
 
-    /** Wake in-place (v3) — overlay vocal sans ramener HOME. */
+    /** Wake reçu via binder — l'activité est lancée par {@link VoiceService} (FGS). */
     private void handleWakeOnLauncher(String command) {
         wantListen = false;
-        Context ctx = app;
-        if (ctx == null) return;
-        Intent i = new Intent(ctx, InPlaceVoiceActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_NO_ANIMATION
-                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-                .putExtra("wake_activate", true)
-                .putExtra("wake_command", command == null ? "" : command)
-                .putExtra("wake_speaker_verified", false);
-        ctx.startActivity(i);
+        Log.i(TAG, "wake relayed to launcher cmd=" + (command == null ? "" : command));
     }
 }
