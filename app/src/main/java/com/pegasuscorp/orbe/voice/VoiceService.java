@@ -26,6 +26,10 @@ import android.util.Log;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 
+import com.pegasuscorp.orbe.diag.PegaseDiagLog;
+
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 
 /**
@@ -188,6 +192,7 @@ public class VoiceService extends Service {
         KwsCrashGuard.bumpConfigGeneration(this, 5);
         if (KwsCrashGuard.shouldDisableKws(this)) {
             Log.e(TAG, "KWS disabled (crash loop) — pas de STT duty-cycle (évite kill micro)");
+            diag("wake_backend_disabled", "crash_guard", null);
             destroyRecognizer();
             refreshForegroundNotification();
             return;
@@ -235,6 +240,9 @@ public class VoiceService extends Service {
                 if (!success) return;
                 main.post(() -> {
                     boolean wasListening = wantListening;
+                    if (wasListening) {
+                        KwsCrashGuard.onPlannedRestart(this);
+                    }
                     stopListening();
                     refreshWakeBackend();
                     // Pas de nm.notify — évite le spam / clignotement FGS
@@ -331,6 +339,14 @@ public class VoiceService extends Service {
     private void onKwsAudioRouteChanged() {
         if (!wantListening || !useKws) return;
         Log.i(TAG, "KWS audio route changed — restarting capture");
+        diag("kws_route_changed", kwsRouteManager != null
+                ? kwsRouteManager.describeRoute() : "", null);
+        stopKwsPlanned();
+        scheduleListen(400);
+    }
+
+    /** Arrêt KWS volontaire (redémarrage prévu) — ne pas compter comme crash natif. */
+    private void stopKwsPlanned() {
         KwsCrashGuard.onPlannedRestart(this);
         listening = false;
         if (kwsEngine != null) {
@@ -339,7 +355,6 @@ public class VoiceService extends Service {
             } catch (Exception ignored) {}
         }
         releaseListenWakeLock();
-        scheduleListen(400);
     }
 
     private void onWakeDetected(String command) {
@@ -352,6 +367,7 @@ public class VoiceService extends Service {
         kwsRestartStreak = 0;
         sttBackoffStep = 0;
         wantListening = false;
+        diag("kws_wake_detected", null, command);
         stopListening();
         String cmd = command == null ? "" : command.trim();
         notifyWake(cmd);
@@ -434,11 +450,7 @@ public class VoiceService extends Service {
             Log.w(TAG, "KWS dead ×5 — pause " + (KWS_RETRY_AFTER_FAIL_MS / 1000)
                     + "s puis nouvel essai KWS (pas de STT)");
             kwsRestartStreak = 0;
-            listening = false;
-            if (kwsEngine != null) {
-                try { kwsEngine.stop(); } catch (Exception ignored) {}
-            }
-            releaseListenWakeLock();
+            stopKwsPlanned();
             main.removeCallbacks(kwsHealthRunnable);
             main.postDelayed(() -> {
                 if (wantListening && useKws) scheduleListen(0);
@@ -447,12 +459,7 @@ public class VoiceService extends Service {
         }
         kwsRestartStreak++;
         Log.w(TAG, "KWS not running while wantListening — restart #" + kwsRestartStreak);
-        KwsCrashGuard.onPlannedRestart(this);
-        listening = false;
-        if (kwsEngine != null) {
-            try { kwsEngine.stop(); } catch (Exception ignored) {}
-        }
-        releaseListenWakeLock();
+        stopKwsPlanned();
         scheduleListen(2_500);
     }
 
@@ -500,6 +507,7 @@ public class VoiceService extends Service {
         if (kwsEngine == null || !kwsEngine.isReady()) {
             Log.w(TAG, "KWS not ready — retry in 5s (model=" + KwsModelStore.isModelReady(this)
                     + " crashGuard=" + KwsCrashGuard.shouldDisableKws(this) + ")");
+            diag("kws_not_ready", null, null);
             refreshForegroundNotification();
             scheduleListen(5_000);
             return;
@@ -517,6 +525,8 @@ public class VoiceService extends Service {
         listening = true;
         acquireListenWakeLock();
         lastKwsStartMs = System.currentTimeMillis();
+        diag("kws_listen_start", kwsRouteManager != null
+                ? kwsRouteManager.describeRoute() : "", null);
         kwsEngine.start();
         main.removeCallbacks(kwsHealthRunnable);
         main.postDelayed(kwsHealthRunnable, KWS_HEALTH_FIRST_MS);
@@ -564,6 +574,7 @@ public class VoiceService extends Service {
 
     private void stopListening() {
         listening = false;
+        diag("kws_listen_stop", null, null);
         clearIdleHandler();
         main.removeCallbacks(listenRunnable);
         main.removeCallbacks(forceIdleListenRunnable);
@@ -705,6 +716,18 @@ public class VoiceService extends Service {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
         }
+    }
+
+    private void diag(String event, String route, String command) {
+        try {
+            JSONObject f = new JSONObject();
+            f.put("want_listening", wantListening);
+            f.put("use_kws", useKws);
+            f.put("listening", listening);
+            if (route != null) f.put("route", route);
+            if (command != null) f.put("command", command);
+            PegaseDiagLog.kws(this, event, f);
+        } catch (Exception ignored) {}
     }
 
     public static Intent bindIntent(Context ctx) {

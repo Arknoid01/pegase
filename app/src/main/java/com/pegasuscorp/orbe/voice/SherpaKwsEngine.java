@@ -56,6 +56,8 @@ public final class SherpaKwsEngine {
     private volatile boolean running;
     private volatile boolean nativeBroken;
     private volatile boolean routeChanged;
+    /** prepareCapture / releaseCapture ne doivent s'exécuter que depuis le thread KWS. */
+    private final Object captureLock = new Object();
     private int readCount;
 
     public SherpaKwsEngine(Context context, Listener listener) {
@@ -167,7 +169,9 @@ public final class SherpaKwsEngine {
 
     public void stop() {
         wantRun = false;
-        routeChanged = true;
+        if (!routeChanged) {
+            routeChanged = true;
+        }
         Thread t = thread;
         if (t != null) {
             try {
@@ -294,8 +298,11 @@ public final class SherpaKwsEngine {
         } catch (UnsatisfiedLinkError e) {
             nativeBroken = true;
             Log.e(TAG, "native in loop", e);
+            KwsDiagnostics.logLoopError(routeDescription(), "native", e.getMessage());
         } catch (Throwable e) {
             Log.e(TAG, "loop error", e);
+            KwsDiagnostics.logLoopError(routeDescription(), e.getClass().getSimpleName(),
+                    e.getMessage());
         } finally {
             closeMic();
             if (stream != null) {
@@ -307,48 +314,52 @@ public final class SherpaKwsEngine {
     }
 
     private boolean openMic() {
-        if (routeManager != null && !routeManager.prepareCapture()) {
-            Log.w(TAG, "prepareCapture failed — fallback micro téléphone");
-            routeManager.forcePhoneBuiltin();
+        synchronized (captureLock) {
+            if (routeManager != null && !routeManager.prepareCapture()) {
+                Log.w(TAG, "prepareCapture failed — fallback micro téléphone");
+                routeManager.forcePhoneBuiltin();
+            }
+            int source = routeManager != null
+                    ? routeManager.getAudioSource()
+                    : android.media.MediaRecorder.AudioSource.MIC;
+            int min = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT);
+            if (min <= 0) return false;
+            audioRecord = new AudioRecord(
+                    source,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    Math.max(min * 2, SAMPLE_RATE / 5));
+            if (routeManager != null) {
+                routeManager.applyPreferredDevice(audioRecord);
+            }
+            boolean ok = audioRecord.getState() == AudioRecord.STATE_INITIALIZED;
+            if (ok) {
+                Log.i(TAG, "mic open " + routeDescription());
+            } else {
+                Log.e(TAG, "AudioRecord not initialized source=" + source);
+            }
+            return ok;
         }
-        int source = routeManager != null
-                ? routeManager.getAudioSource()
-                : android.media.MediaRecorder.AudioSource.MIC;
-        int min = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT);
-        if (min <= 0) return false;
-        audioRecord = new AudioRecord(
-                source,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                Math.max(min * 2, SAMPLE_RATE / 5));
-        if (routeManager != null) {
-            routeManager.applyPreferredDevice(audioRecord);
-        }
-        boolean ok = audioRecord.getState() == AudioRecord.STATE_INITIALIZED;
-        if (ok) {
-            Log.i(TAG, "mic open " + routeDescription());
-        } else {
-            Log.e(TAG, "AudioRecord not initialized source=" + source);
-        }
-        return ok;
     }
 
     private void closeMic() {
-        if (audioRecord != null) {
-            try {
-                audioRecord.stop();
-            } catch (Exception ignored) {}
-            try {
-                audioRecord.release();
-            } catch (Exception ignored) {}
-            audioRecord = null;
-        }
-        if (routeManager != null) {
-            routeManager.releaseCapture();
+        synchronized (captureLock) {
+            if (audioRecord != null) {
+                try {
+                    audioRecord.stop();
+                } catch (Exception ignored) {}
+                try {
+                    audioRecord.release();
+                } catch (Exception ignored) {}
+                audioRecord = null;
+            }
+            if (routeManager != null) {
+                routeManager.releaseCapture();
+            }
         }
     }
 
