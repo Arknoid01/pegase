@@ -80,6 +80,35 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void init_defersChannelChange_whileTurnInFlight() {
+        session.init(new SessionContext(Channel.VOICE, false));
+        backend.deferSend = true;
+        backend.nextReply = "ok voix";
+
+        session.send("Dis bonjour", new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {}
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        });
+
+        assertEquals(Channel.VOICE, session.getChannel());
+        session.init(new SessionContext(Channel.COPILOT, false));
+        // Canal du tour courant inchangé ; COPILOT en attente.
+        assertEquals(Channel.VOICE, session.getChannel());
+
+        backend.flushDeferredSend();
+        drainMainThread();
+        assertEquals(Channel.COPILOT, session.getChannel());
+    }
+
+    @Test
     public void send_toolJson_dispatchesOnToolResult() {
         backend.nextReply = "{\"tool\":\"stub\",\"params\":{}}";
         AtomicReference<ToolResult> toolOut = new AtomicReference<>();

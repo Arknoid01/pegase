@@ -3,11 +3,15 @@ package com.pegasuscorp.orbe.voice;
 import android.content.Context;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Modèle Sherpa-onnx keyword spotting (GigaSpeech 3.3M fp32) pour le wake « Pégase ».
@@ -40,20 +44,23 @@ public final class KwsModelStore {
 
     /**
      * Lignes BPE (▁ = U+2581) + boost Sherpa {@code :score #threshold @id}.
-     * Chaque token doit exister dans tokens.txt — sinon Sherpa abort natif.
-     * Modèle GigaSpeech EN — « Pégase » FR : score haut + seuil bas.
+     * Alias courts gardés pour le rappel FR (modèle EN) — filtrés ensuite par
+     * gate RMS + anti-poche côté {@link SherpaKwsEngine}.
+     * Validé à l'écriture via {@link #ensureKeywords}.
      */
     static final String KEYWORDS_CONTENT =
-            "\u2581P E G AS E :6.0 #0.05 @PEGASE\n"
-                    + "\u2581P E G A Z :6.0 #0.05 @PEGAZ\n"
-                    + "\u2581P E G AS :5.0 #0.05 @PEGAS\n"
-                    + "\u2581P E G A S E :5.0 #0.05 @PEGASE_CHARS\n"
-                    + "\u2581P E G A SE :5.5 #0.05 @PEGA_SE\n"
-                    + "\u2581P E G AS US :5.0 #0.05 @PEGASUS\n"
-                    + "\u2581HE Y \u2581P E G AS E :7.0 #0.04 @HEY_PEGASE\n"
-                    + "\u2581O K \u2581P E G AS E :6.0 #0.05 @OK_PEGASE\n"
-                    + "\u2581BO N J O UR \u2581P E G AS E :5.0 #0.05 @BONJOUR_PEGASE\n"
-                    + "\u2581HE Y \u2581P E G AS US :6.0 #0.05 @HEY_PEGASUS\n";
+            "\u2581P E G AS E :7.0 #0.04 @PEGASE\n"
+                    + "\u2581P E G A Z E :7.0 #0.04 @PEGAZE\n"
+                    + "\u2581P E G A Z :6.5 #0.05 @PEGAZ\n"
+                    + "\u2581P E G AS :6.0 #0.05 @PEGAS\n"
+                    + "\u2581P E G A S E :6.0 #0.04 @PEGASE_CHARS\n"
+                    + "\u2581P E G A SE :6.5 #0.04 @PEGA_SE\n"
+                    + "\u2581P E G AS US :6.0 #0.05 @PEGASUS\n"
+                    // Composés plus stricts : évite un HIT « HEY_PEGASE » collé sur une discussion.
+                    + "\u2581HE Y \u2581P E G AS E :6.0 #0.10 @HEY_PEGASE\n"
+                    + "\u2581O K \u2581P E G AS E :5.5 #0.10 @OK_PEGASE\n"
+                    + "\u2581BO N J O UR \u2581P E G AS E :5.5 #0.12 @BONJOUR_PEGASE\n"
+                    + "\u2581HE Y \u2581P E G AS US :6.0 #0.10 @HEY_PEGASUS\n";
 
     private KwsModelStore() {}
 
@@ -152,18 +159,89 @@ public final class KwsModelStore {
                 : "Wake local Sherpa non installé (~17 Mo)";
     }
 
+    /**
+     * Filtre les lignes dont chaque pièce BPE existe dans tokens.txt.
+     * Évite l'abort natif Sherpa (ex. ▁PE inexistant).
+     */
+    static String filterValidKeywordLines(String content, Set<String> vocab) {
+        if (content == null || content.isEmpty()) return "";
+        if (vocab == null || vocab.isEmpty()) return content;
+        StringBuilder out = new StringBuilder();
+        int kept = 0;
+        int dropped = 0;
+        for (String raw : content.split("\n", -1)) {
+            String line = raw.trim();
+            if (line.isEmpty()) continue;
+            String missing = firstMissingToken(line, vocab);
+            if (missing != null) {
+                dropped++;
+                logSafe("keywords line dropped — missing token \"" + missing + "\": " + line);
+                continue;
+            }
+            out.append(line).append('\n');
+            kept++;
+        }
+        logSafe("keywords validated kept=" + kept + " dropped=" + dropped);
+        return out.toString();
+    }
+
+    /** JVM unit tests n'ont pas android.util.Log mocké. */
+    private static void logSafe(String msg) {
+        try {
+            Log.w(TAG, msg);
+        } catch (RuntimeException ignored) {}
+    }
+
+    /** @return premier token absent, ou null si la ligne est valide. */
+    static String firstMissingToken(String line, Set<String> vocab) {
+        if (line == null || vocab == null) return "null";
+        for (String piece : line.trim().split("\\s+")) {
+            if (piece.isEmpty()) continue;
+            char c0 = piece.charAt(0);
+            if (c0 == ':' || c0 == '#' || c0 == '@') break;
+            if (!vocab.contains(piece)) return piece;
+        }
+        return null;
+    }
+
+    static Set<String> loadTokenVocab(Context context) {
+        Set<String> vocab = new HashSet<>();
+        File f = tokensFile(context);
+        if (!f.isFile()) return vocab;
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+                int sp = line.indexOf(' ');
+                String tok = sp > 0 ? line.substring(0, sp) : line;
+                if (!tok.isEmpty()) vocab.add(tok);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "loadTokenVocab failed", e);
+        }
+        return vocab;
+    }
+
     static void writeKeywords(Context context) throws Exception {
+        Set<String> vocab = loadTokenVocab(context);
+        String filtered = filterValidKeywordLines(KEYWORDS_CONTENT, vocab);
+        if (filtered.isEmpty()) {
+            throw new IllegalStateException("no valid keyword lines after tokens.txt filter");
+        }
         File f = keywordsFile(context);
         File parent = f.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
+        byte[] bytes = filtered.getBytes(StandardCharsets.UTF_8);
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
-            out.write(KEYWORDS_CONTENT.getBytes(StandardCharsets.UTF_8));
+            out.write(bytes);
         }
-        Log.i(TAG, "keywords written bytes=" + KEYWORDS_CONTENT.length()
+        Log.i(TAG, "keywords written bytes=" + bytes.length
                 + " path=" + f.getAbsolutePath());
     }
 
-    /** Réécrit keywords.txt à chaque start KWS (boosts / variantes à jour). */
+    /** Réécrit keywords.txt à chaque start KWS (boosts / variantes à jour + validation). */
     public static void ensureKeywords(Context context) {
         try {
             writeKeywords(context);

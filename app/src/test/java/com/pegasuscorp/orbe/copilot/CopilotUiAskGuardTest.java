@@ -12,8 +12,23 @@ public class CopilotUiAskGuardTest {
                 "Peux-tu me donner l'identifiant de la vue qui contient le texte ?"));
         assertTrue(CopilotUiAskGuard.asksForTechnicalViewId(
                 "Il me faut le view_id de l'élément."));
+        assertTrue(CopilotUiAskGuard.asksForTechnicalViewId(
+                "Il me faut l'id de l'élément à cliquer."));
         assertTrue(CopilotUiAskGuard.asksForTechnicalViewId("android:id/text1"));
         assertFalse(CopilotUiAskGuard.asksForTechnicalViewId("Clic envoyé sur Astronomie."));
+    }
+
+    @Test
+    public void replaceTechnicalViewIdAsk_usesToolFallback() {
+        assertEquals("Clic envoyé sur Astronomie.",
+                CopilotUiAskGuard.replaceTechnicalViewIdAsk(
+                        "Donne-moi l'identifiant de la vue.",
+                        "Clic envoyé sur Astronomie."));
+        assertEquals("C'est fait.",
+                CopilotUiAskGuard.replaceTechnicalViewIdAsk(
+                        "Il me faut le view_id.", ""));
+        assertEquals("OK",
+                CopilotUiAskGuard.replaceTechnicalViewIdAsk("OK", "fallback"));
     }
 
     @Test

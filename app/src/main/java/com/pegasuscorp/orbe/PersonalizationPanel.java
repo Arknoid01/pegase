@@ -391,9 +391,40 @@ public class PersonalizationPanel extends FrameLayout {
         });
 
         body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Wake local (Sherpa)"));
+        body.addView(addSubHeading(context, "Wake openWakeWord"));
         body.addView(hintLabel(context,
-                "Remplace la boucle STT par un mot d'éveil on-device (~15 Mo). "
+                "Enregistre « Hey Pégase » sur le micro du téléphone, entraîne sur PC, "
+                        + "importe hey_pegase.onnx. Prioritaire sur Sherpa si le modèle est prêt. "
+                        + "Seuil actuel : "
+                        + String.format(java.util.Locale.US, "%.2f",
+                        com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context))
+                        + " (plus haut = moins de faux positifs)."));
+        TextView owwStatus = new TextView(context);
+        owwStatus.setTextColor(Color.parseColor("#88FFFFFF"));
+        owwStatus.setTextSize(12);
+        owwStatus.setText(com.pegasuscorp.orbe.voice.WakeOwwStore.statusLabel(context));
+        body.addView(owwStatus, wrapLp());
+        addActionRow("Seuil OWW plus strict (0,92)", () -> {
+            com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.92f);
+            android.widget.Toast.makeText(context, "Seuil wake → 0,92",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            PegaseWakeService.sync(context);
+        });
+        addActionRow("Seuil OWW normal (0,88)", () -> {
+            com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.88f);
+            android.widget.Toast.makeText(context, "Seuil wake → 0,88",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            PegaseWakeService.sync(context);
+        });
+        addActionRow("Enregistrer mon wake word", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(),
+                                com.pegasuscorp.orbe.WakeWordRecordActivity.class)));
+
+        body.addView(spacer(context, (int) (12 * density)));
+        body.addView(addSubHeading(context, "Wake local (Sherpa — filet)"));
+        body.addView(hintLabel(context,
+                "Filet si openWakeWord n'est pas encore installé (~15 Mo). "
                         + "Téléchargement auto au premier démarrage de :voice."));
         TextView kwsStatus = new TextView(context);
         kwsStatus.setTextColor(Color.parseColor("#88FFFFFF"));

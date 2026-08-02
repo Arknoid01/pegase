@@ -67,8 +67,11 @@ public final class CopilotScreenContext {
         sb.append("Pour cliquer / expliquer / chercher : appelle ui_action, ui_explain ou ")
                 .append("ui_search avec target = un libellé visible ci-dessus ")
                 .append("(ex. Astronomie et espace). Le matching est local sur l'appareil. ")
+                .append("INTERDIT de demander view_id, identifiant de vue, resource name ")
+                .append("ou tout id technique — même après un outil. ")
                 .append("Si hésitation, réessaie avec un autre libellé — ")
-                .append("n'interroge pas l'utilisateur, agis.\n");
+                .append("n'interroge pas l'utilisateur, agis. ")
+                .append("Après un ui_* réussi, confirme brièvement le résultat, sans question.\n");
         return sb.toString();
     }
 

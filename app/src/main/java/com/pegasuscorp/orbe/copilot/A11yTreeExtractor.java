@@ -130,22 +130,26 @@ public final class A11yTreeExtractor {
         String combined = "";
         if (text != null && text.length() > 0) combined = text.toString().trim();
         else if (desc != null && desc.length() > 0) combined = desc.toString().trim();
+        String viewId = node.getViewIdResourceName();
         if (combined.isEmpty()) {
-            String viewIdOnly = node.getViewIdResourceName();
-            if (viewIdOnly == null || viewIdOnly.isEmpty()) return;
-            combined = "";
+            // Icônes sans libellé a11y : garder le nœud via viewId (sinon invisible au LLM).
+            if (viewId == null || viewId.isEmpty()) return;
+            if (!worthIconViewIdFallback(node, viewId)) return;
+            combined = "[icône: " + shortResourceName(viewId) + "]";
         }
         if (combined.length() > MAX_TEXT_LEN) {
             combined = combined.substring(0, MAX_TEXT_LEN) + "…";
         }
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);
-        JSONObject o = new JSONObject();
-        if (!combined.isEmpty()) {
-            o.put("text", combined);
+        // Conteneurs plein écran sans texte utile : bruit.
+        if (combined.startsWith("[icône:") && bounds.width() > 0 && bounds.height() > 0
+                && bounds.width() * bounds.height() > 900_000) {
+            return;
         }
+        JSONObject o = new JSONObject();
+        o.put("text", combined);
         o.put("class", node.getClassName() != null ? node.getClassName().toString() : "");
-        String viewId = node.getViewIdResourceName();
         if (viewId != null && !viewId.isEmpty()) {
             o.put("viewId", viewId);
         }
@@ -155,6 +159,37 @@ public final class A11yTreeExtractor {
         o.put("right", bounds.right);
         o.put("bottom", bounds.bottom);
         out.put(o);
+    }
+
+    /**
+     * Repli viewId uniquement pour cibles actionnables / type icône —
+     * pas pour chaque LinearLayout nommé « container ».
+     */
+    static boolean worthIconViewIdFallback(AccessibilityNodeInfo node, String viewId) {
+        if (node == null) return false;
+        if (node.isClickable() || node.isLongClickable() || node.isCheckable()) return true;
+        String cls = node.getClassName() != null ? node.getClassName().toString() : "";
+        String c = cls.toLowerCase(java.util.Locale.ROOT);
+        if (c.contains("imagebutton") || c.contains("imageview") || c.contains("floatingaction")
+                || c.contains("button") || c.contains("checkbox") || c.contains("switch")
+                || c.contains("radiobutton") || c.contains("toolbar") || c.contains("menuitem")) {
+            return true;
+        }
+        String id = shortResourceName(viewId).toLowerCase(java.util.Locale.ROOT);
+        return id.contains("btn") || id.contains("button") || id.contains("icon")
+                || id.contains("fab") || id.contains("mic") || id.contains("search")
+                || id.contains("add") || id.contains("close") || id.contains("back")
+                || id.contains("menu") || id.contains("more") || id.contains("send")
+                || id.contains("play") || id.contains("pause") || id.contains("camera")
+                || id.contains("nav") || id.contains("tab") || id.contains("action");
+    }
+
+    /** {@code com.app:id/mic_button} → {@code mic_button}. */
+    static String shortResourceName(String viewId) {
+        if (viewId == null || viewId.isEmpty()) return "";
+        int slash = viewId.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < viewId.length()) return viewId.substring(slash + 1);
+        return viewId;
     }
 
     private static File snapshotDir(android.content.Context ctx) {

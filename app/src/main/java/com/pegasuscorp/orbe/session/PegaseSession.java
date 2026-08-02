@@ -77,6 +77,12 @@ public class PegaseSession {
     private final CopyOnWriteArrayList<SessionObserver> observers = new CopyOnWriteArrayList<>();
 
     private SessionContext sessionContext = new SessionContext(Channel.TEXT, false);
+    /** init() d'un autre canal pendant un tour — appliqué à {@link #endTurn()}. */
+    private SessionContext pendingSessionContext;
+    /** True entre le début de {@link #send} et la fin du tour (réponse / erreur). */
+    private boolean turnInFlight;
+    /** Canal figé pour le tour en cours (ignore les init() concurrents). */
+    private Channel turnChannel;
 
     /** Contexte du tour en cours — boucle agentique après tool_calls natif. */
     private LlmReply pendingAssistantToolReply;
@@ -131,10 +137,47 @@ public class PegaseSession {
         }
     }
 
-    public void init(SessionContext ctx) {
-        if (ctx != null) {
-            sessionContext = ctx;
+    /**
+     * Configure le canal pour le prochain tour. Si un tour est en vol et que le canal
+     * change (voix ↔ copilote ↔ texte…), le contexte est mis en attente pour ne pas
+     * écraser les options / outils du tour courant.
+     */
+    public synchronized void init(SessionContext ctx) {
+        if (ctx == null) return;
+        if (turnInFlight && sessionContext != null
+                && sessionContext.channel != ctx.channel) {
+            pendingSessionContext = ctx;
+            Trace.error("session", "init deferred channel=" + ctx.channel
+                    + " (busy " + sessionContext.channel + ")");
+            return;
         }
+        sessionContext = ctx;
+        if (pendingSessionContext != null
+                && pendingSessionContext.channel == ctx.channel) {
+            pendingSessionContext = null;
+        }
+    }
+
+    private void beginTurn() {
+        turnInFlight = true;
+        turnChannel = sessionContext.channel;
+    }
+
+    /** Fin de tour — applique un {@link #init} différé s'il y en a un. */
+    private synchronized void endTurn() {
+        if (!turnInFlight) return;
+        turnInFlight = false;
+        turnChannel = null;
+        if (pendingSessionContext != null) {
+            sessionContext = pendingSessionContext;
+            pendingSessionContext = null;
+            Trace.error("session", "applied deferred init channel=" + sessionContext.channel);
+        }
+    }
+
+    private Channel effectiveChannel() {
+        Channel locked = turnChannel;
+        return locked != null ? locked : sessionContext.channel;
     }
 
     public void addObserver(SessionObserver obs) {
@@ -209,6 +252,7 @@ public class PegaseSession {
         }
 
         clearAgenticState();
+        beginTurn();
         activeRequestId = nextRequestId++;
         String userVisible = displayText != null ? displayText : payload;
         beginTurnReasoning(userVisible);
@@ -232,6 +276,12 @@ public class PegaseSession {
 
         // Batterie / heure / date → device local (évite prose LLM après un device({}) raté)
         if (tryDeviceLocalShortCircuit(conv, userVisible, obs)) {
+            return;
+        }
+
+        // « ouvre Cursor » (raccourci web / app) → open_app local, jamais le LLM
+        // qui invente « ça tourne déjà » sans relancer.
+        if (tryOpenAppLocalShortCircuit(conv, userVisible, obs)) {
             return;
         }
 
@@ -618,7 +668,7 @@ public class PegaseSession {
     }
 
     public Channel getChannel() {
-        return sessionContext.channel;
+        return effectiveChannel();
     }
 
     private void deliverBureauMarkdown(BureauMarkdownBrain.Callback callback, String document,
@@ -762,6 +812,32 @@ public class PegaseSession {
      * Court-circuit diag local : réponse honnête depuis la trace, ou lancement de l'outil.
      * Évite que le LLM invente « j'ai essayé mais quota dépassé ».
      */
+    private boolean tryOpenAppLocalShortCircuit(ConversationManager conv, String userText,
+            SessionObserver obs) {
+        if (userText == null || userText.trim().isEmpty()) return false;
+        com.pegasuscorp.orbe.voice.IntentParser.Command cmd =
+                new com.pegasuscorp.orbe.voice.LocalKeywordParser(appContext).parse(userText);
+        if (cmd == null
+                || cmd.action != com.pegasuscorp.orbe.voice.IntentParser.Action.OPEN_APP) {
+            return false;
+        }
+        String name = cmd.argument != null ? cmd.argument.trim() : "";
+        if (name.isEmpty()) return false;
+        if (!allowToolExecution(obs)) {
+            conv.addUserMessage(userText.trim());
+            conv.recordToolReply(LockSessionPolicy.UNLOCK_TOOL_MESSAGE);
+            notifyToolBlocked(obs);
+            return true;
+        }
+        try {
+            JSONObject params = new JSONObject().put("name", name);
+            executeToolInternal("open_app", params, userText.trim(), obs, true);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private boolean tryDeviceLocalShortCircuit(ConversationManager conv, String userText,
             SessionObserver obs) {
         if (userText == null || userText.trim().isEmpty()) return false;
@@ -981,7 +1057,7 @@ public class PegaseSession {
     }
 
     private ChatSendOptions buildSendOptions(String userMessage) {
-        Channel channel = sessionContext.channel;
+        Channel channel = effectiveChannel();
         ContextIntent intent = currentTurnIntent;
         if (intent == null) {
             intent = ContextAnalyzer.analyze(appContext, userMessage);
@@ -998,7 +1074,8 @@ public class PegaseSession {
     }
 
     private boolean useNativeFunctionCalling() {
-        if (sessionContext.channel != Channel.TEXT && sessionContext.channel != Channel.VOICE) {
+        Channel channel = effectiveChannel();
+        if (channel != Channel.TEXT && channel != Channel.VOICE) {
             return false;
         }
         return CloudModelStore.supportsNativeFunctionCalling(appContext);
@@ -1240,6 +1317,27 @@ public class PegaseSession {
                     conv.getLastUserText());
             notifyError(obs, "Je n'ai pas pu exécuter l'outil — le format était incorrect.");
             return;
+        }
+        String lastUser = conv != null ? conv.getLastUserText() : "";
+        if (com.pegasuscorp.orbe.copilot.OpenClaimGuard.claimsAlreadyOpen(text)
+                && com.pegasuscorp.orbe.copilot.OpenClaimGuard.looksLikeOpenRequest(lastUser)
+                && allowToolExecution(obs)) {
+            com.pegasuscorp.orbe.voice.IntentParser.Command reopen =
+                    new com.pegasuscorp.orbe.voice.LocalKeywordParser(appContext).parse(lastUser);
+            if (reopen != null
+                    && reopen.action == com.pegasuscorp.orbe.voice.IntentParser.Action.OPEN_APP
+                    && reopen.argument != null && !reopen.argument.trim().isEmpty()) {
+                try {
+                    Trace.error("agentic", "re-open after already-open claim (non-agentic)");
+                    executeToolInternal("open_app",
+                            new JSONObject().put("name", reopen.argument.trim()),
+                            null, obs, true);
+                    return;
+                } catch (Exception ignored) {
+                }
+            }
+            text = com.pegasuscorp.orbe.copilot.OpenClaimGuard
+                    .replaceAlreadyOpenClaim(text, "");
         }
         // Carte avant notify : l'UI refresh Discussion dans onReply et doit déjà trouver la carte.
         markTurnLlmSynthesis(conv);
@@ -1494,13 +1592,13 @@ public class PegaseSession {
                 allowMoreTools,
                 activeAgenticOptions != null
                         ? activeAgenticOptions.channel
-                        : sessionContext.channel);
+                        : effectiveChannel());
         if (activeAgenticOptions != null && activeAgenticOptions.intentName != null) {
             stepOpts = stepOpts.withIntentName(activeAgenticOptions.intentName);
         }
         Channel channel = activeAgenticOptions != null
                 ? activeAgenticOptions.channel
-                : sessionContext.channel;
+                : effectiveChannel();
         if (channel == Channel.VOICE) {
             stepOpts = stepOpts.withVoiceTokenBudget(appContext);
         }
@@ -1632,24 +1730,30 @@ public class PegaseSession {
                         activeAgenticChain, call);
                 Trace.agenticBlocked(activeRequestId, call.name, block.name(),
                         eval.toolStepCount, eval.sameToolSameArgsCount);
-                // brief déjà joué (ex. brief({}) vide après « plus de détail ») → prose cache, pas de 2e outil
-                if (activeAgenticChain != null && activeAgenticChain.usedTool("brief")
-                        && "brief".equalsIgnoreCase(call.name)) {
-                    String detail = BriefTool.composeBriefDetail(appContext);
-                    if (detail == null || detail.trim().isEmpty()) {
-                        detail = activeAgenticChain.lastToolDisplayText();
+                boolean reopenApp = "open_app".equalsIgnoreCase(call.name)
+                        && (block == AgenticTurnPolicy.BlockReason.DUPLICATE_TOOL_ARGS
+                        || block == AgenticTurnPolicy.BlockReason.TOOL_ALREADY_USED);
+                if (!reopenApp) {
+                    // brief déjà joué → prose cache, pas de 2e outil
+                    if (activeAgenticChain != null && activeAgenticChain.usedTool("brief")
+                            && "brief".equalsIgnoreCase(call.name)) {
+                        String detail = BriefTool.composeBriefDetail(appContext);
+                        if (detail == null || detail.trim().isEmpty()) {
+                            detail = activeAgenticChain.lastToolDisplayText();
+                        }
+                        finalizeAgentic(conv, obs, detail);
+                        return;
                     }
-                    finalizeAgentic(conv, obs, detail);
+                    // orion_manager({}) répété → statut déjà obtenu
+                    if (activeAgenticChain != null && activeAgenticChain.usedTool("orion_manager")
+                            && "orion_manager".equalsIgnoreCase(call.name)) {
+                        finalizeAgentic(conv, obs, activeAgenticChain.lastToolDisplayText());
+                        return;
+                    }
+                    runAgenticStep(conv, obs, false);
                     return;
                 }
-                // orion_manager({}) répété → finaliser avec le statut déjà obtenu, pas de nouvel appel LLM
-                if (activeAgenticChain != null && activeAgenticChain.usedTool("orion_manager")
-                        && "orion_manager".equalsIgnoreCase(call.name)) {
-                    finalizeAgentic(conv, obs, activeAgenticChain.lastToolDisplayText());
-                    return;
-                }
-                runAgenticStep(conv, obs, false);
-                return;
+                // open_app : exécuter quand même (relance raccourci / app)
             }
             String preview = reply.content != null ? reply.content : "";
             notifyReply(obs, preview, true);
@@ -1669,8 +1773,26 @@ public class PegaseSession {
 
     private void finalizeAgentic(ConversationManager conv, SessionObserver obs, String text) {
         String out = text != null ? text.trim() : "";
-        if (out.isEmpty() && activeAgenticChain != null) {
-            out = activeAgenticChain.lastToolDisplayText();
+        String toolFallback = activeAgenticChain != null
+                ? activeAgenticChain.lastToolDisplayText() : "";
+        if (out.isEmpty()) {
+            out = toolFallback;
+        }
+        // Après ui_action réussi, le LLM redemande souvent un viewId — ne jamais
+        // l'écrire en conversation : on garde le résultat outil (« Clic envoyé… »).
+        if (com.pegasuscorp.orbe.copilot.CopilotUiAskGuard.asksForTechnicalViewId(out)) {
+            String replaced = com.pegasuscorp.orbe.copilot.CopilotUiAskGuard
+                    .replaceTechnicalViewIdAsk(out, toolFallback);
+            Trace.error("agentic", "suppressed viewId ask after tools → "
+                    + (replaced.length() > 80 ? replaced.substring(0, 80) + "…" : replaced));
+            out = replaced;
+        }
+        // « Ça tourne déjà » sans relance réelle après open_app / demande d'ouverture.
+        if (com.pegasuscorp.orbe.copilot.OpenClaimGuard.claimsAlreadyOpen(out)) {
+            String replaced = com.pegasuscorp.orbe.copilot.OpenClaimGuard
+                    .replaceAlreadyOpenClaim(out, toolFallback);
+            Trace.error("agentic", "suppressed already-open claim → " + replaced);
+            out = replaced;
         }
         clearAgenticState();
         if (out.isEmpty()) {
@@ -1697,7 +1819,7 @@ public class PegaseSession {
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
             ContextSnapshot snap = ContextBuilder.buildSnapshot(
-                    appContext, msg, currentTurnIntent, sessionContext.channel);
+                    appContext, msg, currentTurnIntent, effectiveChannel());
             turnReasoning.applySnapshot(snap);
             turnReasoning.setSessionUsed(msg);
         } catch (Exception ignored) {
@@ -1783,15 +1905,16 @@ public class PegaseSession {
     }
 
     private void traceUserIngress(String text) {
-        if (sessionContext.channel == Channel.VOICE) {
+        if (effectiveChannel() == Channel.VOICE) {
             return;
         }
         Trace.userMessage(text, channelTraceSource(), false);
     }
 
     private String channelTraceSource() {
-        if (sessionContext.channel == Channel.VOICE) return "voice";
-        if (sessionContext.channel == Channel.BUREAU) return "bureau";
+        Channel channel = effectiveChannel();
+        if (channel == Channel.VOICE) return "voice";
+        if (channel == Channel.BUREAU) return "bureau";
         return "text";
     }
 
@@ -1805,6 +1928,9 @@ public class PegaseSession {
 
     private void notifyReply(SessionObserver oneOff, String text, boolean toolFired) {
         notify(oneOff, o -> o.onReply(text, toolFired));
+        if (!toolFired) {
+            endTurn();
+        }
     }
 
     private void notifyPartial(SessionObserver oneOff, String accumulated) {
@@ -1832,18 +1958,24 @@ public class PegaseSession {
 
     private void notifyToolResult(SessionObserver oneOff, ToolResult result) {
         notify(oneOff, o -> o.onToolResult(result));
+        if (activeAgenticChain == null && pendingNativeToolCall == null) {
+            endTurn();
+        }
     }
 
     private void notifyToolExit(SessionObserver oneOff, ToolResult result) {
         notify(oneOff, o -> o.onToolExit(result));
+        endTurn();
     }
 
     private void notifyToolBlocked(SessionObserver oneOff) {
         notify(oneOff, SessionObserver::onToolBlocked);
+        endTurn();
     }
 
     private void notifyError(SessionObserver oneOff, String message) {
         notify(oneOff, o -> o.onError(ChatSpokenErrors.toUserMessage(message)));
+        endTurn();
     }
 
     private void notify(SessionObserver oneOff, ObserverAction action) {

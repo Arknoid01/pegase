@@ -145,11 +145,10 @@ public final class VoiceSessionContext {
         VoiceIntentRouter.RoutedIntent notepad = resolveNotepadFollowUp(transcript, fold);
         if (notepad != null) return notepad;
 
-        if ("pareil".equals(fold) || "idem".equals(fold)
-                || fold.contains("la meme chose") || fold.contains("encore")) {
-            if (lastToolJson != null) {
-                return replayLast(transcript);
-            }
+        // « encore » seul / « pareil » — PAS « ouvre encore Cursor » (sinon on
+        // rejoue le dernier outil, souvent orion_manager → « … tourne déjà »).
+        if (isReplayLastPhrase(fold) && lastToolJson != null) {
+            return replayLast(transcript);
         }
 
         if ("météo".equals(lastIntentHint) || lastToolJson != null && lastToolJson.contains("\"weather\"")) {
@@ -312,6 +311,22 @@ public final class VoiceSessionContext {
         return new VoiceIntentRouter.RoutedIntent(
                 transcript, lastToolJson, lastIntentHint,
                 VoiceConfirmation.HIGH_CONFIDENCE, false);
+    }
+
+    /** Replay court uniquement — pas une nouvelle commande « ouvre / lance … ». */
+    static boolean isReplayLastPhrase(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        if (fold.contains("ouvre") || fold.contains("ouvrir")
+                || fold.contains("lance") || fold.contains("lancer")
+                || fold.contains("relance") || fold.contains("reouvre")
+                || fold.contains("demarre") || fold.contains("ramene")) {
+            return false;
+        }
+        return "pareil".equals(fold) || "idem".equals(fold)
+                || "encore".equals(fold) || "encore une fois".equals(fold)
+                || "reessaie".equals(fold) || "reessaye".equals(fold)
+                || fold.equals("la meme chose") || fold.equals("fais la meme chose")
+                || fold.equals("fait la meme chose");
     }
 
     private boolean hasRecentIntent() {

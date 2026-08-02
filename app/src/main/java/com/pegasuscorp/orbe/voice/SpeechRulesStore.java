@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Charge et persiste {@code files/speech/speech_rules.json} (dictionnaire, vitesse, remplacements).
@@ -23,6 +25,17 @@ public final class SpeechRulesStore {
     private static final float DEFAULT_SPEED = 0.87f;
     private static final String PREFS = "orbe_piper";
     private static final String KEY_SPEED_MIGRATED = "speech_rules_speed_migrated";
+
+    /**
+     * Mots fonction FR — ne jamais les mettre dans le dictionnaire TTS
+     * (sinon « dis » → « Disse » pour toute phrase).
+     */
+    private static final Set<String> BLOCKED_DICTIONARY_KEYS = Set.of(
+            "dis", "dit", "moi", "toi", "lui", "elle", "nous", "vous",
+            "je", "tu", "il", "ils", "on", "ce", "ça", "ca", "et", "ou",
+            "de", "du", "des", "le", "la", "les", "un", "une", "au", "aux",
+            "que", "qui", "ne", "pas", "plus", "comme", "prononce", "prononces"
+    );
 
     private static SpeechRulesStore instance;
 
@@ -46,7 +59,12 @@ public final class SpeechRulesStore {
      */
     public synchronized void warmUp() {
         reloadFromDisk();
-        rebuildCache();
+        ensureStructure();
+        if (purgeBlockedDictionaryKeys()) {
+            save();
+        } else {
+            rebuildCache();
+        }
     }
 
     /** Accès rapide aux règles précompilées (RAM). */
@@ -102,9 +120,18 @@ public final class SpeechRulesStore {
         return getSnapshot().ttsFriendlyMode;
     }
 
+    /** True si ce mot ne doit pas devenir une règle de prononciation. */
+    public static boolean isBlockedDictionaryKey(String word) {
+        if (word == null) return true;
+        String k = word.trim().toLowerCase(Locale.ROOT);
+        if (k.isEmpty()) return true;
+        return BLOCKED_DICTIONARY_KEYS.contains(k);
+    }
+
     public synchronized void putDictionary(String word, String pronunciation) {
         if (word == null || word.trim().isEmpty()) return;
         if (pronunciation == null || pronunciation.trim().isEmpty()) return;
+        if (isBlockedDictionaryKey(word)) return;
         try {
             root.optJSONObject("dictionary").put(word.trim(), pronunciation.trim());
             save();
@@ -228,7 +255,9 @@ public final class SpeechRulesStore {
                 root = new JSONObject(sb.toString());
                 ensureStructure();
                 migrateSpeedFromPrefs();
-                if (mergeMissingFromAssets()) save();
+                boolean changed = mergeMissingFromAssets();
+                changed |= purgeBlockedDictionaryKeys();
+                if (changed) save();
                 return;
             } catch (Exception ignored) {}
         }
@@ -315,6 +344,21 @@ public final class SpeechRulesStore {
             if (!root.has("replace")) root.put("replace", new JSONObject());
             if (!root.has("expand")) root.put("expand", new JSONObject());
         } catch (Exception ignored) {}
+    }
+
+    /** Retire les fausses règles type « Dis » / « Moi » déjà persistées. */
+    private boolean purgeBlockedDictionaryKeys() {
+        JSONObject dict = root.optJSONObject("dictionary");
+        if (dict == null) return false;
+        List<String> toRemove = new ArrayList<>();
+        Iterator<String> keys = dict.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (isBlockedDictionaryKey(key)) toRemove.add(key);
+        }
+        if (toRemove.isEmpty()) return false;
+        for (String key : toRemove) dict.remove(key);
+        return true;
     }
 
     private static JSONObject defaultRules() {

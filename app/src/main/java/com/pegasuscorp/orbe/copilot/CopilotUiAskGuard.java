@@ -34,10 +34,31 @@ public final class CopilotUiAskGuard {
             return true;
         }
         if (f.contains("identifiant") && (f.contains("vue") || f.contains("view")
-                || f.contains("contient le texte"))) {
+                || f.contains("contient le texte") || f.contains("element")
+                || f.contains("bouton") || f.contains("cible"))) {
+            return true;
+        }
+        // « il me faut l'id », « donne-moi l'id », « quel est l'id »…
+        if ((f.contains("faut") || f.contains("besoin") || f.contains("donne")
+                || f.contains(" indiqu") || f.contains("fournis") || f.contains("quel"))
+                && (f.contains(" l'id") || f.contains(" l id") || f.contains("lid ")
+                || f.contains("lid?") || f.endsWith("lid")
+                || f.contains("identifiant"))) {
             return true;
         }
         return f.contains("android:id") || f.contains("id/text");
+    }
+
+    /**
+     * Si {@code reply} réclame un viewId : remplace par le texte outil (ou un court OK).
+     * Sinon renvoie {@code reply} inchangé.
+     */
+    public static String replaceTechnicalViewIdAsk(String reply, String toolFallback) {
+        if (!asksForTechnicalViewId(reply)) return reply != null ? reply : "";
+        if (toolFallback != null && !toolFallback.trim().isEmpty()) {
+            return toolFallback.trim();
+        }
+        return "C'est fait.";
     }
 
     /**

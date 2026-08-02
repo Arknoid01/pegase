@@ -167,7 +167,11 @@ public final class PegaseWakeController {
 
     public static void resumeWakeIfAllowed(Context context) {
         if (context == null || !shouldListen()) return;
-        VoiceWakeClient.get().startListening(context);
+        // Laisse le TTS / buffers audio se vider avant de réarmer le wake (anti-boucle FP).
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (!shouldListen()) return;
+            VoiceWakeClient.get().startListening(context);
+        }, 8_000L);
     }
 
     public static void pauseWake(Context context) {

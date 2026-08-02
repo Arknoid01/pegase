@@ -256,13 +256,22 @@ public final class LifecycleBridge {
                 || com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) {
             return;
         }
-        // Priorité : overlay vocal pendant un chat actif, sinon copilote permanent.
-        if (voice != null && voice.isConversationActive()
-                && PegaseWakeController.isVoiceChatActive()) {
-            FloatingOrbService.show(a);
-        } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
-            FloatingOrbService.showCopilot(a);
-        }
+        // Évite le flash orbe : HOME onPause → show, puis Interface onResume → hide.
+        final VoiceInputHandler voiceRef = voice;
+        mainHandler.postDelayed(() -> {
+            if (a.isFinishing() || a.isDestroyed()) return;
+            // Encore au premier plan (ex. dialogue permission) → pas d'overlay
+            if (a.hasWindowFocus()) return;
+            if (PegaseInterfaceState.isOpen()) return;
+            if (com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) return;
+            if (!android.provider.Settings.canDrawOverlays(a)) return;
+            if (voiceRef != null && voiceRef.isConversationActive()
+                    && PegaseWakeController.isVoiceChatActive()) {
+                FloatingOrbService.show(a);
+            } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
+                FloatingOrbService.showCopilot(a);
+            }
+        }, 200);
     }
 
     public void onStop() {

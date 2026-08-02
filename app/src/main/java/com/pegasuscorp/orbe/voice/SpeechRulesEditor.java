@@ -183,6 +183,11 @@ public final class SpeechRulesEditor {
         if (word.isEmpty() || pronunciation.isEmpty()) return null;
         // Nettoie les formules parasites
         pronunciation = pronunciation.replaceAll("(?i)^(c'est\\s+|ça\\s+fait\\s+|ça\\s+se\\s+dit\\s+)", "").trim();
+        if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
+            return MemoryEditResult.failed(
+                    "Je ne peux pas enregistrer « " + word
+                            + " » comme prononciation — trop courant en français.");
+        }
         rules.putDictionary(word, pronunciation);
         return MemoryEditResult.applied(
                 word + " → " + pronunciation,

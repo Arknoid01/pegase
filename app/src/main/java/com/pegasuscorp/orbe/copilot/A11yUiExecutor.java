@@ -20,7 +20,8 @@ public final class A11yUiExecutor {
     public static A11yUiMatcher.Criteria parseCriteria(JSONObject params) {
         A11yUiMatcher.Criteria c = new A11yUiMatcher.Criteria();
         if (params == null) return c;
-        c.text = params.optString("target", params.optString("text", "")).trim();
+        c.text = unwrapIconTarget(
+                params.optString("target", params.optString("text", "")).trim());
         // Compat : si un vieux prompt LLM envoie encore view_id, le traiter comme libellé.
         if (c.text.isEmpty()) {
             String rawId = params.optString("view_id", params.optString("viewId", "")).trim();
@@ -32,6 +33,30 @@ public final class A11yUiExecutor {
         // Jamais de critère viewId côté LLM — matching texte seul (scanne aussi les ids nœuds).
         c.viewId = "";
         return c;
+    }
+
+    /**
+     * Le snapshot montre {@code [icône: mic_button]} ; le LLM le renvoie souvent tel quel.
+     * Le matching live n'a pas ce libellé synthétique — on extrait l'id court.
+     */
+    static String unwrapIconTarget(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        String t = raw.trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?i)^\\[\\s*ic[oô]ne\\s*:\\s*(.+?)\\s*\\]$").matcher(t);
+        if (m.find()) {
+            t = m.group(1).trim();
+        } else {
+            // « icône mic_button » / « l'icone search »
+            m = java.util.regex.Pattern.compile(
+                    "(?i)^(?:l['’])?ic[oô]ne(?:s)?\\s+(.+)$").matcher(t);
+            if (m.find()) t = m.group(1).trim();
+        }
+        // Crochets résiduels
+        if (t.startsWith("[") && t.endsWith("]") && t.length() > 2) {
+            t = t.substring(1, t.length() - 1).trim();
+        }
+        return t;
     }
 
     public static boolean isForegroundAllowed(Context ctx, AccessibilityNodeInfo root) {
@@ -66,11 +91,7 @@ public final class A11yUiExecutor {
             cb.onError("Indique la cible à cliquer (texte visible à l'écran).");
             return;
         }
-        withRoot(svc, root -> {
-            if (!isForegroundAllowed(ctx, root)) {
-                cb.onError("Cette app n'est pas autorisée pour le copilote.");
-                return;
-            }
+        withForegroundRoot(ctx, svc, root -> {
             A11yUiMatcher.Target target = A11yUiMatcher.find(root, criteria);
             if (target == null) {
                 cb.onError("Je ne trouve pas cet élément à l'écran.");
@@ -86,11 +107,11 @@ public final class A11yUiExecutor {
             cb.onConfirmNeeded(question,
                     () -> {
                         CopilotUiSupport.notifyActionInProgress(ctx, cb);
-                        withRoot(svc, r -> performClick(ctx, r, criteria, target, cb),
-                                () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
+                        withForegroundRoot(ctx, svc,
+                                r -> performClick(ctx, r, criteria, target, cb), cb);
                     },
                     () -> cb.onError("Clic annulé."));
-        }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
+        }, cb);
     }
 
     public static void executeType(Context ctx, PegaseAccessibilityService svc,
@@ -102,11 +123,7 @@ public final class A11yUiExecutor {
             return;
         }
         A11yUiMatcher.Criteria criteria = parseCriteria(params);
-        withRoot(svc, root -> {
-            if (!isForegroundAllowed(ctx, root)) {
-                cb.onError("Cette app n'est pas autorisée pour le copilote.");
-                return;
-            }
+        withForegroundRoot(ctx, svc, root -> {
             AccessibilityNodeInfo node = criteria.isEmpty()
                     ? A11yUiMatcher.findEditableRoot(root)
                     : A11yUiMatcher.findNode(root, criteria);
@@ -122,22 +139,18 @@ public final class A11yUiExecutor {
             } finally {
                 node.recycle();
             }
-        }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
+        }, cb);
     }
 
     public static void executeScroll(Context ctx, PegaseAccessibilityService svc,
             JSONObject params, ToolCallback cb) {
         CopilotUiSupport.notifyActionInProgress(ctx, cb);
         String direction = params.optString("direction", "down");
-        withRoot(svc, root -> {
-            if (!isForegroundAllowed(ctx, root)) {
-                cb.onError("Cette app n'est pas autorisée pour le copilote.");
-                return;
-            }
+        withForegroundRoot(ctx, svc, root -> {
             boolean ok = A11yUiMatcher.performScroll(root, direction);
             if (ok) cb.onSuccess(ToolResult.text("Défilement effectué."));
             else cb.onError("Impossible de faire défiler cette page.");
-        }, () -> cb.onError("Service d'accessibilité pas encore prêt — réessaie."));
+        }, cb);
     }
 
     public static void executeBack(Context ctx, PegaseAccessibilityService svc, ToolCallback cb) {
@@ -163,26 +176,22 @@ public final class A11yUiExecutor {
         try {
             android.graphics.Rect live = new android.graphics.Rect();
             node.getBoundsInScreen(live);
-            // Chrome/WebView : ACTION_CLICK renvoie souvent true sans effet (succès fantôme),
-            // même sur des nœuds cliquables à hauteur > 0 (ex. lien « latin »).
-            boolean preferGesture = live.height() <= 0 || !node.isClickable()
-                    || looksLikeWebContent(node);
-            boolean ok = false;
-            String via = "";
-            if (!preferGesture) {
+            // Retirer le surlignage avant le geste (même NOT_TOUCHABLE, certains OEM
+            // absorbent encore le dispatchGesture).
+            ElementHighlightService.hide(ctx);
+
+            // Gesture d'abord : ACTION_CLICK renvoie souvent true sans effet
+            // (Compose / Reddit / WebView / Play Store).
+            boolean ok = tapBounds(headerBand(live));
+            String via = ok ? "gesture" : "";
+            if (!ok) {
                 ok = A11yUiMatcher.performClick(node);
                 if (ok) via = "a11y";
-            }
-            if (!ok) {
-                // Bounds fraîches du nœud (pas le preview snapshot).
-                ok = tapBounds(headerBand(live));
-                if (ok) via = "gesture";
             }
             if (!ok && preview != null) {
                 ok = tapTarget(preview);
                 if (ok) via = "gesture-preview";
             }
-            ElementHighlightService.hide(ctx);
             if (ok) {
                 String label = preview != null && !TextUtils.isEmpty(preview.text)
                         ? preview.text
@@ -259,17 +268,31 @@ public final class A11yUiExecutor {
         void run(AccessibilityNodeInfo root);
     }
 
-    private static void withRoot(PegaseAccessibilityService svc, RootTask task, Runnable onMissing) {
+    /**
+     * Racine premier plan (hors overlay) puis garde-fou whitelist.
+     * Ne confond plus « app non autorisée » / « écran illisible » avec
+     * « service pas prêt » (getInstance null).
+     */
+    private static void withForegroundRoot(Context ctx, PegaseAccessibilityService svc,
+            RootTask task, ToolCallback cb) {
         if (svc == null) {
-            if (onMissing != null) onMissing.run();
+            cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
             return;
         }
-        AccessibilityNodeInfo root = A11yRootPicker.preferAppRoot(svc);
+        AccessibilityNodeInfo root = A11yRootPicker.preferForegroundRoot(svc);
         if (root == null) {
-            if (onMissing != null) onMissing.run();
+            cb.onError("Impossible de lire l'écran de l'app au premier plan "
+                    + "(fenêtre masquée par l'overlay ou arbre a11y vide).");
             return;
         }
         try {
+            if (!isForegroundAllowed(ctx, root)) {
+                String pkg = A11yRootPicker.packageOf(root);
+                cb.onError("Cette app n'est pas autorisée pour le copilote"
+                        + (pkg.isEmpty() ? "." : " (" + pkg + ").")
+                        + " Ajoute-la dans Copilote → apps.");
+                return;
+            }
             task.run(root);
         } finally {
             root.recycle();

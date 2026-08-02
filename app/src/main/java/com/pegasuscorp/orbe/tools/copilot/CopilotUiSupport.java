@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.tools.copilot;
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
+import android.util.Log;
 
 import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.copilot.AccessibilityAccess;
@@ -14,6 +15,8 @@ import com.pegasuscorp.orbe.tools.ToolCallback;
  * Vérifications communes outils copilote v4.
  */
 public final class CopilotUiSupport {
+
+    private static final String TAG = "CopilotUiSupport";
 
     private CopilotUiSupport() {}
 
@@ -28,7 +31,10 @@ public final class CopilotUiSupport {
             ctx.startActivity(i);
             return null;
         }
-        cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
+        // Toggle ON mais instance null = process service mort / pas encore rebound.
+        Log.w(TAG, "a11y enabled in Settings but getInstance()=null");
+        cb.onError("Service d'accessibilité activé mais pas connecté — "
+                + "désactive puis réactive « Pégase copilote », ou redémarre l'app.");
         return null;
     }
 

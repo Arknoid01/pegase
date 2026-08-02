@@ -37,11 +37,29 @@ public final class SherpaKwsEngine {
     private static final String TAG = "SherpaKws";
     private static final int SAMPLE_RATE = 16_000;
     private static final float INTERVAL_SEC = 0.1f;
-    /** Seuil Sherpa — très bas : modèle EN vs « Pégase » FR. */
-    private static final float KEYWORDS_THRESHOLD = 0.05f;
-    private static final float KEYWORDS_SCORE = 4.0f;
+    /** Seuil Sherpa global (les lignes keywords.txt peuvent overrider). */
+    private static final float KEYWORDS_THRESHOLD = 0.04f;
+    private static final float KEYWORDS_SCORE = 5.0f;
+    /**
+     * Rejette un HIT trop faible (bruit poche / frottement).
+     * Utilise le pic RMS sur ~1,5 s (pas le frame de fin d'énoncé, souvent trop bas).
+     * Vrai PEGASE rejeté à −61 sur frame fin alors que la parole était ~−25…−38.
+     */
+    private static final float MIN_HIT_RMS_DB = -55f;
+    /** Fenêtre pic RMS : 15 × 100 ms. */
+    private static final int PEAK_RMS_WINDOW = 15;
     /** ~2 s entre deux logs probe (100 ms × 20). */
     private static final int PROBE_EVERY_READS = 20;
+    /**
+     * Après parole, recréer le OnlineStream (pas reset mid-mot).
+     * Évite les HIT retardés type HEY_PEGASE collés sur une conversation.
+     * 1,5 s ≫ trailing blanks du spotter (~200–400 ms).
+     */
+    private static final int SILENCE_RECREATE_FRAMES = 15;
+    private static final float SPEECH_RMS_DB = -45f;
+    private static final float QUIET_RMS_DB = -58f;
+    /** Composés (Hey/Ok…) : exigent un pic plus fort que les alias courts. */
+    private static final float MIN_COMPOUND_HIT_RMS_DB = -42f;
 
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -126,7 +144,7 @@ public final class SherpaKwsEngine {
                     .setKeywordsScore(KEYWORDS_SCORE)
                     .setKeywordsThreshold(KEYWORDS_THRESHOLD)
                     .setMaxActivePaths(16)
-                    .setNumTrailingBlanks(1)
+                    .setNumTrailingBlanks(2)
                     .build();
             Log.i(TAG, "creating KeywordSpotter enc=" + enc.getName()
                     + " size=" + enc.length()
@@ -161,6 +179,7 @@ public final class SherpaKwsEngine {
                 != PackageManager.PERMISSION_GRANTED) {
             return;
         }
+        PocketWakeGuard.start(app);
         thread = new Thread(this::loop, "sherpa-kws");
         thread.setPriority(Thread.NORM_PRIORITY - 1);
         KwsCrashGuard.onKwsStarting(app);
@@ -182,6 +201,7 @@ public final class SherpaKwsEngine {
         }
         thread = null;
         running = false;
+        PocketWakeGuard.stop();
     }
 
     public void release() {
@@ -232,10 +252,15 @@ public final class SherpaKwsEngine {
             int bufferSize = Math.max(1, (int) (INTERVAL_SEC * SAMPLE_RATE));
             short[] buffer = new short[bufferSize];
             int emptyStreak = 0;
+            float[] recentRms = new float[PEAK_RMS_WINDOW];
+            java.util.Arrays.fill(recentRms, -96f);
+            int recentRmsIdx = 0;
+            boolean hadSpeech = false;
+            int quietAfterSpeech = 0;
             while (wantRun && !routeChanged) {
+                // Ne plus skipper les frames si média : sinon « Pégase » n'est jamais scorée.
                 if (MediaPlaybackGuard.isOtherAudioPlaying(app)) {
-                    sleepQuiet(400);
-                    continue;
+                    KwsDiagnostics.maybeLogMediaActive(routeDescription());
                 }
                 int ret = audioRecord.read(buffer, 0, buffer.length);
                 if (ret < 0) {
@@ -264,6 +289,12 @@ public final class SherpaKwsEngine {
                 }
                 emptyStreak = 0;
                 float rmsDb = KwsDiagnostics.computeRmsDb(buffer, ret);
+                recentRms[recentRmsIdx % PEAK_RMS_WINDOW] = rmsDb;
+                recentRmsIdx++;
+                float peakRmsDb = rmsDb;
+                for (float r : recentRms) {
+                    if (r > peakRmsDb) peakRmsDb = r;
+                }
                 readCount++;
                 if (readCount % PROBE_EVERY_READS == 0) {
                     KwsDiagnostics.maybeLogProbe(routeDescription(), rmsDb, ret);
@@ -272,8 +303,27 @@ public final class SherpaKwsEngine {
                 for (int i = 0; i < ret; i++) {
                     samples[i] = buffer[i] / 32768.0f;
                 }
+
+                if (rmsDb > SPEECH_RMS_DB) {
+                    hadSpeech = true;
+                    quietAfterSpeech = 0;
+                } else if (hadSpeech && rmsDb < QUIET_RMS_DB) {
+                    quietAfterSpeech++;
+                    if (quietAfterSpeech >= SILENCE_RECREATE_FRAMES) {
+                        OnlineStream fresh = recreateStream(stream);
+                        if (fresh != null) {
+                            stream = fresh;
+                            KwsDiagnostics.logStreamReset(routeDescription(), "recreate_after_silence");
+                        }
+                        hadSpeech = false;
+                        quietAfterSpeech = 0;
+                    }
+                }
+
                 stream.acceptWaveform(samples, SAMPLE_RATE);
+                boolean decoded = false;
                 while (wantRun && !routeChanged && kws.isReady(stream)) {
+                    decoded = true;
                     kws.decode(stream);
                     KeywordSpotterResult result = kws.getResult(stream);
                     String kw = result != null ? result.getKeyword() : null;
@@ -281,8 +331,28 @@ public final class SherpaKwsEngine {
                     float[] timestamps = result != null ? result.getTimestamps() : null;
                     if (kw != null && !kw.trim().isEmpty()) {
                         kws.reset(stream);
+                        hadSpeech = false;
+                        quietAfterSpeech = 0;
                         final String detected = kw.trim();
-                        KwsDiagnostics.logHit(routeDescription(), rmsDb, detected, tokens, timestamps);
+                        // Alias courts / composés ambigus : gate RMS.
+                        // PEGASE plein saute le gate (HIT souvent sur queue soft).
+                        if (isCompoundWakeKeyword(detected) && peakRmsDb < MIN_COMPOUND_HIT_RMS_DB) {
+                            KwsDiagnostics.logHitRejectedRms(
+                                    routeDescription(), peakRmsDb, detected, tokens,
+                                    MIN_COMPOUND_HIT_RMS_DB);
+                            continue;
+                        }
+                        if (!isStrongWakeKeyword(detected) && peakRmsDb < MIN_HIT_RMS_DB) {
+                            KwsDiagnostics.logHitRejectedRms(
+                                    routeDescription(), peakRmsDb, detected, tokens, MIN_HIT_RMS_DB);
+                            continue;
+                        }
+                        if (PocketWakeGuard.shouldSuppressWake(app)) {
+                            KwsDiagnostics.logHitRejectedPocket(
+                                    routeDescription(), peakRmsDb, detected, tokens);
+                            continue;
+                        }
+                        KwsDiagnostics.logHit(routeDescription(), peakRmsDb, detected, tokens, timestamps);
                         wantRun = false;
                         main.post(() -> {
                             if (listener != null) listener.onKeywordDetected(detected);
@@ -290,6 +360,9 @@ public final class SherpaKwsEngine {
                         return;
                     }
                     KwsDiagnostics.logDecodeReadyNoHit(routeDescription(), rmsDb, tokens, timestamps);
+                }
+                if (!decoded) {
+                    KwsDiagnostics.maybeLogSpeechNoTokens(routeDescription(), rmsDb);
                 }
             }
             if (routeChanged && wantRun) {
@@ -310,6 +383,7 @@ public final class SherpaKwsEngine {
                 stream = null;
             }
             running = false;
+            PocketWakeGuard.stop();
         }
     }
 
@@ -368,6 +442,44 @@ public final class SherpaKwsEngine {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Mots-clés complets (sans préfixe Hey/Ok) — fiables, pas de gate RMS. */
+    private static boolean isStrongWakeKeyword(String keyword) {
+        if (keyword == null) return false;
+        String k = keyword.trim().toUpperCase(java.util.Locale.US);
+        if (isCompoundWakeKeyword(k)) return false;
+        return k.equals("PEGASE")
+                || k.equals("PEGASE_CHARS")
+                || k.equals("PEGA_SE")
+                || k.equals("PEGASUS")
+                || k.equals("PEGAZE");
+    }
+
+    /** Préfixes conversationnels — plus stricts (faux positifs en discussion). */
+    private static boolean isCompoundWakeKeyword(String keyword) {
+        if (keyword == null) return false;
+        String k = keyword.trim().toUpperCase(java.util.Locale.US);
+        return k.startsWith("HEY_")
+                || k.startsWith("OK_")
+                || k.startsWith("BONJOUR_");
+    }
+
+    private OnlineStream recreateStream(OnlineStream old) {
+        try {
+            if (old != null) {
+                try { old.release(); } catch (Exception ignored) {}
+            }
+            OnlineStream fresh = kws.createStream();
+            if (fresh == null || fresh.getPtr() == 0L) {
+                Log.e(TAG, "recreateStream failed");
+                return null;
+            }
+            return fresh;
+        } catch (Throwable e) {
+            Log.e(TAG, "recreateStream error", e);
+            return null;
         }
     }
 }

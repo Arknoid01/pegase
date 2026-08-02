@@ -48,25 +48,35 @@ public class PegaseAccessibilityService extends AccessibilityService {
     public void onCreate() {
         super.onCreate();
         instance = this;
+        Log.i(TAG, "onCreate — instance bound");
     }
 
     @Override
     public void onDestroy() {
-        instance = null;
+        Log.w(TAG, "onDestroy — instance cleared");
+        if (instance == this) instance = null;
         super.onDestroy();
     }
 
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
+        // Ceinture : certains OEM appellent connected sans passer par un onCreate
+        // visible côté app après kill process.
+        instance = this;
         AccessibilityServiceInfo info = getServiceInfo();
         if (info != null) {
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                     | AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.notificationTimeout = 100;
+            // Compose / apps natives : beaucoup de nœuds « not important ».
+            info.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                    | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                    | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
             setServiceInfo(info);
         }
+        Log.i(TAG, "onServiceConnected — ready");
     }
 
     @Override
@@ -89,8 +99,9 @@ public class PegaseAccessibilityService extends AccessibilityService {
     public void onInterrupt() {}
 
     /**
-     * Tap écran (gesture) — repli quand ACTION_CLICK a11y échoue (WebView / sections Wiki).
+     * Tap écran (gesture) — chemin principal des clics UI (ACTION_CLICK trop souvent fantôme).
      * Si le tap tombe dans la bulle : la replie (NOT_TOUCHABLE seul insuffisant sur Nothing).
+     * Toujours différer le dispatch : passthrough / collapse sont postés sur le main thread.
      */
     public boolean tapScreen(float x, float y) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
@@ -102,28 +113,41 @@ public class PegaseAccessibilityService extends AccessibilityService {
                 + " overlay=" + (overlay != null ? overlay.toShortString() : "none")
                 + " hitOverlay=" + hitOverlay);
 
+        // Micro-mouvement : certains Compose / OEM ignorent un tap « point mort ».
         Path path = new Path();
         path.moveTo(x, y);
+        path.lineTo(x + 2f, y + 2f);
         GestureDescription.StrokeDescription stroke =
-                new GestureDescription.StrokeDescription(path, 0, 60);
+                new GestureDescription.StrokeDescription(path, 0, 80);
         GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
 
-        boolean evacuated = FloatingOrbService.evacuateForScreenTap(x, y);
-        schedulePassthroughRestore(evacuated ? 900L : 500L);
-
-        if (evacuated || hitOverlay) {
-            main.postDelayed(() -> {
-                Rect after = FloatingOrbService.getOverlayScreenBounds();
-                boolean stillHit = FloatingOrbService.containsScreenPoint(x, y);
-                Log.i(TAG, "tapScreen afterEvacuate overlay="
-                        + (after != null ? after.toShortString() : "none")
-                        + " stillHit=" + stillHit);
-                dispatchTapGesture(gesture, x, y, hitOverlay);
-            }, 80L);
-            return true;
-        }
+        FloatingOrbService.evacuateForScreenTap(x, y);
         FloatingOrbService.setTouchPassthrough(true);
-        return dispatchTapGesture(gesture, x, y, false);
+        schedulePassthroughRestore(hitOverlay ? 1300L : 700L);
+
+        long delayMs = hitOverlay ? 180L : 120L;
+        main.postDelayed(() -> dispatchTapAfterEvacuate(gesture, x, y, hitOverlay, 0), delayMs);
+        return true;
+    }
+
+    /**
+     * Si la bulle couvre encore le point après évacuation, re-évacue une fois
+     * avant le geste — évite un clic absorbé par l'overlay.
+     */
+    private void dispatchTapAfterEvacuate(GestureDescription gesture, float x, float y,
+            boolean hitOverlay, int retry) {
+        Rect after = FloatingOrbService.getOverlayScreenBounds();
+        boolean stillHit = FloatingOrbService.containsScreenPoint(x, y);
+        Log.i(TAG, "tapScreen dispatch overlay="
+                + (after != null ? after.toShortString() : "none")
+                + " stillHit=" + stillHit + " retry=" + retry);
+        if (stillHit && retry < 1) {
+            FloatingOrbService.evacuateForScreenTap(x, y);
+            FloatingOrbService.setTouchPassthrough(true);
+            main.postDelayed(() -> dispatchTapAfterEvacuate(gesture, x, y, true, retry + 1), 160L);
+            return;
+        }
+        dispatchTapGesture(gesture, x, y, hitOverlay || stillHit);
     }
 
     private boolean dispatchTapGesture(GestureDescription gesture, float x, float y,

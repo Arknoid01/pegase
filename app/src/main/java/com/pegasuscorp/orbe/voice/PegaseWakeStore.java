@@ -12,6 +12,9 @@ public final class PegaseWakeStore {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_GENTLE = "gentle_mode";
     private static final String KEY_LEGACY_CLEANUP = "local_wake_removed_v4";
+    private static final String KEY_OWW_THRESHOLD = "oww_threshold";
+    /** Seuil OWW — modèle v2 hard-neg ; 0.5 = défaut openWakeWord. */
+    public static final float DEFAULT_OWW_THRESHOLD = 0.50f;
 
     private PegaseWakeStore() {}
 
@@ -34,6 +37,25 @@ public final class PegaseWakeStore {
 
     public static void setEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    public static float getOwwThreshold(Context context) {
+        SharedPreferences p = prefs(context);
+        if (!p.contains(KEY_OWW_THRESHOLD)) {
+            return DEFAULT_OWW_THRESHOLD;
+        }
+        float t = p.getFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD);
+        // Anciens seuils v1 (0.86–0.88) trop hauts pour le modèle hard-neg.
+        if (t >= 0.80f) {
+            t = DEFAULT_OWW_THRESHOLD;
+            p.edit().putFloat(KEY_OWW_THRESHOLD, t).apply();
+        }
+        return t;
+    }
+
+    public static void setOwwThreshold(Context context, float threshold) {
+        float t = Math.max(0.40f, Math.min(0.95f, threshold));
+        prefs(context).edit().putFloat(KEY_OWW_THRESHOLD, t).apply();
     }
 
     /**

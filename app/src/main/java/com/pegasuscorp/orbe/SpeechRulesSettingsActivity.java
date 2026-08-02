@@ -122,6 +122,10 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 showRuleDialog("Nouvelle prononciation", "", "",
                         "Mot ou nom (ex: Qwen)", "Se prononce (ex: Couène)",
                         (word, value) -> {
+                            if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
+                                toast("Mot trop courant — choisis un nom propre (ex: Qwen).");
+                                return;
+                            }
                             rules.putDictionary(word, value);
                             selectTab(TAB_DICT);
                             toast("Prononciation enregistrée.");

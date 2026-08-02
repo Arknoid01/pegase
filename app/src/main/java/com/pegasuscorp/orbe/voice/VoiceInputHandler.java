@@ -477,6 +477,11 @@ public final class VoiceInputHandler {
             return;
         }
 
+        // Avant follow-up « encore » : sinon « ouvre encore Cursor » rejoue Orion.
+        if (tryDirectOpenShortcut(transcript)) {
+            return;
+        }
+
         VoiceIntentRouter.RoutedIntent followUp = session.resolveFollowUp(transcript);
         if (followUp != null && followUp.directToolJson != null) {
             maybeConfirmOrExecute(followUp);
@@ -489,6 +494,56 @@ public final class VoiceInputHandler {
 
         VoiceIntentRouter.RoutedIntent routed = VoiceIntentRouter.analyze(activity, transcript);
         maybeConfirmOrExecute(routed);
+    }
+
+    /**
+     * Toute commande « ouvre / relance X » : exécute {@code open_app} localement.
+     * Jamais de LLM ici — il invente « ça tourne déjà » après un premier succès.
+     */
+    private boolean tryDirectOpenShortcut(String transcript) {
+        if (!toolsAllowed() || transcript == null) return false;
+        IntentParser.Command cmd = intentParser.parse(transcript);
+        if (cmd == null || cmd.action != IntentParser.Action.OPEN_APP) return false;
+        String name = cmd.argument != null ? cmd.argument.trim() : "";
+        if (name.isEmpty()) return false;
+
+        conversation.recordUserMessage(transcript);
+        try {
+            org.json.JSONObject params = new org.json.JSONObject().put("name", name);
+            new com.pegasuscorp.orbe.tools.device.OpenAppTool().execute(
+                    activity, params, new com.pegasuscorp.orbe.tools.ToolCallback() {
+                        @Override
+                        public void onSuccess(com.pegasuscorp.orbe.tools.ToolResult result) {
+                            String msg = result != null && result.text != null
+                                    ? result.text : ("J'ouvre " + name + ".");
+                            conversation.recordToolReply(msg);
+                            output.speak(msg, VoiceInputHandler.this::scheduleListeningResume);
+                        }
+
+                        @Override
+                        public void onSuccessAndExit(com.pegasuscorp.orbe.tools.ToolResult result) {
+                            onSuccess(result);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            String msg = error != null ? error
+                                    : ("Je n'ai pas trouvé " + name + ".");
+                            conversation.recordToolReply(msg);
+                            output.speak(msg, VoiceInputHandler.this::scheduleListeningResume);
+                        }
+
+                        @Override
+                        public void onConfirmNeeded(String question, Runnable onConfirm,
+                                Runnable onCancel) {
+                            if (onConfirm != null) onConfirm.run();
+                        }
+                    });
+        } catch (Exception e) {
+            output.speak("Impossible d'ouvrir " + name + ".",
+                    this::scheduleListeningResume);
+        }
+        return true;
     }
 
     private boolean tryTeacherMode(String transcript) {

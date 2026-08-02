@@ -54,10 +54,15 @@ public final class SpeechRulesSnapshot {
                 splitLong,
                 removeEmoji,
                 ttsFriendly,
-                compileMap(root.optJSONObject("dictionary"), true),
+                // Dictionnaire aussi en insensible à la casse : le LLM écrit souvent
+                // « cursor » / « qwen » alors que la règle est « Cursor » / « Qwen ».
+                compileMap(root.optJSONObject("dictionary"), false),
                 compileMap(root.optJSONObject("replace"), false),
                 compileMap(root.optJSONObject("expand"), false));
     }
+
+    // Pas de UNICODE_CHARACTER_CLASS : non supporté sur Android (crash au boot).
+    private static final int WORD_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
 
     private static WordRule[] compileMap(JSONObject map, boolean caseSensitive) {
         if (map == null) return new WordRule[0];
@@ -67,6 +72,8 @@ public final class SpeechRulesSnapshot {
             String key = keys.next();
             String value = map.optString(key, "");
             if (key.isEmpty() || value.isEmpty()) continue;
+            // Évite « Dis » / « Moi » (fausses règles) qui casseraient tout le français.
+            if (SpeechRulesStore.isBlockedDictionaryKey(key)) continue;
             entries.add(new Entry(key, value));
         }
         entries.sort((a, b) -> Integer.compare(b.key.length(), a.key.length()));
@@ -74,7 +81,7 @@ public final class SpeechRulesSnapshot {
         WordRule[] rules = new WordRule[entries.size()];
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
-            int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE;
+            int flags = caseSensitive ? 0 : WORD_FLAGS;
             rules[i] = new WordRule(
                     Pattern.compile("\\b" + Pattern.quote(e.key) + "\\b", flags),
                     e.value);

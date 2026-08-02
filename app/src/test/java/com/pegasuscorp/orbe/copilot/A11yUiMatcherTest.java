@@ -78,4 +78,33 @@ public class A11yUiMatcherTest {
         assertEquals("Astronomie", c.text);
         assertTrue(c.viewId.isEmpty());
     }
+
+    /** Régression : le LLM renvoie le libellé synthétique du snapshot. */
+    @Test
+    public void parseCriteria_unwrapsSyntheticIconLabel() throws Exception {
+        org.json.JSONObject p = new org.json.JSONObject()
+                .put("target", "[icône: mic_button]");
+        A11yUiMatcher.Criteria c = A11yUiExecutor.parseCriteria(p);
+        assertEquals("mic_button", c.text);
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "com.whatsapp:id/mic_button", "android.widget.ImageButton", c));
+    }
+
+    @Test
+    public void matchesFields_iconPrefixWithoutBrackets() {
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromText("icône search");
+        // Après unwrap côté parseCriteria ; ici on teste les stopwords + tokens.
+        c.text = A11yUiExecutor.unwrapIconTarget("icône search_button");
+        assertEquals("search_button", c.text);
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "com.app:id/search_button", "", c));
+    }
+
+    @Test
+    public void matchesFields_rawBracketIconLabel_viaStopwords() {
+        // Filet si unwrap n'a pas tourné : « icone » est stopword, crochets normalisés.
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromText("[icône: play_button]");
+        assertTrue(A11yUiMatcher.matchesFields(
+                "", "com.app:id/play_button", "", c));
+    }
 }

@@ -239,10 +239,11 @@ public class MainActivity extends AppCompatActivity
         orbView.setSlotListener(new OrbView.SlotListener() {
             @Override
             public void onSlotClick(int index) {
-                String pkg = ShortcutStore.getPackage(MainActivity.this, index);
-                if (pkg == null) homeLaunchers.pickAppForSlot(index);
-                else {
-                    homeLaunchers.launchPackage(pkg);
+                ShortcutStore.Slot slot = ShortcutStore.getSlot(MainActivity.this, index);
+                if (slot.isEmpty()) {
+                    homeLaunchers.pickAppForSlot(index);
+                } else {
+                    homeLaunchers.launchSlot(index);
                     orbView.collapseIfExpanded();
                 }
             }

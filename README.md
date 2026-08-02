@@ -131,7 +131,7 @@ que le modèle peut demander : `ouvre_app()`, `minuteur()`, `web_search()`,
 | Voix niveau 1 (commandes) | ✅ code | `SpeechRecognizer` + `TextToSpeech` natifs |
 | Mode discussion (mémoire) | ✅ code | `ChatBackend` → **API Gemini gratuite** |
 | Ton / caractère personnalisé | ⏳ facile | `systemInstruction` (discussion) + phrases variées (commandes) |
-| Mot d'éveil « Hey Pégase » | ⏳ | **openWakeWord** (libre, local, vérifiable) |
+| Mot d'éveil « Hey Pégase » | ⏳ enregistrement app + moteur ONNX | **openWakeWord** (libre, local) — voir `docs/openwakeword.md` |
 | Voix qui ne répond qu'à moi | ⏳ | **ECAPA-TDNN** local (text-dependent + phrase-clé) |
 | Voix Pégase agréable | ⏳ | **Piper** (neuronal, local, français) |
 | Action sur la compta | ⏳ | endpoint sur mon site Hostinger *(idéal)* ou WebView pilotée en JS |

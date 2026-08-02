@@ -478,13 +478,29 @@ public final class CopilotController {
     }
 
     /**
-     * Si le LLM demande un viewId technique : ne montre pas la question,
-     * relance {@code ui_action} avec le libellé libre de l'utilisateur.
+     * Si le LLM demande un viewId technique : ne montre pas la question.
+     * Sans outil encore : relance {@code ui_action} avec le libellé libre.
+     * Avec outil déjà tiré : avale la demande (l'action a déjà eu lieu).
      */
     private boolean interceptTechnicalViewIdAsk(String reply, boolean toolFired) {
-        if (toolFired || !CopilotUiAskGuard.asksForTechnicalViewId(reply)) return false;
+        if (!CopilotUiAskGuard.asksForTechnicalViewId(reply)) return false;
+        if (toolFired) {
+            android.util.Log.w("CopilotUi",
+                    "LLM asked for view id after tool — swallowing ask");
+            clearBubbleStatus(true);
+            setSending(false);
+            return true;
+        }
         String target = CopilotUiAskGuard.inferUiTarget(lastUserText);
-        if (TextUtils.isEmpty(target)) return false;
+        if (TextUtils.isEmpty(target)) {
+            // Pas de cible à inférer : ne pas afficher la demande technique.
+            clearBubbleStatus(true);
+            if (bubbleSink != null) {
+                bubbleSink.onAssistantMessage("C'est fait.");
+            }
+            setSending(false);
+            return true;
+        }
         android.util.Log.w("CopilotUi",
                 "LLM asked for technical view id — auto click target=\"" + target + "\"");
         clearBubbleStatus(false);

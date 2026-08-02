@@ -252,6 +252,7 @@ public final class A11yUiMatcher {
         String f = fold(text);
         if (f.isEmpty()) return "";
         return f.replace('_', ' ').replace('-', ' ').replace(':', ' ')
+                .replace('[', ' ').replace(']', ' ')
                 .replaceAll("\\s+", " ").trim();
     }
 
@@ -271,7 +272,9 @@ public final class A11yUiMatcher {
             "sur", "le", "la", "les", "un", "une", "des", "du", "de", "d",
             "au", "aux", "et", "ou", "bouton", "lien", "element", "elements",
             "ecran", "app", "applique", "ouvre", "ouvrir", "active", "activer",
-            "section", "titre", "menu", "onglet", "page"
+            "section", "titre", "menu", "onglet", "page",
+            // Libellés synthétiques snapshot `[icône: …]` renvoyés par le LLM
+            "icone", "icones", "icon", "icons", "image", "images"
     ));
 
 
@@ -427,6 +430,13 @@ public final class A11yUiMatcher {
         CharSequence desc = node.getContentDescription();
         if (text != null && text.length() > 0) return text.toString().trim();
         if (desc != null && desc.length() > 0) return desc.toString().trim();
+        // Aligné sur le snapshot `[icône: shortId]` : le short id entre dans le haystack
+        // même si le LLM cherche « mic button » sans le package.
+        String viewId = node.getViewIdResourceName();
+        if (viewId != null && !viewId.isEmpty()) {
+            String shortId = A11yTreeExtractor.shortResourceName(viewId);
+            if (!shortId.isEmpty()) return shortId;
+        }
         return "";
     }
 

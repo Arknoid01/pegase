@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
-import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -21,19 +20,24 @@ import org.json.JSONObject;
 
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Prépare la route micro pour le KWS — téléphone ou Bluetooth SCO / communication device.
- * Réagit aux changements de périphérique en cours d'écoute (casque branché après démarrage).
+ * Prépare la route micro pour KWS + STT — téléphone ou Bluetooth SCO / communication device.
+ * Instance partagée : le wake word et {@link VoiceManager} doivent partager le même SCO.
  */
 public final class KwsAudioRouteManager {
 
     private static final String TAG = "KwsAudioRoute";
     private static final long SCO_WAIT_MS = 4_000L;
-    /** Évite les rafales SCO CONNECTING→CONNECTED sur le même device. */
     private static final long ROUTE_NOTIFY_DEBOUNCE_MS = 300L;
+
+    private static final Object LOCK = new Object();
+    private static KwsAudioRouteManager shared;
 
     public interface RouteChangeListener {
         void onAudioRouteChanged();
@@ -51,6 +55,10 @@ public final class KwsAudioRouteManager {
     private final Context app;
     private final AudioManager audioManager;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    /** Sérialise prepare/release — VoiceManager (async) et KWS (thread capture) partagent le SCO. */
+    private final Object scoLock = new Object();
+    private final AtomicInteger scoHoldCount = new AtomicInteger(0);
 
     private volatile RouteChangeListener routeChangeListener;
     private volatile RouteKind activeKind = RouteKind.UNKNOWN;
@@ -61,6 +69,15 @@ public final class KwsAudioRouteManager {
     private AudioDeviceCallback deviceCallback;
     private BroadcastReceiver scoReceiver;
     private Runnable pendingRouteNotify;
+
+    public static KwsAudioRouteManager getInstance(Context context) {
+        synchronized (LOCK) {
+            if (shared == null) {
+                shared = new KwsAudioRouteManager(context.getApplicationContext());
+            }
+            return shared;
+        }
+    }
 
     public KwsAudioRouteManager(Context context) {
         app = context.getApplicationContext();
@@ -81,19 +98,22 @@ public final class KwsAudioRouteManager {
         return preferredInput;
     }
 
-    /** Source recommandée selon la route active. */
+    /** True si un casque / kit BT (A2DP ou SCO) est connecté — on tentera le micro SCO. */
+    public boolean wantsBluetoothMic() {
+        refreshRouteKind();
+        return activeKind == RouteKind.BLUETOOTH_SCO;
+    }
+
     public int getAudioSource() {
         switch (activeKind) {
             case BLUETOOTH_SCO:
             case WIRED_HEADSET:
                 return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
             default:
-                // MIC = comportement historique (meilleur taux de détection KWS sur plusieurs OEM).
                 return MediaRecorder.AudioSource.MIC;
         }
     }
 
-    /** Après échec SCO / communication device — forcer le micro téléphone. */
     public void forcePhoneBuiltin() {
         activeKind = RouteKind.PHONE_BUILTIN;
         preferredInput = findBuiltinMic();
@@ -102,24 +122,82 @@ public final class KwsAudioRouteManager {
     }
 
     /**
-     * Active SCO / communication device si Bluetooth. Bloquant — appeler hors UI thread.
-     * @return true si prêt à ouvrir {@link AudioRecord}
+     * Active SCO / communication device si Bluetooth. Bloquant — hors UI thread.
+     * Ref-count : chaque {@code prepare} incrémente un hold (même hors BT) pour que
+     * {@link #releaseCapture()} ne coupe jamais le SCO d'un autre client.
      */
     public boolean prepareCapture() {
-        refreshRouteKind();
-        logRoute("prepareCapture");
-        if (activeKind != RouteKind.BLUETOOTH_SCO) {
-            scoPrepared = false;
-            return true;
+        synchronized (scoLock) {
+            refreshRouteKind();
+            logRoute("prepareCapture");
+            int holds = scoHoldCount.incrementAndGet();
+            if (activeKind != RouteKind.BLUETOOTH_SCO) {
+                return true;
+            }
+            if (holds > 1 && scoPrepared) {
+                Log.i(TAG, "SCO already held count=" + holds);
+                return true;
+            }
+            boolean ok;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ok = prepareCommunicationDeviceApi31();
+            } else {
+                ok = prepareScoLegacy();
+            }
+            if (!ok) {
+                scoHoldCount.decrementAndGet();
+                Log.w(TAG, "prepareCapture failed — caller peut fallback téléphone");
+            }
+            return ok;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return prepareCommunicationDeviceApi31();
-        }
-        return prepareScoLegacy();
     }
 
+    /**
+     * Prépare la route STT en arrière-plan puis appelle {@code onReady} sur le main thread
+     * avec le succès de {@link #prepareCapture()}.
+     */
+    public void prepareCaptureAsync(java.util.function.Consumer<Boolean> onReady) {
+        io.execute(() -> {
+            boolean ok = true;
+            try {
+                ok = prepareCapture();
+            } catch (Exception e) {
+                Log.w(TAG, "prepareCaptureAsync", e);
+                ok = false;
+            }
+            final boolean result = ok;
+            if (onReady != null) main.post(() -> onReady.accept(result));
+        });
+    }
+
+    /** Libère un hold ; SCO réellement coupé quand le compteur tombe à 0. */
     public void releaseCapture() {
-        if (!scoPrepared) return;
+        synchronized (scoLock) {
+            int left = scoHoldCount.decrementAndGet();
+            if (left > 0) {
+                Log.i(TAG, "SCO hold remaining=" + left);
+                return;
+            }
+            if (left < 0) {
+                scoHoldCount.set(0);
+                return;
+            }
+            releaseCaptureInternal();
+        }
+    }
+
+    public void releaseCaptureAsync() {
+        io.execute(() -> {
+            try {
+                releaseCapture();
+            } catch (Exception e) {
+                Log.w(TAG, "releaseCaptureAsync", e);
+            }
+        });
+    }
+
+    private void releaseCaptureInternal() {
+        if (!scoPrepared && audioManager.getMode() == AudioManager.MODE_NORMAL) return;
         scoPrepared = false;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -140,11 +218,16 @@ public final class KwsAudioRouteManager {
             main.removeCallbacks(pendingRouteNotify);
             pendingRouteNotify = null;
         }
-        releaseCapture();
+        synchronized (scoLock) {
+            scoHoldCount.set(0);
+            releaseCaptureInternal();
+        }
         unregisterObservers();
+        synchronized (LOCK) {
+            if (shared == this) shared = null;
+        }
     }
 
-    /** Chaîne lisible pour les logs KWS (téléphone vs Bluetooth SCO, etc.). */
     public String describeRoute() {
         refreshRouteKind();
         StringBuilder sb = new StringBuilder();
@@ -159,6 +242,7 @@ public final class KwsAudioRouteManager {
         }
         sb.append(" source=").append(audioSourceLabel(getAudioSource()));
         sb.append(" mode=").append(modeLabel(audioManager.getMode()));
+        sb.append(" holds=").append(scoHoldCount.get());
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             sb.append(" scoOn=").append(audioManager.isBluetoothScoOn());
         }
@@ -177,10 +261,9 @@ public final class KwsAudioRouteManager {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
         AudioDeviceInfo target = findBluetoothCommunicationDevice();
         if (target == null) {
-            Log.w(TAG, "BT connecté mais aucun communication device — fallback téléphone");
-            activeKind = RouteKind.PHONE_BUILTIN;
-            preferredInput = findBuiltinMic();
-            return true;
+            // Souvent l'entrée SCO n'existe qu'après startBluetoothSco.
+            Log.w(TAG, "BT audio présent mais pas encore de communication device — SCO legacy");
+            return prepareScoLegacy();
         }
         try {
             audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
@@ -188,10 +271,14 @@ public final class KwsAudioRouteManager {
             preferredInput = target;
             scoPrepared = set;
             Log.i(TAG, "setCommunicationDevice ok=" + set + " " + describeRoute());
-            return set;
+            if (!set) {
+                Log.w(TAG, "setCommunicationDevice false — fallback SCO legacy");
+                return prepareScoLegacy();
+            }
+            return true;
         } catch (Exception e) {
-            Log.w(TAG, "setCommunicationDevice failed", e);
-            return false;
+            Log.w(TAG, "setCommunicationDevice failed — fallback SCO legacy", e);
+            return prepareScoLegacy();
         }
     }
 
@@ -213,20 +300,34 @@ public final class KwsAudioRouteManager {
             }
         };
         IntentFilter filter = new IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
-        app.registerReceiver(waiter, filter);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                app.registerReceiver(waiter, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                app.registerReceiver(waiter, filter);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "register SCO waiter", e);
+            return false;
+        }
         try {
             audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
             audioManager.startBluetoothSco();
             boolean ok = latch.await(SCO_WAIT_MS, TimeUnit.MILLISECONDS);
-            if (connected.get()) {
+            if (connected.get() || audioManager.isBluetoothScoOn()) {
                 audioManager.setBluetoothScoOn(true);
                 preferredInput = findBluetoothInputDevice();
                 scoPrepared = true;
-                Log.i(TAG, "SCO connected " + describeRoute());
+                Log.i(TAG, "SCO connected awaitOk=" + ok + " " + describeRoute());
                 return true;
             }
             Log.w(TAG, "SCO timeout ok=" + ok + " scoOn=" + audioManager.isBluetoothScoOn());
-            return audioManager.isBluetoothScoOn();
+            // Ne pas laisser MODE_IN_COMMUNICATION sans SCO
+            try {
+                audioManager.stopBluetoothSco();
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+            } catch (Exception ignored) {}
+            return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
@@ -297,8 +398,6 @@ public final class KwsAudioRouteManager {
     private void onDevicesChanged(String reason) {
         RouteKind before = activeKind;
         int beforeId = preferredInput != null ? preferredInput.getId() : -1;
-        // Ne pas appeler releaseCapture() ici — le thread KWS peut être dans AudioRecord.read().
-        // La libération SCO/mode se fait dans SherpaKwsEngine.closeMic() après routeChanged.
         refreshRouteKind();
         int afterId = preferredInput != null ? preferredInput.getId() : -1;
         boolean changed = before != activeKind || beforeId != afterId;
@@ -342,6 +441,12 @@ public final class KwsAudioRouteManager {
             preferredInput = bt;
             return;
         }
+        // Casque musique (A2DP) : l'entrée SCO n'apparaît souvent qu'après startBluetoothSco.
+        if (hasBluetoothAudioOutput() || isScoLikelyAvailable()) {
+            activeKind = RouteKind.BLUETOOTH_SCO;
+            // garder preferredInput précédent si encore valide, sinon null jusqu'au SCO
+            return;
+        }
         AudioDeviceInfo wired = findInputOfType(AudioDeviceInfo.TYPE_WIRED_HEADSET);
         if (wired != null) {
             activeKind = RouteKind.WIRED_HEADSET;
@@ -365,6 +470,32 @@ public final class KwsAudioRouteManager {
         }
         activeKind = RouteKind.UNKNOWN;
         preferredInput = null;
+    }
+
+    private boolean hasBluetoothAudioOutput() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+        for (AudioDeviceInfo device : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int type = device.getType();
+            if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                    || type == AudioDeviceInfo.TYPE_HEARING_AID) {
+                return true;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && (type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    || type == AudioDeviceInfo.TYPE_BLE_SPEAKER)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isScoLikelyAvailable() {
+        try {
+            return audioManager.isBluetoothScoAvailableOffCall();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private AudioDeviceInfo findBluetoothInputDevice() {
@@ -395,7 +526,6 @@ public final class KwsAudioRouteManager {
     private AudioDeviceInfo findBuiltinMic() {
         AudioDeviceInfo builtIn = findInputOfType(AudioDeviceInfo.TYPE_BUILTIN_MIC);
         if (builtIn != null) return builtIn;
-        // TYPE_BUILTIN_ECHO_REFERENCE (= 28) — API 31+ ; littéral pour stubs SDK incomplets
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return findInputOfType(28);
         }
@@ -445,6 +575,7 @@ public final class KwsAudioRouteManager {
             switch (type) {
                 case AudioDeviceInfo.TYPE_BUILTIN_MIC: return "BUILTIN_MIC";
                 case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "BT_SCO";
+                case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP: return "BT_A2DP";
                 case AudioDeviceInfo.TYPE_WIRED_HEADSET: return "WIRED";
                 case AudioDeviceInfo.TYPE_USB_DEVICE: return "USB";
                 default:

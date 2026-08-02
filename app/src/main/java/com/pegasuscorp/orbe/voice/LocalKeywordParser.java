@@ -76,18 +76,40 @@ public class LocalKeywordParser implements IntentParser {
             return new Command(Action.OPEN_API_SETTINGS, null, 0);
         }
 
-        // --- Ouvrir une app : "ouvre X", "lance X", "demarre X" ---
-        for (String verb : new String[]{"ouvre ", "lance ", "demarre ", "ouvrir ", "lancer "}) {
-            int idx = t.indexOf(verb);
-            if (idx >= 0) {
-                String app = t.substring(idx + verb.length()).trim();
-                if (!app.isEmpty()) {
-                    return new Command(Action.OPEN_APP, app, 0);
-                }
+        // --- Ouvrir / relancer une app ou un raccourci web ---
+        String foldT = t.replace('é', 'e').replace('è', 'e').replace('ê', 'e')
+                .replace('-', ' ');
+        for (String verb : new String[]{
+                "relance ", "relancer ", "reouvre ", "reouvrir ",
+                "ouvre encore ", "lance encore ", "ramene ",
+                "ouvre moi ", "lance moi ", "ouvre ", "lance ",
+                "demarre ", "ouvrir ", "lancer "
+        }) {
+            int idx = foldT.indexOf(verb);
+            if (idx < 0) continue;
+            String app = stripOpenArticles(foldT.substring(idx + verb.length()).trim());
+            if (!app.isEmpty()
+                    && !app.startsWith("ton interface")
+                    && !app.startsWith("l'interface")
+                    && !app.startsWith("l interface")
+                    && !app.startsWith("la conversation")
+                    && !app.contains("bloc")
+                    && !app.contains("bureau")) {
+                return new Command(Action.OPEN_APP, app, 0);
             }
         }
 
         return Command.unknown();
+    }
+
+    /** « le cursor » / « l'app cursor » → « cursor ». */
+    static String stripOpenArticles(String app) {
+        if (app == null) return "";
+        String a = app.trim();
+        a = a.replaceFirst("(?i)^(le|la|les|l['’]|un|une|mon|ma|mes)\\s+", "");
+        a = a.replaceFirst("(?i)^(raccourci|lien|site|page|app|application)\\s+", "");
+        a = a.replaceFirst("(?i)^(le|la|les|l['’]|un|une)\\s+", "");
+        return a.trim();
     }
 
     private int extractDuration(String t) {

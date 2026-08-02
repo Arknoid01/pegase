@@ -153,12 +153,15 @@ public final class OrbUiController {
         PackageManager pm = context.getPackageManager();
         int iconSize = (int) (context.getResources().getDisplayMetrics().density * 48);
         for (int i = 0; i < ShortcutStore.SLOT_COUNT; i++) {
-            String pkg = ShortcutStore.getPackage(context, i);
+            ShortcutStore.Slot slot = ShortcutStore.getSlot(context, i);
             Drawable icon = null;
-            if (pkg != null) {
+            if (slot.isWeb()) {
+                icon = webShortcutIcon(pm, iconSize);
+            } else if (slot.isApp()) {
                 try {
-                    Drawable raw = pm.getApplicationIcon(pkg);
-                    icon = IconThemeHelper.resolveForPackage(context, pkg, raw, iconSize);
+                    Drawable raw = pm.getApplicationIcon(slot.packageName);
+                    icon = IconThemeHelper.resolveForPackage(
+                            context, slot.packageName, raw, iconSize);
                 } catch (PackageManager.NameNotFoundException e) {
                     ShortcutStore.clearSlot(context, i);
                 }
@@ -166,6 +169,26 @@ public final class OrbUiController {
             slots.add(new OrbView.AppSlot(icon));
         }
         orbView.setAppSlots(slots);
+    }
+
+    /** Icône générique lien — favicon du navigateur si dispo, sinon icône système. */
+    private Drawable webShortcutIcon(PackageManager pm, int iconSize) {
+        String[] browsers = {
+                "com.android.chrome", "com.brave.browser", "org.mozilla.firefox",
+                "com.microsoft.emmx", "com.sec.android.app.sbrowser"
+        };
+        for (String pkg : browsers) {
+            try {
+                Drawable raw = pm.getApplicationIcon(pkg);
+                return IconThemeHelper.resolveForPackage(context, pkg, raw, iconSize);
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            return context.getDrawable(android.R.drawable.ic_menu_view);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public void applyPersonalization() {

@@ -85,6 +85,12 @@ public class FloatingOrbService extends Service {
     private float density;
     /** Hauteur IME (px) — pour remonter / réduire la bulle au-dessus du clavier. */
     private int imeBottomPx;
+    /**
+     * Y « au repos » avant le lift clavier. Tant que l'IME est ouvert on recalcule
+     * depuis cette valeur (évite de remonter à chaque inset). Au close → restaurer.
+     */
+    private int restingY;
+    private boolean imeLiftActive;
     private DragAndTapListener dragListener;
     private PegaseVisualStateHub.Listener visualStateListener;
 
@@ -316,7 +322,7 @@ public class FloatingOrbService extends Service {
             if (currentMode == OverlayMode.COPILOT) {
                 showCopilotMenu();
             }
-        });
+        }, this::onOrbDragSettled);
         orbView.setOnTouchListener(dragListener);
     }
 
@@ -353,6 +359,12 @@ public class FloatingOrbService extends Service {
         if (currentMode != OverlayMode.COPILOT || !bubbleExpanded || bubblePanel == null) {
             return;
         }
+        // Clavier fermé → revenir à la position mémorisée (sinon l'orbe reste trop haut).
+        if (imeBottomPx <= 0) {
+            restoreRestingLayoutAfterIme();
+            return;
+        }
+
         int screenH = screenHeightPx();
         int orb = orbSizePx();
         int gap = dp(8);
@@ -360,15 +372,19 @@ public class FloatingOrbService extends Service {
         int maxBubble = dp(BUBBLE_H_DP);
         int minBubble = dp(160);
         int visibleBottom = Math.max(orb + gap + minBubble, screenH - imeBottomPx);
-        // Place la fenêtre pour que bas(orbe+bulle) reste au-dessus du clavier
+
+        if (!imeLiftActive) {
+            restingY = layoutParams.y;
+            imeLiftActive = true;
+        }
+        // Toujours partir du Y au repos — pas du Y déjà lifté.
+        int y = restingY;
         int need = orb + gap + maxBubble + pad;
-        int y = layoutParams.y;
         if (y + need > visibleBottom) {
             y = Math.max(0, visibleBottom - need);
         }
         int availableForBubble = visibleBottom - y - orb - gap - pad;
         int bubbleH = Math.max(minBubble, Math.min(maxBubble, availableForBubble));
-        // Si le clavier est très haut, remonte encore
         need = orb + gap + bubbleH + pad;
         if (y + need > visibleBottom) {
             y = Math.max(0, visibleBottom - need);
@@ -389,6 +405,38 @@ public class FloatingOrbService extends Service {
             wm.updateViewLayout(overlayRoot, layoutParams);
         } catch (Exception ignored) {}
         bubblePanel.post(bubblePanel::scrollToBottom);
+    }
+
+    /** Remet Y + hauteur bulle après fermeture IME. */
+    private void restoreRestingLayoutAfterIme() {
+        if (layoutParams == null || wm == null || bubblePanel == null) return;
+        int orb = orbSizePx();
+        int gap = dp(8);
+        int pad = dp(8);
+        int bubbleH = dp(BUBBLE_H_DP);
+        FrameLayout.LayoutParams blp = (FrameLayout.LayoutParams) bubblePanel.getLayoutParams();
+        if (blp.height != bubbleH || blp.topMargin != orb + gap) {
+            blp.height = bubbleH;
+            blp.topMargin = orb + gap;
+            bubblePanel.setLayoutParams(blp);
+        }
+        if (imeLiftActive) {
+            layoutParams.y = restingY;
+            imeLiftActive = false;
+        }
+        layoutParams.height = orb + gap + bubbleH + pad;
+        clampOrbOnScreen();
+        try {
+            wm.updateViewLayout(overlayRoot, layoutParams);
+        } catch (Exception ignored) {}
+    }
+
+    /** Appelé après un drag : la position visible devient le nouveau repos. */
+    void onOrbDragSettled(int x, int y) {
+        if (imeLiftActive) {
+            restingY = y;
+        }
+        CopilotPrefs.setOrbPosition(this, x, y);
     }
 
     private int screenHeightPx() {
@@ -434,6 +482,10 @@ public class FloatingOrbService extends Service {
         if (bubblePanel == null) return;
         bubblePanel.hideKeyboard();
         imeBottomPx = 0;
+        if (imeLiftActive && layoutParams != null) {
+            layoutParams.y = restingY;
+            imeLiftActive = false;
+        }
         // Restaure hauteur bulle par défaut
         FrameLayout.LayoutParams blp = (FrameLayout.LayoutParams) bubblePanel.getLayoutParams();
         blp.height = dp(BUBBLE_H_DP);
@@ -709,27 +761,35 @@ public class FloatingOrbService extends Service {
      */
     public static boolean evacuateForScreenTap(float x, float y) {
         FloatingOrbService s = instance;
-        if (s == null) return false;
+        if (s == null) {
+            setTouchPassthrough(true);
+            return false;
+        }
+        // Toujours passthrough avant geste. Collapse synchrone si déjà sur le main
+        // (sinon le caller doit différer dispatchGesture — voir tapScreen).
         boolean[] evacuated = {false};
-        runOnMain(() -> {
-            if (s.overlayRoot == null || s.layoutParams == null) return;
-            boolean hit = containsScreenPoint(x, y);
-            // Uniquement si le tap tombe dans l'overlay — sinon passthrough léger.
-            if (!hit) {
+        Runnable apply = () -> {
+            if (s.overlayRoot == null || s.layoutParams == null) {
                 setTouchPassthrough(true);
                 return;
             }
-            if (s.bubbleExpanded) {
+            boolean hit = containsScreenPoint(x, y);
+            if (hit && s.bubbleExpanded) {
                 s.gestureCollapsedBubble = true;
                 s.bubbleExpanded = false;
                 s.hideBubble();
                 android.util.Log.i("FloatingOrb",
                         "evacuateForScreenTap collapsed bubble for tap "
                                 + Math.round(x) + "," + Math.round(y));
+                evacuated[0] = true;
             }
             setTouchPassthrough(true);
-            evacuated[0] = true;
-        });
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            apply.run();
+        } else {
+            new Handler(Looper.getMainLooper()).post(apply);
+        }
         return evacuated[0];
     }
 
@@ -995,6 +1055,7 @@ public class FloatingOrbService extends Service {
         private final java.util.function.IntSupplier orbSizePx;
         private final Runnable onTap;
         private final Runnable onLongPress;
+        private final java.util.function.BiConsumer<Integer, Integer> onSettled;
 
         private float startX, startY;
         private int startParamX, startParamY;
@@ -1003,13 +1064,15 @@ public class FloatingOrbService extends Service {
 
         DragAndTapListener(WindowManager wm, WindowManager.LayoutParams p, View root,
                            java.util.function.IntSupplier orbSizePx,
-                           Runnable onTap, Runnable onLongPress) {
+                           Runnable onTap, Runnable onLongPress,
+                           java.util.function.BiConsumer<Integer, Integer> onSettled) {
             this.wm = wm;
             this.params = p;
             this.root = root;
             this.orbSizePx = orbSizePx;
             this.onTap = onTap;
             this.onLongPress = onLongPress;
+            this.onSettled = onSettled;
         }
 
         private void clampPosition() {
@@ -1045,10 +1108,13 @@ public class FloatingOrbService extends Service {
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    Context ctx = v.getContext();
                     clampPosition();
                     wm.updateViewLayout(root, params);
-                    CopilotPrefs.setOrbPosition(ctx, params.x, params.y);
+                    if (onSettled != null) {
+                        onSettled.accept(params.x, params.y);
+                    } else {
+                        CopilotPrefs.setOrbPosition(v.getContext(), params.x, params.y);
+                    }
                     long elapsed = System.currentTimeMillis() - downTime;
                     if (!dragged) {
                         if (elapsed > 500 && onLongPress != null) onLongPress.run();

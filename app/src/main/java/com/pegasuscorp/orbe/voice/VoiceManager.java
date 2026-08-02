@@ -43,11 +43,15 @@ public class VoiceManager {
     private Runnable onListenFailed;
     private OnListeningStateListener listeningStateListener;
     private volatile boolean pushToTalkMode;
+    /** SCO Bluetooth partagé avec le wake word — requis pour que le micro casque marche en STT. */
+    private final KwsAudioRouteManager audioRoute;
+    private boolean scoHeldForStt;
 
     public VoiceManager(Context ctx, OnResult onResult) {
         this.appContext = ctx.getApplicationContext();
         this.onResult = onResult;
         this.speechOutput = new SpeechOutput(appContext);
+        this.audioRoute = KwsAudioRouteManager.getInstance(appContext);
     }
 
     /** SpeechRecognizer exige un contexte Activity sur plusieurs versions d'Android. */
@@ -86,16 +90,7 @@ public class VoiceManager {
             } catch (RuntimeException ignored) {}
             setListeningActive(false);
         }
-        Intent i = buildListenIntent(true);
-        try {
-            recognizer.startListening(i);
-            setListeningActive(true);
-        } catch (RuntimeException ex) {
-            setListeningActive(false);
-            destroyRecognizer();
-            rebuildRecognizer();
-            Toast.makeText(appContext, "Micro indisponible", Toast.LENGTH_SHORT).show();
-        }
+        beginListeningWithBluetoothRoute(true);
     }
 
     /** Relâchement PTT — demande les résultats finaux. */
@@ -151,16 +146,49 @@ public class VoiceManager {
             return;
         }
         if (listening) return;
-        Intent i = buildListenIntent(false);
-        try {
-            recognizer.startListening(i);
-            setListeningActive(true);
-        } catch (RuntimeException ex) {
-            setListeningActive(false);
-            destroyRecognizer();
-            rebuildRecognizer();
-            Toast.makeText(appContext, "Micro indisponible", Toast.LENGTH_SHORT).show();
-        }
+        beginListeningWithBluetoothRoute(false);
+    }
+
+    /**
+     * Active le SCO Bluetooth si un casque est connecté, puis lance SpeechRecognizer.
+     * Sans ça le STT reste sur le micro téléphone alors que le wake word utilisait le casque.
+     */
+    private void beginListeningWithBluetoothRoute(boolean ptt) {
+        final boolean wantBt = audioRoute.wantsBluetoothMic();
+        audioRoute.prepareCaptureAsync(ok -> {
+            if (recognizer == null) {
+                rebuildRecognizer();
+            }
+            if (recognizer == null) {
+                if (wantBt && ok) releaseSttScoAfterListen();
+                Toast.makeText(appContext, "Reconnaissance vocale indisponible",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (listening) {
+                if (wantBt && ok) {
+                    // prepare a acquis un hold inutilisé
+                    scoHeldForStt = true;
+                    releaseSttScoAfterListen();
+                }
+                return;
+            }
+            scoHeldForStt = wantBt && ok;
+            Intent i = buildListenIntent(ptt);
+            try {
+                android.util.Log.i("VoiceManager", "startListening route="
+                        + audioRoute.describeRoute()
+                        + " scoHeld=" + scoHeldForStt);
+                recognizer.startListening(i);
+                setListeningActive(true);
+            } catch (RuntimeException ex) {
+                setListeningActive(false);
+                releaseSttScoAfterListen();
+                destroyRecognizer();
+                rebuildRecognizer();
+                Toast.makeText(appContext, "Micro indisponible", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     /** Appelé après que Pégase a fini de répondre — ré-ouvre le micro. */
@@ -200,6 +228,16 @@ public class VoiceManager {
             } catch (RuntimeException ignored) {}
             setListeningActive(false);
         }
+        // Libérer SCO pour que TTS / musique repassent en A2DP.
+        releaseSttScoAfterListen();
+    }
+
+    /** Libère le hold STT même si listening était déjà false (après résultat). */
+    private void releaseSttScoAfterListen() {
+        if (scoHeldForStt) {
+            scoHeldForStt = false;
+            audioRoute.releaseCaptureAsync();
+        }
     }
 
     public void speak(String text, Runnable afterSpeak) {
@@ -215,6 +253,8 @@ public class VoiceManager {
             } catch (RuntimeException ignored) {}
             setListeningActive(false);
         }
+        // Couper SCO avant TTS → sortie casque en A2DP (meilleure qualité).
+        releaseSttScoAfterListen();
         if (delayMs <= 0) {
             speechOutput.speak(text, afterSpeak);
         } else {
@@ -235,6 +275,7 @@ public class VoiceManager {
             } catch (RuntimeException ignored) {}
             setListeningActive(false);
         }
+        releaseSttScoAfterListen();
         speechOutput.beginSpeakStream(onComplete);
     }
 
@@ -264,6 +305,7 @@ public class VoiceManager {
         cancelScheduledListening();
         cancelPendingSpeakDelay();
         destroyRecognizer();
+        releaseSttScoAfterListen();
         hostActivity = null;
         speechOutput.release();
     }
@@ -335,8 +377,17 @@ public class VoiceManager {
     private void setListeningActive(boolean active) {
         if (listening == active) return;
         listening = active;
-        if (listeningStateListener != null) {
-            main.post(() -> listeningStateListener.onListeningChanged(listening));
+        // Capturer le listener : PTT peut le nullifier avant l'exécution du post
+        // (crash au retour HOME après ouverture d'un lien web / Chrome).
+        final OnListeningStateListener listener = listeningStateListener;
+        final boolean now = listening;
+        if (listener != null) {
+            main.post(() -> {
+                OnListeningStateListener l = listeningStateListener;
+                if (l != null) {
+                    l.onListeningChanged(now);
+                }
+            });
         }
     }
 
@@ -349,6 +400,7 @@ public class VoiceManager {
         public void onResults(Bundle results) {
             setListeningActive(false);
             pushToTalkMode = false;
+            releaseSttScoAfterListen();
             ArrayList<String> list =
                     results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (list != null && !list.isEmpty()) {
@@ -382,6 +434,7 @@ public class VoiceManager {
         @Override public void onError(int error) {
             setListeningActive(false);
             pushToTalkMode = false;
+            releaseSttScoAfterListen();
             if (error != SpeechRecognizer.ERROR_CLIENT
                     && error != SpeechRecognizer.ERROR_NO_MATCH
                     && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
