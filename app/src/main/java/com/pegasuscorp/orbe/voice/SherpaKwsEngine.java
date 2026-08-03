@@ -520,14 +520,15 @@ public final class SherpaKwsEngine {
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : android.media.MediaRecorder.AudioSource.MIC;
-            // Sur SCO bande étroite, demander 16 kHz oblige le système à rééchantillonner
-            // depuis le 8 kHz du lien. Sur cet appareil cette conversion est cassée :
-            // un échantillon sur deux à zéro et une raie à 4 kHz (mesuré sur kws_deaf_*.wav).
-            // On capture donc à la fréquence native du lien et on double nous-mêmes.
-            captureRate = (routeManager != null
-                    && routeManager.getActiveKind() == KwsAudioRouteManager.RouteKind.BLUETOOTH_SCO)
-                    ? SCO_NATIVE_RATE
-                    : SAMPLE_RATE;
+            // Le rééchantillonnage 8 → 16 kHz du système est propre : une appli
+            // d'enregistrement tierce obtient 1,4 % de zéros sur le même casque, là où
+            // notre capture en produisait 37 à 54 %. On demande donc 16 kHz comme elle,
+            // et on ne force plus le périphérique d'entrée (voir plus bas) — c'est le
+            // seul écart structurel qui restait avec une capture qui fonctionne.
+            // (conservé : sert au commentaire de captureRate)
+            boolean sco = routeManager != null
+                    && routeManager.getActiveKind() == KwsAudioRouteManager.RouteKind.BLUETOOTH_SCO;
+            captureRate = SAMPLE_RATE;
             lastSample = 0f;
             int min = AudioRecord.getMinBufferSize(
                     captureRate,
@@ -540,6 +541,10 @@ public final class SherpaKwsEngine {
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
                     Math.max(min * 2, captureRate / 5));
+            // Indispensable sur SCO : sans épinglage, Android rebranche la capture sur le
+            // micro intégré en cours de session (mesuré : routed=id=19,type=BUILTIN_MIC
+            // alors que la route annonçait BLUETOOTH_SCO, niveaux à -75 dB). Ce n'est pas
+            // la cause des corruptions qu'on a chassées — c'était startVoiceRecognition().
             if (routeManager != null) {
                 routeManager.applyPreferredDevice(audioRecord);
             }

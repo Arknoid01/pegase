@@ -301,10 +301,13 @@ public final class KwsAudioRouteManager {
                 f.put("sco_available_offcall", isScoLikelyAvailable());
                 f.put("am_sco_on", audioManager.isBluetoothScoOn());
                 f.put("hfp_devices", countHfpDevices());
+                // Toujours journalisé : en cas de succès aussi, savoir *quelle* méthode
+                // a établi le lien est la seule façon de relier la qualité audio obtenue
+                // au chemin emprunté.
+                f.put("phases", scoPhaseLog.toString());
+                f.put("sco_states", scoStateLog.toString());
                 if (!result) {
                     f.put("fail_reason", lastScoFailReason == null ? "" : lastScoFailReason);
-                    f.put("phases", scoPhaseLog.toString());
-                    f.put("sco_states", scoStateLog.toString());
                 }
                 com.pegasuscorp.orbe.diag.PegaseDiagLog.kws(app, "sco_service_start", f);
             } catch (Exception ignored) {}
@@ -384,11 +387,14 @@ public final class KwsAudioRouteManager {
             sleepQuiet(350L);
         }
         boolean ok = false;
-        // Sur API 31+ : VR HFP d'abord (plus fiable pour le micro casque hors appel),
-        // puis setCommunicationDevice, puis startBluetoothSco en dernier recours.
+        // SCO ordinaire d'abord — c'est le lien qu'établit un appel téléphonique, et
+        // celui qu'utilisent les applis d'enregistrement Bluetooth. Mesuré sur écouteurs
+        // TWS : 1,4 % d'échantillons à zéro par ce chemin, contre 29 à 56 % par le nôtre.
+        // startVoiceRecognition() met le casque dans un mode HFP particulier que beaucoup
+        // d'écouteurs servent mal ; on le garde en repli, pas en premier choix.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ok = prepareViaHeadsetVoiceRecognition();
-            notePhase("vr1=" + ok);
+            ok = prepareScoLegacy();
+            notePhase("legacy=" + ok);
             if (!ok) {
                 cleanupFailedScoAttemptLocked();
                 sleepQuiet(SCO_RETRY_PAUSE_MS);
@@ -398,8 +404,8 @@ public final class KwsAudioRouteManager {
             if (!ok) {
                 cleanupFailedScoAttemptLocked();
                 sleepQuiet(SCO_RETRY_PAUSE_MS);
-                ok = prepareScoLegacy();
-                notePhase("legacy=" + ok);
+                ok = prepareViaHeadsetVoiceRecognition();
+                notePhase("vr1=" + ok);
             }
             if (!ok) {
                 cleanupFailedScoAttemptLocked();
