@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -54,17 +55,28 @@ public final class SpeechRulesSnapshot {
                 splitLong,
                 removeEmoji,
                 ttsFriendly,
-                // Dictionnaire aussi en insensible à la casse : le LLM écrit souvent
-                // « cursor » / « qwen » alors que la règle est « Cursor » / « Qwen ».
-                compileMap(root.optJSONObject("dictionary"), false),
-                compileMap(root.optJSONObject("replace"), false),
-                compileMap(root.optJSONObject("expand"), false));
+                // Dictionnaire : insensible à la casse sauf clés courtes (acronymes).
+                compileMap(root.optJSONObject("dictionary"), Section.DICTIONARY),
+                compileMap(root.optJSONObject("replace"), Section.REPLACE),
+                compileMap(root.optJSONObject("expand"), Section.EXPAND));
     }
+
+    private enum Section { DICTIONARY, REPLACE, EXPAND }
 
     // Pas de UNICODE_CHARACTER_CLASS : non supporté sur Android (crash au boot).
     private static final int WORD_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
 
-    private static WordRule[] compileMap(JSONObject map, boolean caseSensitive) {
+    /**
+     * Frontières « mot » Unicode via lookarounds — {@code \\b} ASCII rate
+     * café / C++ / C# une fois UNICODE_CHARACTER_CLASS retiré.
+     */
+    private static Pattern wordPattern(String key, boolean caseSensitive) {
+        int flags = caseSensitive ? 0 : WORD_FLAGS;
+        String body = Pattern.quote(key);
+        return Pattern.compile("(?<![\\p{L}\\p{N}_])" + body + "(?![\\p{L}\\p{N}_])", flags);
+    }
+
+    private static WordRule[] compileMap(JSONObject map, Section section) {
         if (map == null) return new WordRule[0];
         List<Entry> entries = new ArrayList<>();
         Iterator<String> keys = map.keys();
@@ -72,8 +84,11 @@ public final class SpeechRulesSnapshot {
             String key = keys.next();
             String value = map.optString(key, "");
             if (key.isEmpty() || value.isEmpty()) continue;
-            // Évite « Dis » / « Moi » (fausses règles) qui casseraient tout le français.
-            if (SpeechRulesStore.isBlockedDictionaryKey(key)) continue;
+            // Évite « Dis » / « Moi » / « Chat »… qui casseraient le français.
+            if (section == Section.DICTIONARY
+                    && SpeechRulesStore.isBlockedDictionaryKey(key)) {
+                continue;
+            }
             entries.add(new Entry(key, value));
         }
         entries.sort((a, b) -> Integer.compare(b.key.length(), a.key.length()));
@@ -81,12 +96,19 @@ public final class SpeechRulesSnapshot {
         WordRule[] rules = new WordRule[entries.size()];
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
-            int flags = caseSensitive ? 0 : WORD_FLAGS;
-            rules[i] = new WordRule(
-                    Pattern.compile("\\b" + Pattern.quote(e.key) + "\\b", flags),
-                    e.value);
+            // Acronymes courts / TOUT-EN-MAJ : casse exacte (évite « rest » / « x »).
+            // « Git » / « Qwen » restent insensibles à la casse.
+            boolean caseSensitive = section == Section.DICTIONARY && isStrictCaseKey(e.key);
+            rules[i] = new WordRule(wordPattern(e.key, caseSensitive), e.value);
         }
         return rules;
+    }
+
+    private static boolean isStrictCaseKey(String key) {
+        if (key == null || key.isEmpty()) return true;
+        if (key.length() <= 2) return true;
+        String upper = key.toUpperCase(Locale.ROOT);
+        return key.equals(upper);
     }
 
     private static final class Entry {

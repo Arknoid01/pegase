@@ -27,14 +27,19 @@ public final class SpeechRulesStore {
     private static final String KEY_SPEED_MIGRATED = "speech_rules_speed_migrated";
 
     /**
-     * Mots fonction FR — ne jamais les mettre dans le dictionnaire TTS
-     * (sinon « dis » → « Disse » pour toute phrase).
+     * Ne jamais mettre dans le dictionnaire phonétique TTS :
+     * mots fonction FR, et anglicismes seed qui écrasent le français courant
+     * (« chat »→Tchate, « continue »→Conitniou, « rest »→Reste…).
      */
     private static final Set<String> BLOCKED_DICTIONARY_KEYS = Set.of(
             "dis", "dit", "moi", "toi", "lui", "elle", "nous", "vous",
             "je", "tu", "il", "ils", "on", "ce", "ça", "ca", "et", "ou",
             "de", "du", "des", "le", "la", "les", "un", "une", "au", "aux",
-            "que", "qui", "ne", "pas", "plus", "comme", "prononce", "prononces"
+            "que", "qui", "ne", "pas", "plus", "comme", "prononce", "prononces",
+            // Collisions FR / seed phonétique agressif
+            "chat", "branch", "token", "commit", "continue", "root", "word",
+            "rest", "zoom", "go", "x", "ar", "pr", "mr", "ea", "gg", "wp",
+            "yc", "ms"
     );
 
     private static SpeechRulesStore instance;

@@ -24,4 +24,15 @@ public class CopilotIntentHandlerTest {
         assertFalse(CopilotIntentHandler.looksLikeBackCommand("retour sur youtube"));
         assertFalse(CopilotIntentHandler.looksLikeBackCommand(null));
     }
+
+    @Test
+    public void looksLikeCursorMic() {
+        assertTrue(CopilotIntentHandler.looksLikeCursorMic("active le micro cursor"));
+        assertTrue(CopilotIntentHandler.looksLikeCursorMic("lance le micro curseur"));
+        assertTrue(CopilotIntentHandler.looksLikeCursorMic("micro cursor"));
+        assertTrue(CopilotIntentHandler.looksLikeCursorMic("saisie vocale cursor"));
+        assertFalse(CopilotIntentHandler.looksLikeCursorMic("active le micro"));
+        assertFalse(CopilotIntentHandler.looksLikeCursorMic("ouvre cursor"));
+        assertFalse(CopilotIntentHandler.looksLikeCursorMic(null));
+    }
 }

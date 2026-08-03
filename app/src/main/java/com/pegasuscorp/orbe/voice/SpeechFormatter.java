@@ -37,9 +37,11 @@ public final class SpeechFormatter {
         text = text.replaceAll("\\s+", " ").trim();
         if (text.isEmpty()) return List.of();
 
-        text = rules.applyDictionary(text);
+        // Remplacements FR / acronymes d'abord — le dictionnaire phonétique
+        // ne doit pas angliciser « chat », « branch », « continue », etc.
         text = rules.applyReplace(text);
         text = rules.applyExpand(text);
+        text = rules.applyDictionary(text);
         text = expandNumbers(text);
         text = normalizePunctuation(text);
         if (rules.ttsFriendlyMode) {

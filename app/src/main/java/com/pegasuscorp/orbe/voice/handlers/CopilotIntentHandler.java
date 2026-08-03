@@ -36,6 +36,16 @@ public final class CopilotIntentHandler implements IntentHandler {
                 return null;
             }
         }
+        if (looksLikeCursorMic(fold)) {
+            try {
+                return VoiceIntentSupport.routed(context, text,
+                        VoiceIntentSupport.toolJson("copilot_action",
+                                new JSONObject().put("action", "cursor_mic")),
+                        "micro cursor", 0.94);
+            } catch (Exception e) {
+                return null;
+            }
+        }
         if (ShareIngestRouter.looksLikeRemember(fold)
                 || ShareIngestRouter.parseContextName(fold) != null) {
             ShareIngestRouter.Result r = ShareIngestRouter.ingestFromVoice(context, text);
@@ -72,5 +82,18 @@ public final class CopilotIntentHandler implements IntentHandler {
                 || fold.contains("mets les sous titres")
                 || fold.contains("met les sous titres")
                 || fold.contains("affiche les sous titres");
+    }
+
+    static boolean looksLikeCursorMic(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        boolean cursor = fold.contains("cursor") || fold.contains("curseur");
+        boolean mic = fold.contains("micro") || fold.contains("microphone")
+                || fold.contains("saisie vocale") || fold.contains("dictée")
+                || fold.contains("dictee") || fold.contains("voice input");
+        if (cursor && mic) return true;
+        return fold.contains("micro cursor") || fold.contains("micro curseur")
+                || fold.contains("active le micro cursor")
+                || fold.contains("active le micro curseur")
+                || fold.contains("lance le micro cursor");
     }
 }
