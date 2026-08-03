@@ -223,7 +223,7 @@ public final class LifecycleBridge {
         if ((voice == null || !voice.isConversationActive())
                 && PegaseWakeStore.isEnabled(a)
                 && PegaseWakeController.shouldListen()) {
-            PegaseWakeController.resumeWakeIfAllowed(a);
+            VoiceWakeClient.get().startListening(a);
         }
     }
 
@@ -265,11 +265,13 @@ public final class LifecycleBridge {
             if (PegaseInterfaceState.isOpen()) return;
             if (com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) return;
             if (!android.provider.Settings.canDrawOverlays(a)) return;
-            if (voiceRef != null && voiceRef.isConversationActive()
+            // Copilote AlwaysOn prioritaire — sinon open_app (Chrome) + chat actif
+            // bascule l'orbe en VOICE et le tap ouvre MainActivity au lieu de la bulle.
+            if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
+                FloatingOrbService.showCopilot(a);
+            } else if (voiceRef != null && voiceRef.isConversationActive()
                     && PegaseWakeController.isVoiceChatActive()) {
                 FloatingOrbService.show(a);
-            } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
-                FloatingOrbService.showCopilot(a);
             }
         }, 200);
     }
@@ -284,7 +286,8 @@ public final class LifecycleBridge {
         VoiceInputHandler voice = host.voiceInput();
         if (PegaseInterfaceState.isOpen()) {
             if (vm != null) vm.stopListening();
-        } else if (ChatSessionRegistry.isActive()) {
+        } else if (ChatSessionRegistry.isActive()
+                || PegaseWakeController.isVoiceChatActive()) {
             if (vm != null) {
                 vm.cancelScheduledListening();
                 vm.stopListening();
@@ -329,16 +332,26 @@ public final class LifecycleBridge {
         VoiceInputHandler voice = host.voiceInput();
         VoiceManager vm = host.voiceManager();
         boolean interfaceOpen = PegaseInterfaceState.isOpen();
-        boolean chatActive = voice != null && voice.isConversationActive();
-        boolean preserve = interfaceOpen && chatActive;
+        boolean chatActive = ChatSessionRegistry.isActive()
+                || (voice != null && voice.isConversationActive());
+        // Interface ouverte : garder la session, couper le STT HOME.
+        // Wake in-place / voiceChat : garder la session SANS toucher au VoiceManager
+        // partagé (sinon cancelScheduledListening/stopListening tue l'ack→STT).
+        boolean interfacePreserve = interfaceOpen && chatActive;
+        boolean wakeSessionPreserve = !interfacePreserve
+                && (PegaseWakeController.isInPlaceVoiceActive()
+                || PegaseWakeController.isVoiceChatActive())
+                && chatActive;
 
         ChatVoiceBridge.unregister((com.pegasuscorp.orbe.MainActivity) a);
-        if (preserve) {
+        if (interfacePreserve) {
             ChatVoiceBridge.markSessionPreserved(true);
             if (vm != null) {
                 vm.cancelScheduledListening();
                 vm.stopListening();
             }
+        } else if (wakeSessionPreserve) {
+            ChatVoiceBridge.markSessionPreserved(true);
         } else {
             ChatVoiceBridge.markSessionPreserved(false);
             if (voice != null) voice.finalizeChatSession(false);

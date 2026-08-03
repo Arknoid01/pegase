@@ -6,13 +6,13 @@ import android.content.Intent;
 import com.pegasuscorp.orbe.MainActivity;
 import com.pegasuscorp.orbe.FloatingOrbService;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
-import com.pegasuscorp.orbe.PegaseWakeService;
 import com.pegasuscorp.orbe.bureau.BureauHost;
 import com.pegasuscorp.orbe.voice.VoicePushToTalk;
 import com.pegasuscorp.orbe.voice.AssistantVolumeGuard;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.VoiceSessionContext;
 import com.pegasuscorp.orbe.voice.VoiceManager;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 import java.lang.ref.WeakReference;
 
@@ -55,7 +55,7 @@ public final class ChatVoiceBridge {
         if (activity instanceof android.app.Activity) {
             android.app.Activity a = (android.app.Activity) activity;
             PegaseWakeController.setBureauActive(true);
-            PegaseWakeController.pauseWake(a);
+            VoiceWakeClient.get().stopListening(a);
         }
         VoiceManager voice = sharedVoice;
         if (voice != null) {
@@ -70,7 +70,7 @@ public final class ChatVoiceBridge {
         }
         PegaseWakeController.setBureauActive(false);
         if (activity instanceof android.content.Context) {
-            PegaseWakeController.resumeWakeIfAllowed((android.content.Context) activity);
+            VoiceWakeClient.get().startListening((android.content.Context) activity);
         }
     }
 
@@ -107,6 +107,8 @@ public final class ChatVoiceBridge {
         if (isBureauActive()) return;
         if (ChatSessionRegistry.isActive()) return;
         if (host != null && host.get() != null) return;
+        // VoiceManager.release() → endWakeSttHandoff() (notifySttSessionEnded) avant
+        // shutdown TTS — ne laisse pas le launcher en STT_ACTIVE fantôme.
         sharedVoice.release();
         sharedVoice = null;
     }
@@ -149,7 +151,7 @@ public final class ChatVoiceBridge {
             return;
         }
         if (ctx != null) {
-            PegaseWakeController.resumeWakeIfAllowed(ctx);
+            VoiceWakeClient.get().startListening(ctx);
         }
         releaseSharedVoiceIfIdle();
     }
@@ -165,7 +167,14 @@ public final class ChatVoiceBridge {
             VoiceSessionContext.get().clear();
             PegaseWakeController.setVoiceChatActive(false);
             AssistantVolumeGuard.deactivate(appContext);
-            PegaseWakeController.resumeWakeIfAllowed(appContext);
+            VoiceManager voice = sharedVoice;
+            if (voice != null) {
+                voice.cancelScheduledListening();
+                voice.stopListening();
+                voice.endWakeSttHandoff();
+            }
+            // Rearm via coordinator (si STT_ACTIVE) + wantListen ; pas de 2e délai 8s.
+            VoiceWakeClient.get().startListening(appContext);
         }
         releaseSharedVoiceIfIdle();
     }

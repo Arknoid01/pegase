@@ -64,8 +64,13 @@ public final class PegaseWakeController {
 
     public static void setInPlaceVoiceActive(boolean active) {
         inPlaceVoiceActive = active;
-        if (active) voiceChatActive = true;
-        else if (!isVoiceChatSessionOnHome()) voiceChatActive = false;
+        if (active) {
+            voiceChatActive = true;
+        }
+        // Ne PAS clear voiceChatActive ici : après moveTaskToBack l'OEM peut détruire
+        // InPlaceVoiceActivity pendant l'ack TTS / STT. Clear via setVoiceChatActive(false)
+        // ou finalizeChatSession uniquement — sinon shouldListen repasse true et le wake
+        // reprend le micro → conversation coupée (pas de wake_ack_tts_done / stt_schedule).
         logState("inPlace=" + active);
     }
 
@@ -165,15 +170,21 @@ public final class PegaseWakeController {
         logState("userPaused=" + paused);
     }
 
+    /**
+     * @deprecated préférer {@link VoiceWakeClient#startListening} — wrapper conservé
+     * pour compat ; délègue au binder.
+     */
+    @Deprecated
     public static void resumeWakeIfAllowed(Context context) {
         if (context == null || !shouldListen()) return;
-        // Laisse le TTS / buffers audio se vider avant de réarmer le wake (anti-boucle FP).
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            if (!shouldListen()) return;
-            VoiceWakeClient.get().startListening(context);
-        }, 8_000L);
+        VoiceWakeClient.get().startListening(context);
     }
 
+    /**
+     * @deprecated préférer {@link VoiceWakeClient#stopListening} — wrapper conservé
+     * pour compat ; délègue au binder.
+     */
+    @Deprecated
     public static void pauseWake(Context context) {
         if (context != null) VoiceWakeClient.get().stopListening(context);
     }

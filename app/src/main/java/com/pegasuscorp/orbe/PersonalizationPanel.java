@@ -31,6 +31,7 @@ import com.pegasuscorp.orbe.spotify.SpotifyAuthStore;
 import com.pegasuscorp.orbe.voice.PiperModelDownloader;
 import com.pegasuscorp.orbe.voice.PiperModelImporter;
 import com.pegasuscorp.orbe.voice.PiperModelStore;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 import com.pegasuscorp.orbe.diag.DiagReport;
 import com.pegasuscorp.orbe.diag.DiagScriptRunStore;
 import com.pegasuscorp.orbe.diag.DiagScriptResult;
@@ -349,7 +350,7 @@ public class PersonalizationPanel extends FrameLayout {
                         android.widget.Toast.LENGTH_LONG).show());
         addActionRow("Réinitialiser garde KWS (si écoute bloquée)", () -> {
             com.pegasuscorp.orbe.voice.KwsCrashGuard.resetForUser(context);
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
             android.widget.Toast.makeText(context,
                     "Garde KWS réinitialisée — relance de l'écoute",
                     android.widget.Toast.LENGTH_SHORT).show();
@@ -361,7 +362,7 @@ public class PersonalizationPanel extends FrameLayout {
                 : "Activer l'écoute « Pégase »", () -> {
             boolean enable = !com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context);
             com.pegasuscorp.orbe.voice.PegaseWakeStore.setEnabled(context, enable);
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
             android.widget.Toast.makeText(context,
                     enable ? "Pégase écoute en arrière-plan" : "Écoute désactivée",
                     android.widget.Toast.LENGTH_SHORT).show();
@@ -372,7 +373,7 @@ public class PersonalizationPanel extends FrameLayout {
             boolean gentle = !com.pegasuscorp.orbe.voice.PegaseWakeStore.isGentleMode(context);
             com.pegasuscorp.orbe.voice.PegaseWakeStore.setGentleMode(context, gentle);
             com.pegasuscorp.orbe.voice.VoiceWakeClient.get().setGentleMode(context, gentle);
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
             android.widget.Toast.makeText(context,
                     gentle ? "Mode doux : sessions micro espacées"
                             : "Mode réactif : wake plus vif, lag possible",
@@ -383,7 +384,7 @@ public class PersonalizationPanel extends FrameLayout {
                 : "Couper le micro Pégase (global)", () -> {
             boolean muted = !com.pegasuscorp.orbe.voice.VoiceMuteStore.isMuted(context);
             com.pegasuscorp.orbe.voice.VoiceMuteStore.setMuted(context, muted);
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
             android.widget.Toast.makeText(context,
                     muted ? "Micro coupé — wake et discussion désactivés"
                             : "Micro réactivé",
@@ -408,13 +409,13 @@ public class PersonalizationPanel extends FrameLayout {
             com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.92f);
             android.widget.Toast.makeText(context, "Seuil wake → 0,92",
                     android.widget.Toast.LENGTH_SHORT).show();
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
         });
         addActionRow("Seuil OWW normal (0,88)", () -> {
             com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.88f);
             android.widget.Toast.makeText(context, "Seuil wake → 0,88",
                     android.widget.Toast.LENGTH_SHORT).show();
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
         });
         addActionRow("Enregistrer mon wake word", () ->
                 getContext().startActivity(
@@ -472,7 +473,7 @@ public class PersonalizationPanel extends FrameLayout {
                                 android.widget.Toast.makeText(getContext(), message,
                                         android.widget.Toast.LENGTH_LONG).show();
                                 if (success) {
-                                    com.pegasuscorp.orbe.PegaseWakeService.sync(getContext());
+                                    VoiceWakeClient.get().sync(getContext());
                                 }
                             });
                         }
@@ -490,7 +491,7 @@ public class PersonalizationPanel extends FrameLayout {
             android.widget.Toast.makeText(context,
                     "Coupe-circuit réinitialisé — relance du wake…",
                     android.widget.Toast.LENGTH_SHORT).show();
-            PegaseWakeService.sync(context);
+            VoiceWakeClient.get().sync(context);
         });
 
         body.addView(spacer(context, (int) (12 * density)));
@@ -684,6 +685,8 @@ public class PersonalizationPanel extends FrameLayout {
         body.addView(majorSectionTitle(context, "Diagnostic"));
         body.addView(hintLabel(context,
                 "trace.jsonl + rapport d'anomalies — files/diag/ sur l'appareil"));
+        addActionRow("Tableau de bord debug", () ->
+                context.startActivity(DebugDashboardActivity.intent(context)));
         body.addView(hintLabel(context,
                 "voix ou texte : « mode test » pour marquer les sessions poussées"));
         stressTestBtn = addActionRow(stressTestLabel(), this::toggleStressTest);

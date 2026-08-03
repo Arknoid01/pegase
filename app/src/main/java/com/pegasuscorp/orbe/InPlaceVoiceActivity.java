@@ -5,8 +5,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -30,6 +28,7 @@ import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 import com.pegasuscorp.orbe.voice.VoiceMuteStore;
 import com.pegasuscorp.orbe.voice.VoiceOutputHandler;
+import com.pegasuscorp.orbe.voice.WakeToSttTrace;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,7 +41,6 @@ public class InPlaceVoiceActivity extends AppCompatActivity
 
     private static final int REQ_MIC = 8801;
 
-    private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService importExecutor = Executors.newSingleThreadExecutor();
 
     private VoiceManager voiceManager;
@@ -79,24 +77,34 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         voiceInput.attachVoiceHost();
         VoiceMuteStore.syncController(this);
 
+        WakeToSttTrace.adoptFromIntent(getIntent());
+        WakeToSttTrace.mark(this, "wake_ui_opened");
         voiceInput.handleWakeIntent(getIntent());
-        main.postDelayed(() -> moveTaskToBack(true), 350);
+        // moveTaskToBack après ack TTS (onWakeAckFinished) — pas ici :
+        // un retour trop tôt + destroy OEM / recreate MainActivity coupait la phrase.
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        WakeToSttTrace.adoptFromIntent(intent);
         if (voiceInput != null) voiceInput.handleWakeIntent(intent);
-        main.postDelayed(() -> moveTaskToBack(true), 350);
+    }
+
+    @Override
+    public void onWakeAckFinished() {
+        if (!isFinishing() && !isDestroyed()) {
+            moveTaskToBack(true);
+        }
     }
 
     @Override
     protected void onDestroy() {
+        // Ne PAS exitChatMode ici : après moveTaskToBack l'OEM peut détruire
+        // l'Activity mid-TTS → conversation.exit + resume wake → STT mort.
+        // Clear seulement inPlace ; voiceChatActive reste jusqu'à finalizeChatSession.
         PegaseWakeController.setInPlaceVoiceActive(false);
-        if (voiceInput != null && voiceInput.isConversationActive()) {
-            voiceInput.exitChatMode();
-        }
         ChatVoiceBridge.releaseSharedVoiceIfIdle();
         importExecutor.shutdownNow();
         super.onDestroy();

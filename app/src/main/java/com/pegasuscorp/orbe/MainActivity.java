@@ -227,7 +227,7 @@ public class MainActivity extends AppCompatActivity
 
         homeAssets.maybeOfferPiperDownload();
         wireVoiceAndLifecycle();
-        PegaseWakeService.sync(this);
+        VoiceWakeClient.get().sync(this);
     }
 
     private static FrameLayout.LayoutParams matchParent() {
@@ -479,7 +479,7 @@ public class MainActivity extends AppCompatActivity
         }
         prepareHomeTransition();
         PegaseWakeController.setBureauActive(true);
-        PegaseWakeController.pauseWake(this);
+        VoiceWakeClient.get().stopListening(this);
         if (voiceInput != null) voiceInput.stopListeningForNavigation();
         BureauActivity.open(this);
     }
@@ -491,7 +491,7 @@ public class MainActivity extends AppCompatActivity
         if (orbView != null) orbView.collapseIfExpanded();
         if (voiceInput != null) voiceInput.ensureHeavyNativesReady();
         PegaseWakeController.setTextDiscussionActive(true);
-        PegaseWakeController.pauseWake(this);
+        VoiceWakeClient.get().stopListening(this);
         if (voiceInput != null) voiceInput.stopListeningForNavigation();
         PegaseInterfaceState.openOrBringToFront(this, PegaseInterfaceState.TAB_CONVERSATION);
     }

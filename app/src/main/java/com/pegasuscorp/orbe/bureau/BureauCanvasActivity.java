@@ -35,7 +35,7 @@ import com.pegasuscorp.orbe.session.Channel;
 import com.pegasuscorp.orbe.session.PegaseSession;
 import com.pegasuscorp.orbe.session.SessionContext;
 import com.pegasuscorp.orbe.voice.AssistantVolumeGuard;
-import com.pegasuscorp.orbe.voice.PegaseWakeController;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 import com.pegasuscorp.orbe.voice.SpeechInputNormalizer;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 import com.pegasuscorp.orbe.voice.WakeWordMatcher;
@@ -419,7 +419,7 @@ public class BureauCanvasActivity extends AppCompatActivity
     @Override
     protected void onStart() {
         super.onStart();
-        PegaseWakeController.pauseWake(this);
+        VoiceWakeClient.get().stopListening(this);
         AssistantVolumeGuard.activate(this);
         if (voiceManager != null) {
             voiceManager.cancelScheduledListening();

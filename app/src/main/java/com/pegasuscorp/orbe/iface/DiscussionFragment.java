@@ -51,6 +51,7 @@ import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.PttTouchHelper;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 import com.pegasuscorp.orbe.voice.VoicePushToTalk;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -431,7 +432,7 @@ public class DiscussionFragment extends Fragment {
         if (ctx == null) return;
         if (active) {
             PegaseWakeController.setTextDiscussionActive(true);
-            PegaseWakeController.pauseWake(ctx);
+            VoiceWakeClient.get().stopListening(ctx);
             VoiceManager voice = ChatVoiceBridge.getSharedVoice(ctx);
             if (voice != null) {
                 voice.cancelScheduledListening();
@@ -441,7 +442,7 @@ public class DiscussionFragment extends Fragment {
         }
         PegaseWakeController.setTextDiscussionActive(false);
         if (!ChatSessionRegistry.isActive() && !PegaseWakeController.isVoiceChatActive()) {
-            PegaseWakeController.resumeWakeIfAllowed(ctx);
+            VoiceWakeClient.get().startListening(ctx);
         }
     }
 
@@ -738,7 +739,7 @@ public class DiscussionFragment extends Fragment {
 
         if (!ChatSessionRegistry.get(ctx).isActive()) {
             PegaseWakeController.setTextDiscussionActive(true);
-            PegaseWakeController.pauseWake(ctx);
+            VoiceWakeClient.get().stopListening(ctx);
         }
         ensureTurnsListener();
         MemoryRepository.getInstance(ctx).addTurn(true, userLabel);
@@ -996,7 +997,7 @@ public class DiscussionFragment extends Fragment {
 
         if (!ChatSessionRegistry.get(ctx).isActive()) {
             PegaseWakeController.setTextDiscussionActive(true);
-            PegaseWakeController.pauseWake(ctx);
+            VoiceWakeClient.get().stopListening(ctx);
         }
 
         ensureTurnsListener();

@@ -29,6 +29,7 @@ public final class VoiceWakeClient {
     private IVoiceWakeService remote;
     private boolean binding;
     private boolean wantListen;
+    private boolean keepScoWhilePaused;
     private boolean gentle = true;
     private WakeHealthStatus cachedHealth = WakeHealthStatus.OFF;
     private Runnable pendingAfterBind;
@@ -63,6 +64,8 @@ public final class VoiceWakeClient {
                     main.post(() -> WakeHealthUi.apply(cachedHealth));
                     if (wantListen) {
                         remote.startWakeListening();
+                    } else if (keepScoWhilePaused) {
+                        remote.pauseWakeListeningKeepSco();
                     } else {
                         remote.stopWakeListening();
                     }
@@ -172,6 +175,7 @@ public final class VoiceWakeClient {
     public void startListening(Context ctx) {
         ensureApp(ctx);
         wantListen = true;
+        keepScoWhilePaused = false;
         ensureBound(ctx, () -> {
             IVoiceWakeService r;
             synchronized (lock) {
@@ -191,6 +195,7 @@ public final class VoiceWakeClient {
     public void stopListening(Context ctx) {
         ensureApp(ctx);
         wantListen = false;
+        keepScoWhilePaused = false;
         IVoiceWakeService r;
         synchronized (lock) {
             r = remote;
@@ -201,6 +206,75 @@ public final class VoiceWakeClient {
             } catch (RemoteException ignored) {}
         }
         // Ne pas unbind immédiatement : re-bind rapide au prochain resume HOME.
+    }
+
+    /**
+     * Pause conversation / handoff STT : arrête le wake sans couper le SCO Bluetooth.
+     * Évite le silence micro juste après « Pégase » sur casque.
+     */
+    public void pauseKeepSco(Context ctx) {
+        ensureApp(ctx);
+        wantListen = false;
+        keepScoWhilePaused = true;
+        IVoiceWakeService r;
+        synchronized (lock) {
+            r = remote;
+        }
+        if (r != null) {
+            try {
+                r.pauseWakeListeningKeepSco();
+            } catch (RemoteException ignored) {}
+        }
+    }
+
+    /** Handoff : conversation STT ouverte → coordinator {@code STT_ACTIVE}. */
+    public void notifySttSessionStarted(Context ctx) {
+        ensureApp(ctx);
+        ensureBound(ctx, () -> {
+            IVoiceWakeService r;
+            synchronized (lock) {
+                r = remote;
+            }
+            if (r == null) return;
+            try {
+                r.notifySttSessionStarted();
+            } catch (RemoteException e) {
+                Log.w(TAG, "notifySttSessionStarted", e);
+                remoteDied();
+            }
+        });
+    }
+
+    /** Handoff : fin STT → {@code releaseSttSession} (rearm anti-écho côté :voice). */
+    public void notifySttSessionEnded(Context ctx) {
+        ensureApp(ctx);
+        IVoiceWakeService r;
+        synchronized (lock) {
+            r = remote;
+        }
+        if (r != null) {
+            try {
+                r.notifySttSessionEnded();
+            } catch (RemoteException e) {
+                Log.w(TAG, "notifySttSessionEnded", e);
+                remoteDied();
+            }
+            return;
+        }
+        // Service pas encore bind : tenter un bind et rejouer.
+        ensureBound(ctx, () -> {
+            IVoiceWakeService r2;
+            synchronized (lock) {
+                r2 = remote;
+            }
+            if (r2 == null) return;
+            try {
+                r2.notifySttSessionEnded();
+            } catch (RemoteException e) {
+                Log.w(TAG, "notifySttSessionEnded", e);
+                remoteDied();
+            }
+        });
     }
 
     private void ensureApp(Context ctx) {

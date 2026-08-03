@@ -22,6 +22,7 @@ import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.tools.copilot.UiActionTool;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 import org.json.JSONObject;
 
@@ -170,12 +171,23 @@ public final class CopilotController {
         if (!ChatSessionRegistry.get(appContext).isActive()
                 && !PegaseWakeController.isVoiceChatActive()) {
             PegaseWakeController.setTextDiscussionActive(false);
-            PegaseWakeController.resumeWakeIfAllowed(appContext);
+            VoiceWakeClient.get().startListening(appContext);
         }
     }
 
     public boolean isSending() {
         return sending;
+    }
+
+    /** Débloque la bulle si un outil exit a laissé {@code sending=true}. */
+    public void forceIdleUi() {
+        if (!sending) {
+            BubbleSink sink = bubbleSink;
+            if (sink != null) sink.onSendingChanged(false);
+            return;
+        }
+        setSending(false);
+        clearBubbleStatus(true);
     }
 
     public void sendUserMessage(String text) {
@@ -425,6 +437,19 @@ public final class CopilotController {
                     if (gen != attachGeneration) return;
                     clearBubbleStatus(true);
                     if (bubbleSink != null && result != null && result.text != null) {
+                        bubbleSink.onAssistantMessage(result.text);
+                    }
+                    setSending(false);
+                });
+            }
+
+            @Override
+            public void onToolExit(ToolResult result) {
+                // open_app / Spotify / etc. — sinon sending reste true et la bulle casse.
+                main.post(() -> {
+                    if (gen != attachGeneration) return;
+                    clearBubbleStatus(true);
+                    if (bubbleSink != null && result != null && !TextUtils.isEmpty(result.text)) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
                     setSending(false);

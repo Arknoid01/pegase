@@ -49,11 +49,10 @@ public class VoiceService extends Service {
     private static final long START_LISTEN_DELAY_MS = 800L;
     private static final long WAKE_DEBOUNCE_MS = 8_000L;
     private static final long KWS_MEDIA_POLL_MS = 4_000L;
-    /** Si le thread KWS meurt sans mot-clé, relancer tant que wantListening. */
+    /** Si le thread KWS meurt sans mot-clé, relancer tant que wantsListening. */
     private static final long KWS_HEALTH_FIRST_MS = 4_000L;
     private static final long KWS_HEALTH_PERIOD_MS = 30_000L;
     private static final long KWS_HEALTH_GRACE_MS = 3_500L;
-    private static final long KWS_RETRY_AFTER_FAIL_MS = 45_000L;
     /** STT en arrière-plan = ouvre/ferme le micro → OEM tue le service. Backoff fort. */
     private static final long[] STT_BACKOFF_MS = { 20_000L, 45_000L, 90_000L };
 
@@ -64,16 +63,11 @@ public class VoiceService extends Service {
 
     private SpeechRecognizer recognizer;
     private KwsAudioRouteManager kwsRouteManager;
+    private AudioRouteObserver audioRouteObserver;
+    private WakeCoordinator wakeCoordinator;
     private SherpaKwsEngine kwsEngine;
     private OpenWakeWordEngine owwEngine;
-    /** Sherpa zipformer (filet). */
-    private boolean useKws;
-    /** openWakeWord custom (prioritaire). */
-    private boolean useOww;
 
-    private boolean listening;
-    /** true = le launcher a demandé l'écoute. */
-    private boolean wantListening;
     private boolean idleListenPending;
     private long lastWakeDetectedMs;
     private long lastKwsStartMs;
@@ -86,22 +80,67 @@ public class VoiceService extends Service {
     private String lastNotifFingerprint;
     private boolean foregroundStarted;
     private WakeHealthStatus lastHealth = WakeHealthStatus.OFF;
+    /** Garde réentrance async SCO wake (pas une source de vérité d'état). */
+    private boolean wakeScoAcquireInFlight;
+    /** STT duty-cycle (fallback rare) — distinct du KWS local. */
+    private boolean sttRecognizerActive;
+    private WakeCoordinator.WakeState lastCoordinatorState = WakeCoordinator.WakeState.IDLE;
+    /** Sécurité : ne pas garder le SCO indéfiniment après pause conversation. */
+    private static final long KEEP_SCO_TIMEOUT_MS = 120_000L;
+    private final Runnable releaseKeptScoRunnable = () -> {
+        if (!wantsListening()) {
+            Log.i(TAG, "keep-SCO timeout — release");
+            releaseWakeServiceScoHold();
+        }
+    };
 
     private final IVoiceWakeService.Stub binder = new IVoiceWakeService.Stub() {
         @Override
         public void startWakeListening() {
-            wantListening = true;
             sttBackoffStep = 0;
             kwsRestartStreak = 0;
+            main.removeCallbacks(releaseKeptScoRunnable);
+            if (wakeCoordinator != null && wakeCoordinator.start()) {
+                ensureSessionEngines();
+            }
             refreshForegroundNotification();
-            scheduleListen(START_LISTEN_DELAY_MS);
+            if (wantsListening()) {
+                scheduleListen(START_LISTEN_DELAY_MS);
+            }
         }
 
         @Override
         public void stopWakeListening() {
-            wantListening = false;
+            if (wakeCoordinator != null) wakeCoordinator.stop();
+            main.removeCallbacks(releaseKeptScoRunnable);
             stopListening();
+            releaseWakeServiceScoHold();
             refreshForegroundNotification();
+        }
+
+        @Override
+        public void pauseWakeListeningKeepSco() {
+            // Handoff wake→STT : couper AudioRecord KWS mais garder le lien HFP/SCO
+            // sinon le micro casque tombe avant SpeechRecognizer (error 7 / silence).
+            // Si encore LISTENING_WAKE (pause avant hit traité), passer en HANDING_OFF
+            // pour que wantsListening() soit false et n'auto-relance pas le moteur.
+            if (wakeCoordinator != null && wakeCoordinator.wantsListening()) {
+                wakeCoordinator.onWakeDetected();
+            }
+            stopListening();
+            main.removeCallbacks(releaseKeptScoRunnable);
+            main.postDelayed(releaseKeptScoRunnable, KEEP_SCO_TIMEOUT_MS);
+            refreshForegroundNotification();
+            try {
+                JSONObject f = new JSONObject();
+                f.put("wake_service_hold", kwsRouteManager != null
+                        && kwsRouteManager.hasWakeServiceScoHold());
+                f.put("route", kwsRouteManager != null
+                        ? kwsRouteManager.describeRoute() : "");
+                f.put("coord_state", wakeCoordinator != null
+                        ? wakeCoordinator.getState().state.name() : "");
+                PegaseDiagLog.kws(VoiceService.this, "wake_pause_keep_sco", f);
+            } catch (Exception ignored) {}
         }
 
         @Override
@@ -141,12 +180,58 @@ public class VoiceService extends Service {
         @Override
         public void resetKwsCrashGuard() {
             KwsCrashGuard.resetForUser(VoiceService.this);
-            refreshWakeBackend();
-            if (wantListening) {
+            if (wakeCoordinator != null) {
+                WakeCoordinator.WakeState st = wakeCoordinator.getState().state;
+                if (st == WakeCoordinator.WakeState.COOLDOWN) {
+                    wakeCoordinator.stop();
+                    wakeCoordinator.start();
+                }
+            }
+            ensureSessionEngines();
+            if (wantsListening()) {
                 scheduleListen(START_LISTEN_DELAY_MS);
             } else {
                 refreshForegroundNotification();
             }
+        }
+
+        @Override
+        public void notifySttSessionStarted() {
+            main.post(() -> {
+                if (wakeCoordinator == null) return;
+                // Plus de relance KWS tant que STT_ACTIVE (wantsListening=false).
+                main.removeCallbacks(listenRunnable);
+                stopListening();
+                main.removeCallbacks(releaseKeptScoRunnable);
+                wakeCoordinator.requestSttSession(ok -> {
+                    try {
+                        JSONObject f = new JSONObject();
+                        f.put("ok", ok);
+                        f.put("coord_state", wakeCoordinator.getState().state.name());
+                        f.put("rearm_pending", wakeCoordinator.isPostSttRearmPending());
+                        f.put("route", kwsRouteManager != null
+                                ? kwsRouteManager.describeRoute() : "");
+                        PegaseDiagLog.kws(VoiceService.this, "coord_stt_started", f);
+                    } catch (Exception ignored) {}
+                    refreshForegroundNotification();
+                });
+            });
+        }
+
+        @Override
+        public void notifySttSessionEnded() {
+            main.post(() -> {
+                if (wakeCoordinator == null) return;
+                boolean released = wakeCoordinator.releaseSttSession();
+                try {
+                    JSONObject f = new JSONObject();
+                    f.put("released", released);
+                    f.put("coord_state", wakeCoordinator.getState().state.name());
+                    f.put("rearm_pending", wakeCoordinator.isPostSttRearmPending());
+                    PegaseDiagLog.kws(VoiceService.this, "coord_stt_ended", f);
+                } catch (Exception ignored) {}
+                refreshForegroundNotification();
+            });
         }
     };
 
@@ -156,8 +241,48 @@ public class VoiceService extends Service {
         createChannel();
         refreshForegroundNotification();
         kwsRouteManager = KwsAudioRouteManager.getInstance(this);
-        refreshWakeBackend();
+        audioRouteObserver = new AudioRouteObserver(this);
+        wakeCoordinator = new WakeCoordinator(this, audioRouteObserver);
+        wakeCoordinator.setListener(this::onCoordinatorState);
         maybeAutoDownloadKws();
+    }
+
+    private void onCoordinatorState(WakeCoordinator.Snapshot snap) {
+        WakeCoordinator.WakeState prev = lastCoordinatorState;
+        lastCoordinatorState = snap.state;
+        if (prev == WakeCoordinator.WakeState.COOLDOWN
+                && snap.state == WakeCoordinator.WakeState.LISTENING_WAKE) {
+            // Fin du COOLDOWN crash-loop : permettre un nouvel essai moteur.
+            KwsCrashGuard.reset(this);
+        }
+        if (snap.state == WakeCoordinator.WakeState.STT_ACTIVE) {
+            // Pas de KWS pendant STT / rearm anti-écho.
+            main.removeCallbacks(listenRunnable);
+            main.post(this::refreshForegroundNotification);
+            return;
+        }
+        if (snap.state == WakeCoordinator.WakeState.LISTENING_WAKE) {
+            main.post(() -> {
+                ensureSessionEngines();
+                if (wantsListening()) scheduleListen(START_LISTEN_DELAY_MS);
+            });
+        } else {
+            main.post(this::refreshForegroundNotification);
+        }
+    }
+
+    private boolean wantsListening() {
+        return wakeCoordinator != null && wakeCoordinator.wantsListening();
+    }
+
+    private boolean useOww() {
+        return wakeCoordinator != null
+                && wakeCoordinator.getSessionBackend() == WakeCoordinator.WakeBackend.OWW;
+    }
+
+    private boolean useKws() {
+        return wakeCoordinator != null
+                && wakeCoordinator.getSessionBackend() == WakeCoordinator.WakeBackend.SHERPA;
     }
 
     @Override
@@ -172,8 +297,13 @@ public class VoiceService extends Service {
 
     @Override
     public void onDestroy() {
-        wantListening = false;
+        if (wakeCoordinator != null) {
+            wakeCoordinator.setListener(null);
+            wakeCoordinator.stop();
+        }
+        main.removeCallbacks(releaseKeptScoRunnable);
         stopListening();
+        releaseWakeServiceScoHold();
         releaseListenWakeLock();
         destroyRecognizer();
         if (owwEngine != null) {
@@ -184,34 +314,48 @@ public class VoiceService extends Service {
             kwsEngine.release();
             kwsEngine = null;
         }
+        if (audioRouteObserver != null) {
+            audioRouteObserver.release();
+            audioRouteObserver = null;
+        }
         if (kwsRouteManager != null) {
             kwsRouteManager.release();
             kwsRouteManager = null;
         }
+        wakeCoordinator = null;
         callbacks.kill();
         healthCallbacks.kill();
         super.onDestroy();
     }
 
     private boolean usesLocalWake() {
-        return useOww || useKws;
+        return useOww() || useKws();
     }
 
-    private void refreshWakeBackend() {
-        useKws = false;
-        useOww = false;
-        // Nouvelle config KWS : laisser une chance après les crashs zipformer.
-        KwsCrashGuard.bumpConfigGeneration(this, 5);
-        if (KwsCrashGuard.shouldDisableKws(this)) {
-            Log.e(TAG, "KWS disabled (crash loop) — pas de STT duty-cycle (évite kill micro)");
-            diag("wake_backend_disabled", "crash_guard", null);
+    /**
+     * Charge les moteurs selon le backend figé par {@link WakeCoordinator#start()}.
+     * Ne re-sélectionne pas Sherpa/OWW (règle dans le coordinator).
+     */
+    private void ensureSessionEngines() {
+        if (wakeCoordinator == null) return;
+        WakeCoordinator.WakeState st = wakeCoordinator.getState().state;
+        if (st == WakeCoordinator.WakeState.COOLDOWN) {
             destroyRecognizer();
             refreshForegroundNotification();
             return;
         }
-        // Production : Sherpa par défaut. openWakeWord uniquement si opt-in explicite.
-        boolean preferOww = WakeOwwStore.preferCustomWake(this) && WakeOwwStore.isModelReady(this);
-        if (preferOww) {
+        KwsCrashGuard.bumpConfigGeneration(this, 5);
+        if (KwsCrashGuard.shouldDisableKws(this)) {
+            Log.e(TAG, "KWS crash-loop — COOLDOWN via WakeCoordinator");
+            diag("wake_backend_disabled", "crash_guard", null);
+            wakeCoordinator.onCrashGuardTripped();
+            stopListening();
+            destroyRecognizer();
+            refreshForegroundNotification();
+            return;
+        }
+        WakeCoordinator.WakeBackend backend = wakeCoordinator.getSessionBackend();
+        if (backend == WakeCoordinator.WakeBackend.OWW) {
             if (owwEngine == null) {
                 owwEngine = new OpenWakeWordEngine(this, new OpenWakeWordEngine.Listener() {
                     @Override
@@ -229,15 +373,13 @@ public class VoiceService extends Service {
                 owwEngine.setRouteManager(kwsRouteManager);
             }
             if (owwEngine.ensureLoaded()) {
-                useOww = true;
                 destroyRecognizer();
-                Log.i(TAG, "wake backend = openWakeWord (prefer_custom)");
+                Log.i(TAG, "wake engine = openWakeWord (session backend)");
                 refreshForegroundNotification();
                 return;
             }
-            Log.w(TAG, "OWW preferé mais load échoué — fallback Sherpa");
-        }
-        if (KwsModelStore.isModelReady(this)) {
+            Log.w(TAG, "OWW session backend but load failed");
+        } else if (backend == WakeCoordinator.WakeBackend.SHERPA) {
             if (kwsEngine == null) {
                 kwsEngine = new SherpaKwsEngine(this, new SherpaKwsEngine.Listener() {
                     @Override
@@ -255,15 +397,14 @@ public class VoiceService extends Service {
                 kwsEngine.setRouteManager(kwsRouteManager);
             }
             if (kwsEngine.ensureLoaded()) {
-                useKws = true;
                 destroyRecognizer();
-                Log.i(TAG, "wake backend = Sherpa KWS");
+                Log.i(TAG, "wake engine = Sherpa KWS (session backend)");
                 refreshForegroundNotification();
                 return;
             }
+            Log.w(TAG, "Sherpa session backend but load failed");
         }
-        // Pas de fallback STT en boucle : ouvre/ferme le micro → OEM kill + point vert.
-        Log.w(TAG, "wake backend = none (OWW/KWS indisponible, STT désactivé en arrière-plan)");
+        Log.w(TAG, "wake engine = none (backend=" + backend + ")");
         destroyRecognizer();
         refreshForegroundNotification();
     }
@@ -279,18 +420,21 @@ public class VoiceService extends Service {
                 Log.i(TAG, "KWS download: " + success + " " + message);
                 if (!success) return;
                 main.post(() -> {
-                    boolean wasListening = wantListening;
+                    boolean wasListening = wantsListening();
                     if (wasListening) {
                         KwsCrashGuard.onPlannedRestart(VoiceService.this);
                     }
                     stopListening();
-                    refreshWakeBackend();
-                    // Pas de nm.notify — évite le spam / clignotement FGS
-                    if (wasListening) {
-                        wantListening = true;
+                    if (wasListening && wakeCoordinator != null) {
+                        // Re-fige backend (modèle désormais dispo) puis relance.
+                        wakeCoordinator.stop();
+                        wakeCoordinator.start();
+                        ensureSessionEngines();
                         sttBackoffStep = 0;
                         kwsRestartStreak = 0;
                         scheduleListen(800);
+                    } else {
+                        ensureSessionEngines();
                     }
                 });
             }
@@ -324,15 +468,15 @@ public class VoiceService extends Service {
         recognizer.setRecognitionListener(new RecognitionListener() {
             @Override
             public void onResults(Bundle results) {
-                listening = false;
+                sttRecognizerActive = false;
                 handleResults(results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION));
-                if (wantListening) scheduleListen(nextSttBackoffMs());
+                if (wantsListening()) scheduleListen(nextSttBackoffMs());
             }
 
             @Override
             public void onError(int error) {
-                listening = false;
-                if (!wantListening) return;
+                sttRecognizerActive = false;
+                if (!wantsListening()) return;
                 scheduleListen(nextSttBackoffMs());
             }
 
@@ -340,7 +484,7 @@ public class VoiceService extends Service {
             @Override public void onBeginningOfSpeech() {}
             @Override public void onRmsChanged(float rmsdB) {}
             @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() { listening = false; }
+            @Override public void onEndOfSpeech() { sttRecognizerActive = false; }
             @Override public void onPartialResults(Bundle partialResults) {
                 ArrayList<String> list = partialResults.getStringArrayList(
                         SpeechRecognizer.RESULTS_RECOGNITION);
@@ -348,7 +492,7 @@ public class VoiceService extends Service {
                 for (String raw : list) {
                     if (WakeWordMatcher.containsWakeWordLite(raw)) {
                         try { recognizer.cancel(); } catch (Exception ignored) {}
-                        listening = false;
+                        sttRecognizerActive = false;
                         onWakeDetected(WakeWordMatcher.stripWakePrefixLite(raw));
                         return;
                     }
@@ -375,21 +519,21 @@ public class VoiceService extends Service {
         }
     }
 
-    /** Casque BT / filaire — relance capture OWW ou Sherpa sur la nouvelle route. */
+    /** Casque BT / filaire — relance capture ; backend figé par WakeCoordinator. */
     private void onWakeAudioRouteChanged() {
-        if (!wantListening || !usesLocalWake()) return;
-        String backend = useOww ? "oww" : "kws";
-        Log.i(TAG, backend + " audio route changed — restarting capture");
+        if (!wantsListening() || !usesLocalWake()) return;
+        String backend = useOww() ? "oww" : "kws";
+        Log.i(TAG, backend + " audio route changed — restart capture (backend frozen)");
         diag(backend + "_route_changed", kwsRouteManager != null
                 ? kwsRouteManager.describeRoute() : "", null);
         stopKwsPlanned();
-        scheduleListen(400);
+        if (wantsListening()) scheduleListen(400);
     }
 
     /** Arrêt wake local volontaire (redémarrage prévu) — ne pas compter comme crash natif. */
     private void stopKwsPlanned() {
         KwsCrashGuard.onPlannedRestart(this);
-        listening = false;
+        sttRecognizerActive = false;
         if (owwEngine != null) {
             try { owwEngine.stop(); } catch (Exception ignored) {}
         }
@@ -402,20 +546,35 @@ public class VoiceService extends Service {
     private void onWakeDetected(String command) {
         long now = System.currentTimeMillis();
         if (now - lastWakeDetectedMs < WAKE_DEBOUNCE_MS) {
-            if (wantListening) scheduleListen(800);
+            if (wantsListening()) scheduleListen(800);
             return;
         }
         lastWakeDetectedMs = now;
         kwsRestartStreak = 0;
         sttBackoffStep = 0;
-        wantListening = false;
+        if (wakeCoordinator == null || !wakeCoordinator.onWakeDetected()) {
+            Log.d(TAG, "onWakeDetected ignored by coordinator");
+            return;
+        }
+        long transitionId = WakeToSttTrace.begin();
+        try {
+            JSONObject f = new JSONObject();
+            f.put("command", command == null ? "" : command);
+            f.put("use_oww", useOww());
+            f.put("use_kws", useKws());
+            f.put("backend", useOww() ? "oww" : (useKws() ? "sherpa" : "none"));
+            f.put("coord_state", wakeCoordinator.getState().state.name());
+            WakeToSttTrace.mark(this, "wake_detected", f);
+        } catch (Exception ignored) {
+            WakeToSttTrace.mark(this, "wake_detected");
+        }
         diag("kws_wake_detected", null, command);
-        stopListening();
+        stopListeningForWakeTransition();
         String cmd = command == null ? "" : command.trim();
-        notifyWake(cmd);
+        notifyWake(cmd, transitionId, WakeToSttTrace.currentT0());
     }
 
-    private void notifyWake(String command) {
+    private void notifyWake(String command, long transitionId, long t0ElapsedMs) {
         int n = callbacks.beginBroadcast();
         Log.i(TAG, "notifyWake callbacks=" + n + " cmd=" + (command == null ? "" : command));
         try {
@@ -428,22 +587,26 @@ public class VoiceService extends Service {
             callbacks.finishBroadcast();
         }
         // FGS peut démarrer l'activité même si le launcher n'est pas bindé.
-        launchInPlaceVoice(command);
+        launchInPlaceVoice(command, transitionId, t0ElapsedMs);
     }
 
-    private void launchInPlaceVoice(String command) {
+    private void launchInPlaceVoice(String command, long transitionId, long t0ElapsedMs) {
         try {
             Intent i = new Intent(this, com.pegasuscorp.orbe.InPlaceVoiceActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                             | Intent.FLAG_ACTIVITY_NO_ANIMATION
                             | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
                     .putExtra("wake_activate", true)
                     .putExtra("wake_command", command == null ? "" : command)
                     .putExtra("wake_speaker_verified", false);
+            WakeToSttTrace.attachToIntent(i, transitionId, t0ElapsedMs);
             startActivity(i);
             Log.i(TAG, "InPlaceVoiceActivity started from VoiceService");
         } catch (Exception e) {
             Log.e(TAG, "launchInPlaceVoice failed", e);
+            WakeToSttTrace.mark(this, "wake_launch_failed");
         }
     }
 
@@ -453,7 +616,7 @@ public class VoiceService extends Service {
         main.removeCallbacks(kwsMediaPollRunnable);
         main.removeCallbacks(kwsHealthRunnable);
         clearIdleHandler();
-        if (!wantListening) return;
+        if (!wantsListening()) return;
         main.postDelayed(listenRunnable, delayMs);
     }
 
@@ -475,13 +638,13 @@ public class VoiceService extends Service {
     }
 
     private boolean isLocalWakeRunning() {
-        return (useOww && owwEngine != null && owwEngine.isRunning())
-                || (useKws && kwsEngine != null && kwsEngine.isRunning());
+        return (useOww() && owwEngine != null && owwEngine.isRunning())
+                || (useKws() && kwsEngine != null && kwsEngine.isRunning());
     }
 
     /** Pendant média : ne pas tear-down KWS/OWW (sinon clignotement + kill OEM). */
     private void pollKwsAfterMedia() {
-        if (!wantListening || !usesLocalWake()) return;
+        if (!wantsListening() || !usesLocalWake()) return;
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
             main.postDelayed(kwsMediaPollRunnable, KWS_MEDIA_POLL_MS);
             return;
@@ -496,7 +659,7 @@ public class VoiceService extends Service {
 
     /** Relance wake local si le thread est mort alors qu'on veut encore écouter. */
     private void runKwsHealthCheck() {
-        if (!wantListening || !usesLocalWake()) return;
+        if (!wantsListening() || !usesLocalWake()) return;
         if (isLocalWakeRunning()) {
             kwsRestartStreak = 0;
             if (System.currentTimeMillis() - lastKwsStartMs > 15_000L) {
@@ -511,20 +674,18 @@ public class VoiceService extends Service {
             main.postDelayed(kwsHealthRunnable, KWS_HEALTH_GRACE_MS);
             return;
         }
-        if (kwsRestartStreak >= 5) {
-            // Ne PAS basculer sur STT en boucle — ça spam le micro et Android tue le service.
-            Log.w(TAG, "wake dead ×5 — pause " + (KWS_RETRY_AFTER_FAIL_MS / 1000)
-                    + "s puis nouvel essai (pas de STT)");
+        if (kwsRestartStreak >= 5 || KwsCrashGuard.shouldDisableKws(this)) {
+            Log.w(TAG, "wake dead / crash-guard — COOLDOWN via WakeCoordinator");
             kwsRestartStreak = 0;
             stopKwsPlanned();
             main.removeCallbacks(kwsHealthRunnable);
-            main.postDelayed(() -> {
-                if (wantListening && usesLocalWake()) scheduleListen(0);
-            }, KWS_RETRY_AFTER_FAIL_MS);
+            if (wakeCoordinator != null) {
+                wakeCoordinator.onCrashGuardTripped();
+            }
             return;
         }
         kwsRestartStreak++;
-        Log.w(TAG, "wake not running while wantListening — restart #" + kwsRestartStreak);
+        Log.w(TAG, "wake not running while wantsListening — restart #" + kwsRestartStreak);
         stopKwsPlanned();
         scheduleListen(2_500);
     }
@@ -540,21 +701,11 @@ public class VoiceService extends Service {
     }
 
     private void startListenIfReady() {
-        if (!wantListening) return;
-        // Bascule OWW seulement si opt-in ; sinon rester / revenir sur Sherpa.
-        boolean preferOww = WakeOwwStore.preferCustomWake(this) && WakeOwwStore.isModelReady(this);
-        if (preferOww && !useOww) {
-            Log.i(TAG, "OWW preferred — switching backend from "
-                    + (useKws ? "Sherpa" : "none"));
-            stopKwsPlanned();
-            refreshWakeBackend();
-        } else if (useOww && !preferOww) {
-            Log.i(TAG, "OWW not preferred — switching back to Sherpa default");
-            stopKwsPlanned();
-            refreshWakeBackend();
-        } else if (!usesLocalWake()
-                && (preferOww || KwsModelStore.isModelReady(this))) {
-            refreshWakeBackend();
+        if (!wantsListening()) return;
+        if (!usesLocalWake()
+                && (WakeOwwStore.preferCustomWake(this) || KwsModelStore.isModelReady(this))) {
+            // Backend figé à start() ; recharger moteurs si absents.
+            ensureSessionEngines();
         }
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
             if (usesLocalWake()) {
@@ -579,11 +730,11 @@ public class VoiceService extends Service {
     }
 
     private void startKwsListen() {
-        if (!wantListening || !usesLocalWake()) return;
-        if ((useOww && owwEngine == null) || (useKws && kwsEngine == null)) {
-            refreshWakeBackend();
+        if (!wantsListening() || !usesLocalWake()) return;
+        if ((useOww() && owwEngine == null) || (useKws() && kwsEngine == null)) {
+            ensureSessionEngines();
         }
-        if (useOww) {
+        if (useOww()) {
             if (owwEngine == null || !owwEngine.isReady()) {
                 Log.w(TAG, "OWW not ready — retry in 5s");
                 diag("oww_not_ready", null, null);
@@ -609,11 +760,85 @@ public class VoiceService extends Service {
             return;
         }
         if (isLocalWakeRunning()) return;
-        listening = true;
+        if (wakeScoAcquireInFlight) return;
+        // Respecter la source figée par WakeCoordinator : pas de danse SCO si session téléphone.
+        boolean sessionPhone = wakeCoordinator != null
+                && wakeCoordinator.getState().source
+                == AudioRouteObserver.AudioSource.PHONE_BUILTIN;
+        if (sessionPhone) {
+            if (kwsRouteManager != null) {
+                kwsRouteManager.forcePhoneBuiltin();
+            }
+            startKwsListenEngine();
+            return;
+        }
+        // SCO une seule fois pour la durée d'écoute wake (pas à chaque openMic / cycle).
+        if (kwsRouteManager != null) {
+            wakeScoAcquireInFlight = true;
+            kwsRouteManager.ensureWakeServiceScoHoldAsync(ok -> {
+                wakeScoAcquireInFlight = false;
+                if (!wantsListening() || !usesLocalWake()) return;
+                if (!ok && kwsRouteManager.wantsBluetoothMic()) {
+                    Log.w(TAG, "SCO wake hold failed — retry in 1.5s");
+                    wakeScoAcquireInFlight = true;
+                    main.postDelayed(() -> {
+                        if (!wantsListening() || !usesLocalWake()) {
+                            wakeScoAcquireInFlight = false;
+                            return;
+                        }
+                        kwsRouteManager.ensureWakeServiceScoHoldAsync(ok2 -> {
+                            wakeScoAcquireInFlight = false;
+                            if (!wantsListening() || !usesLocalWake()) return;
+                            if (!ok2 && kwsRouteManager.wantsBluetoothMic()) {
+                                // HFP absent (A2DP-only / casque sans profil téléphone) :
+                                // bascule téléphone pour ne pas rester sourd.
+                                // Sinon (proxy/SCO flappy) : réessaie sans micro phone.
+                                String fail = kwsRouteManager.lastScoFailReason();
+                                boolean noHfp = fail != null && (fail.contains("no_hfp")
+                                        || fail.contains("a2dp_only"));
+                                if (noHfp) {
+                                    Log.w(TAG, "SCO sans HFP — fallback micro téléphone");
+                                    try {
+                                        JSONObject f = new JSONObject();
+                                        f.put("fail_reason", fail);
+                                        f.put("route", kwsRouteManager.describeRoute());
+                                        PegaseDiagLog.kws(VoiceService.this,
+                                                "sco_phone_fallback_no_hfp", f);
+                                    } catch (Exception ignored) {}
+                                    kwsRouteManager.forcePhoneBuiltin();
+                                    startKwsListenEngine();
+                                    return;
+                                }
+                                Log.w(TAG, "SCO wake hold retry failed — reschedule, pas de fallback phone");
+                                try {
+                                    JSONObject f = new JSONObject();
+                                    f.put("route", kwsRouteManager.describeRoute());
+                                    PegaseDiagLog.kws(VoiceService.this,
+                                            "sco_bt_no_phone_fallback", f);
+                                } catch (Exception ignored) {}
+                                scheduleListen(12_000);
+                                return;
+                            }
+                            startKwsListenEngine();
+                        });
+                    }, KwsAudioRouteManager.WAKE_SCO_RETRY_DELAY_MS);
+                    return;
+                }
+                startKwsListenEngine();
+            });
+            return;
+        }
+        startKwsListenEngine();
+    }
+
+    private void startKwsListenEngine() {
+        if (!wantsListening() || !usesLocalWake()) return;
+        if (isLocalWakeRunning()) return;
         acquireListenWakeLock();
         lastKwsStartMs = System.currentTimeMillis();
-        if (useOww) {
-            diag("oww_listen_start", null, null);
+        if (useOww()) {
+            diag("oww_listen_start", kwsRouteManager != null
+                    ? kwsRouteManager.describeRoute() : "", null);
             owwEngine.start();
         } else {
             diag("kws_listen_start", kwsRouteManager != null
@@ -625,10 +850,18 @@ public class VoiceService extends Service {
         refreshForegroundNotification();
     }
 
+    /** Coupe le hold SCO wake (stop écoute / destroy) — pas entre deux wakes. */
+    private void releaseWakeServiceScoHold() {
+        wakeScoAcquireInFlight = false;
+        if (kwsRouteManager != null) {
+            kwsRouteManager.releaseWakeServiceScoHold();
+        }
+    }
+
     private void startSttListen() {
-        if (!wantListening || usesLocalWake()) return;
+        if (!wantsListening() || usesLocalWake()) return;
         if (recognizer == null) initRecognizer();
-        if (recognizer == null || listening) return;
+        if (recognizer == null || sttRecognizerActive) return;
         if (MediaPlaybackGuard.isOtherAudioPlaying(this)) {
             scheduleListen(MEDIA_PAUSE_POLL_MS);
             return;
@@ -656,16 +889,16 @@ public class VoiceService extends Service {
         try {
             recognizer.startListening(intent);
             MediaPlaybackGuard.markSttSessionStarted();
-            listening = true;
+            sttRecognizerActive = true;
             acquireListenWakeLock();
         } catch (RuntimeException ignored) {
-            listening = false;
+            sttRecognizerActive = false;
             scheduleListen(nextSttBackoffMs());
         }
     }
 
     private void stopListening() {
-        listening = false;
+        sttRecognizerActive = false;
         diag("kws_listen_stop", null, null);
         clearIdleHandler();
         main.removeCallbacks(listenRunnable);
@@ -685,11 +918,60 @@ public class VoiceService extends Service {
         refreshForegroundNotification();
     }
 
+    /**
+     * Arrêt wake après HIT — trace {@code kws_release_*} pour mesurer join/closeMic
+     * avant l'ouverture STT côté launcher.
+     */
+    private void stopListeningForWakeTransition() {
+        sttRecognizerActive = false;
+        diag("kws_listen_stop", null, null);
+        clearIdleHandler();
+        main.removeCallbacks(listenRunnable);
+        main.removeCallbacks(forceIdleListenRunnable);
+        main.removeCallbacks(kwsMediaPollRunnable);
+        main.removeCallbacks(kwsHealthRunnable);
+        String backend = useOww() ? "oww" : (useKws() ? "sherpa" : "none");
+        try {
+            JSONObject start = new JSONObject();
+            start.put("backend", backend);
+            start.put("oww_running", owwEngine != null && owwEngine.isRunning());
+            start.put("kws_running", kwsEngine != null && kwsEngine.isRunning());
+            WakeToSttTrace.mark(this, "kws_release_start", start);
+        } catch (Exception ignored) {
+            WakeToSttTrace.mark(this, "kws_release_start");
+        }
+        long tStop = android.os.SystemClock.elapsedRealtime();
+        if (owwEngine != null) {
+            try { owwEngine.stop(); } catch (Exception ignored) {}
+        }
+        if (kwsEngine != null) {
+            try { kwsEngine.stop(); } catch (Exception ignored) {}
+        }
+        long joinMs = android.os.SystemClock.elapsedRealtime() - tStop;
+        if (recognizer != null) {
+            try { recognizer.cancel(); } catch (Exception ignored) {}
+        }
+        releaseListenWakeLock();
+        refreshForegroundNotification();
+        try {
+            JSONObject done = new JSONObject();
+            done.put("backend", backend);
+            done.put("join_ms", joinMs);
+            done.put("oww_running", owwEngine != null && owwEngine.isRunning());
+            done.put("kws_running", kwsEngine != null && kwsEngine.isRunning());
+            WakeToSttTrace.mark(this, "kws_release_done", done);
+        } catch (Exception ignored) {
+            WakeToSttTrace.mark(this, "kws_release_done");
+        }
+    }
+
     private WakeHealthStatus currentWakeHealth() {
         boolean modelReady = WakeOwwStore.isModelReady(this) || KwsModelStore.isModelReady(this);
+        boolean crashCooldown = wakeCoordinator != null
+                && wakeCoordinator.getState().state == WakeCoordinator.WakeState.COOLDOWN;
         return WakeHealthEvaluator.evaluate(
-                wantListening,
-                KwsCrashGuard.shouldDisableKws(this),
+                wantsListening(),
+                KwsCrashGuard.shouldDisableKws(this) || crashCooldown,
                 isLocalWakeRunning(),
                 modelReady);
     }
@@ -825,10 +1107,14 @@ public class VoiceService extends Service {
     private void diag(String event, String route, String command) {
         try {
             JSONObject f = new JSONObject();
-            f.put("want_listening", wantListening);
-            f.put("use_kws", useKws);
-            f.put("use_oww", useOww);
-            f.put("listening", listening);
+            f.put("want_listening", wantsListening());
+            f.put("use_kws", useKws());
+            f.put("use_oww", useOww());
+            f.put("listening", isLocalWakeRunning() || sttRecognizerActive);
+            if (wakeCoordinator != null) {
+                f.put("coord_state", wakeCoordinator.getState().state.name());
+                f.put("backend", wakeCoordinator.getSessionBackend().name());
+            }
             if (route != null) f.put("route", route);
             if (command != null) f.put("command", command);
             PegaseDiagLog.kws(this, event, f);

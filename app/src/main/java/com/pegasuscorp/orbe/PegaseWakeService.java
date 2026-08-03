@@ -28,7 +28,8 @@ public final class PegaseWakeService {
     }
 
     public static void pause(Context ctx) {
-        VoiceWakeClient.get().stopListening(ctx);
+        // Garder SCO pendant la conversation / STT (sinon micro casque coupé → error 7).
+        VoiceWakeClient.get().pauseKeepSco(ctx);
     }
 
     public static void resume(Context ctx) {

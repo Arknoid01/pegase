@@ -26,6 +26,7 @@ import com.pegasuscorp.orbe.session.SessionObserver;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.ui.ThinkingView;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
+import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 import com.pegasuscorp.orbe.voice.VoiceManager;
 
 import java.util.Locale;
@@ -378,7 +379,7 @@ public class BureauActivity extends AppCompatActivity implements BureauHost {
         if (panel != null) panel.clearCallbacks();
         ChatVoiceBridge.unregisterBureau(this);
         PegaseWakeController.setBureauActive(false);
-        PegaseWakeController.resumeWakeIfAllowed(this);
+        VoiceWakeClient.get().startListening(this);
         super.onDestroy();
     }
 

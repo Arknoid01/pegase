@@ -40,7 +40,10 @@ import java.util.concurrent.ExecutorService;
 public final class VoiceInputHandler {
 
     private static final long GREETING_SPEAK_DELAY_MS = 1200;
-    private static final long GREETING_LISTEN_RESUME_MS = 1200;
+    /** Après fin TTS ack (micro téléphone). */
+    private static final long GREETING_LISTEN_RESUME_MS = 250;
+    /** Après ack TTS + bascule A2DP→SCO casque — laisser le HFP se stabiliser. */
+    private static final long GREETING_LISTEN_RESUME_BT_MS = 1800;
 
     /**
      * Hooks Activity pour les bits non déplaçables (intents launcher, lock UI, mic).
@@ -69,6 +72,12 @@ public final class VoiceInputHandler {
 
         /** Annule le déchargement LLM idle avant un chargement à la demande. */
         void cancelLlmIdleUnload();
+
+        /**
+         * Fin de l'ack TTS wake (avant STT). In-place : {@code moveTaskToBack}
+         * ici plutôt qu'au create, pour ne pas exposer la session aux destroys OEM mid-phrase.
+         */
+        default void onWakeAckFinished() {}
     }
 
     private final Activity activity;
@@ -502,6 +511,12 @@ public final class VoiceInputHandler {
      */
     private boolean tryDirectOpenShortcut(String transcript) {
         if (!toolsAllowed() || transcript == null) return false;
+        // Icône / bouton / a11y → pas open_app local (voir IntentDetector.looksLikeUi).
+        String foldUi = SpeechInputNormalizer.fold(transcript).replace('\'', ' ')
+                .replace('’', ' ');
+        if (com.pegasuscorp.orbe.memory.IntentDetector.looksLikeUi(foldUi)) {
+            return false;
+        }
         IntentParser.Command cmd = intentParser.parse(transcript);
         if (cmd == null || cmd.action != IntentParser.Action.OPEN_APP) return false;
         String name = cmd.argument != null ? cmd.argument.trim() : "";
@@ -598,6 +613,7 @@ public final class VoiceInputHandler {
     public void handleWakeIntent(Intent intent) {
         if (intent == null || !intent.getBooleanExtra("wake_activate", false)) return;
         intent.removeExtra("wake_activate");
+        WakeToSttTrace.adoptFromIntent(intent);
 
         String command = intent.getStringExtra("wake_command");
         if (command == null) command = "";
@@ -614,6 +630,7 @@ public final class VoiceInputHandler {
 
         if (SpeakerVerifyGate.isRequired(activity) && !speakerVerifiedSession) {
             PegaseWakeService.pause(activity);
+            WakeToSttTrace.mark(activity, "wake_speaker_gate");
             output.speak("Dis Pégase pour confirmer.", () ->
                     SpeakerVerifyGate.runAfterPrompt(activity, this::pauseMicForSpeakerCapture,
                             speakerGateCallback(
@@ -686,7 +703,17 @@ public final class VoiceInputHandler {
             ack = ack + " Cette semaine, j'ai appris " + count
                     + " nouvelles formulations. Tu peux les valider dans les réglages.";
         }
+        try {
+            org.json.JSONObject f = new org.json.JSONObject();
+            f.put("ack_len", ack != null ? ack.length() : 0);
+            f.put("has_command", toHandle != null && !toHandle.isEmpty());
+            WakeToSttTrace.mark(activity, "wake_ack_tts_start", f);
+        } catch (Exception ignored) {
+            WakeToSttTrace.mark(activity, "wake_ack_tts_start");
+        }
         output.speak(ack, () -> {
+            WakeToSttTrace.mark(activity, "wake_ack_tts_done");
+            callback.onWakeAckFinished();
             if (!toHandle.isEmpty()) {
                 handleChatInput(toHandle);
             } else {
@@ -1193,19 +1220,52 @@ public final class VoiceInputHandler {
     }
 
     private void scheduleListeningResumeAfterGreeting() {
-        scheduleListeningResume(GREETING_LISTEN_RESUME_MS);
+        long delay = GREETING_LISTEN_RESUME_MS;
+        if (voiceManager != null && voiceManager.wantsBluetoothMic()) {
+            delay = GREETING_LISTEN_RESUME_BT_MS;
+        }
+        scheduleListeningResume(delay);
     }
 
     private void scheduleListeningResume(long delayMs) {
-        if (voiceManager == null) return;
-        if (VoiceMuteStore.isMuted(activity)) return;
-        if (conversation == null || !conversation.isActive()) return;
-        if (PegaseInterfaceState.isOpen()) {
-            PegaseInterfaceState.requestResumeListening();
+        if (voiceManager == null) {
+            WakeToSttTrace.mark(activity, "stt_schedule_skip",
+                    jsonReason("voiceManager_null"));
             return;
         }
-        if (ChatVoiceBridge.isInterfaceTakingMic()) return;
+        if (VoiceMuteStore.isMuted(activity)) {
+            WakeToSttTrace.mark(activity, "stt_schedule_skip", jsonReason("muted"));
+            return;
+        }
+        if (conversation == null || !conversation.isActive()) {
+            WakeToSttTrace.mark(activity, "stt_schedule_skip", jsonReason("conversation_inactive"));
+            return;
+        }
+        if (PegaseInterfaceState.isOpen()) {
+            PegaseInterfaceState.requestResumeListening();
+            WakeToSttTrace.mark(activity, "stt_schedule_skip", jsonReason("interface_open"));
+            return;
+        }
+        if (ChatVoiceBridge.isInterfaceTakingMic()) {
+            WakeToSttTrace.mark(activity, "stt_schedule_skip", jsonReason("interface_taking_mic"));
+            return;
+        }
+        try {
+            org.json.JSONObject f = new org.json.JSONObject();
+            f.put("delay_ms", delayMs);
+            WakeToSttTrace.mark(activity, "stt_schedule", f);
+        } catch (Exception ignored) {
+            WakeToSttTrace.mark(activity, "stt_schedule");
+        }
         voiceManager.resumeListeningAfterReply(delayMs);
+    }
+
+    private static org.json.JSONObject jsonReason(String reason) {
+        try {
+            return new org.json.JSONObject().put("reason", reason);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public void pauseVoiceForInterface() {
@@ -1217,7 +1277,7 @@ public final class VoiceInputHandler {
 
     public void resumeVoiceAfterInterface() {
         scheduleListeningResume();
-        PegaseWakeController.resumeWakeIfAllowed(activity);
+        VoiceWakeClient.get().startListening(activity);
     }
 
     public boolean isChatActiveForBridge() {
@@ -1265,7 +1325,6 @@ public final class VoiceInputHandler {
                 activity.finish();
             }
         }
-        PegaseWakeController.resumeWakeIfAllowed(activity);
         boolean saved = conversation.exit();
         PegaseWakeController.setAssistantThinking(false);
         PegaseWakeController.setMicListening(false);
@@ -1273,8 +1332,12 @@ public final class VoiceInputHandler {
         if (voiceManager != null) {
             voiceManager.cancelScheduledListening();
             voiceManager.stopListening();
+            // Coordinator : STT_ACTIVE → rearm 8s (évite un 2e resumeWakeIfAllowed).
+            voiceManager.endWakeSttHandoff();
             voiceManager.stopSpeaking();
         }
+        // Armer wantListen tout de suite ; start() no-op si rearm STT encore pending.
+        VoiceWakeClient.get().startListening(activity);
         if (saved) {
             callback.showToast("Mémoire mise à jour", Toast.LENGTH_SHORT);
         }

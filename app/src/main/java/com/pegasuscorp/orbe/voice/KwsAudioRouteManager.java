@@ -1,11 +1,17 @@
 package com.pegasuscorp.orbe.voice;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothHeadset;
+import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.media.AudioAttributes;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -33,8 +39,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class KwsAudioRouteManager {
 
     private static final String TAG = "KwsAudioRoute";
-    private static final long SCO_WAIT_MS = 4_000L;
+    private static final long SCO_WAIT_MS = 6_000L;
     private static final long ROUTE_NOTIFY_DEBOUNCE_MS = 300L;
+    private static final long SCO_RETRY_PAUSE_MS = 800L;
+    /** Pause avant une 2ᵉ acquisition wake (évite throttle OS après refus SCO en rafale). */
+    public static final long WAKE_SCO_RETRY_DELAY_MS = 4_500L;
 
     private static final Object LOCK = new Object();
     private static KwsAudioRouteManager shared;
@@ -59,16 +68,34 @@ public final class KwsAudioRouteManager {
     /** Sérialise prepare/release — VoiceManager (async) et KWS (thread capture) partagent le SCO. */
     private final Object scoLock = new Object();
     private final AtomicInteger scoHoldCount = new AtomicInteger(0);
+    /**
+     * Hold dédié à {@link VoiceService} (écoute wake) : le SCO reste up entre deux
+     * tentatives de détection et n'est libéré qu'à l'arrêt de l'écoute / destroy.
+     */
+    private boolean wakeServiceHold = false;
 
     private volatile RouteChangeListener routeChangeListener;
     private volatile RouteKind activeKind = RouteKind.UNKNOWN;
     private volatile AudioDeviceInfo preferredInput;
     private volatile boolean scoPrepared;
+    /** True après échec SCO : bloque refreshRouteKind pour garder le micro téléphone. */
+    private volatile boolean phoneForced;
+    private AudioFocusRequest scoFocusRequest;
+    private BluetoothHeadset bluetoothHeadset;
+    private volatile boolean headsetProxyRequesting;
+    private BluetoothDevice voiceRecognitionDevice;
+    private volatile boolean voiceRecognitionActive;
+    private final Object headsetProxyLock = new Object();
     private final AtomicBoolean receiverRegistered = new AtomicBoolean(false);
 
     private AudioDeviceCallback deviceCallback;
     private BroadcastReceiver scoReceiver;
     private Runnable pendingRouteNotify;
+    /** Dernière tentative SCO — pour diag sco_service_start. */
+    private volatile String lastScoFailReason = "";
+    private final StringBuilder scoPhaseLog = new StringBuilder();
+    private final StringBuilder scoStateLog = new StringBuilder();
+    private long lastScoAttemptAtMs = 0L;
 
     public static KwsAudioRouteManager getInstance(Context context) {
         synchronized (LOCK) {
@@ -83,6 +110,7 @@ public final class KwsAudioRouteManager {
         app = context.getApplicationContext();
         audioManager = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
         registerObservers();
+        ensureHeadsetProxy();
         refreshRouteKind();
     }
 
@@ -104,6 +132,35 @@ public final class KwsAudioRouteManager {
         return activeKind == RouteKind.BLUETOOTH_SCO;
     }
 
+    /** SCO réellement prêt (hold + entrée live / audio headset). */
+    public boolean isScoLive() {
+        synchronized (scoLock) {
+            if (!scoPrepared) return false;
+            return hasLiveBluetoothScoInput() || isHeadsetAudioConnected();
+        }
+    }
+
+    /**
+     * Attend que le micro SCO soit live (après {@link #ensureBluetoothScoActive}).
+     * Callback sur le main thread ; {@code false} si timeout.
+     */
+    public void awaitScoReadyAsync(long timeoutMs, java.util.function.Consumer<Boolean> onReady) {
+        io.execute(() -> {
+            long deadline = android.os.SystemClock.elapsedRealtime()
+                    + Math.max(0L, timeoutMs);
+            boolean ready = false;
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                if (isScoLive()) {
+                    ready = true;
+                    break;
+                }
+                sleepQuiet(40);
+            }
+            final boolean result = ready;
+            if (onReady != null) main.post(() -> onReady.accept(result));
+        });
+    }
+
     public int getAudioSource() {
         switch (activeKind) {
             case BLUETOOTH_SCO:
@@ -115,21 +172,25 @@ public final class KwsAudioRouteManager {
     }
 
     public void forcePhoneBuiltin() {
+        phoneForced = true;
         activeKind = RouteKind.PHONE_BUILTIN;
         preferredInput = findBuiltinMic();
         scoPrepared = false;
-        Log.i(TAG, "forced phone builtin " + describeRoute());
+        Log.i(TAG, "forced phone builtin " + describeRouteLocked());
     }
 
     /**
-     * Active SCO / communication device si Bluetooth. Bloquant — hors UI thread.
-     * Ref-count : chaque {@code prepare} incrémente un hold (même hors BT) pour que
-     * {@link #releaseCapture()} ne coupe jamais le SCO d'un autre client.
+     * Point d'entrée unique STT + wake : active le SCO si un casque BT est connecté.
+     * API 31+ {@code setCommunicationDevice}, sinon {@code startBluetoothSco} (+ HFP VR).
+     * Sans casque : retour immédiat {@code true} (micro local inchangé).
+     * Bloquant — hors UI thread. Ref-count : chaque succès incrémente un hold pour que
+     * {@link #releaseBluetoothSco()} ne coupe jamais le SCO d'un autre client.
      */
-    public boolean prepareCapture() {
+    public boolean ensureBluetoothScoActive() {
         synchronized (scoLock) {
+            phoneForced = false;
             refreshRouteKind();
-            logRoute("prepareCapture");
+            logRoute("ensureBluetoothScoActive");
             int holds = scoHoldCount.incrementAndGet();
             if (activeKind != RouteKind.BLUETOOTH_SCO) {
                 return true;
@@ -138,31 +199,31 @@ public final class KwsAudioRouteManager {
                 Log.i(TAG, "SCO already held count=" + holds);
                 return true;
             }
-            boolean ok;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                ok = prepareCommunicationDeviceApi31();
-            } else {
-                ok = prepareScoLegacy();
-            }
+            boolean ok = establishScoWithFallbacksLocked();
             if (!ok) {
                 scoHoldCount.decrementAndGet();
-                Log.w(TAG, "prepareCapture failed — caller peut fallback téléphone");
+                abandonScoAudioFocus();
+                Log.w(TAG, "ensureBluetoothScoActive failed — caller peut fallback téléphone");
             }
             return ok;
         }
     }
 
+    /** @deprecated préfère {@link #ensureBluetoothScoActive()} — alias conservé pour STT. */
+    public boolean prepareCapture() {
+        return ensureBluetoothScoActive();
+    }
+
     /**
-     * Prépare la route STT en arrière-plan puis appelle {@code onReady} sur le main thread
-     * avec le succès de {@link #prepareCapture()}.
+     * Prépare la route en arrière-plan puis appelle {@code onReady} sur le main thread.
      */
-    public void prepareCaptureAsync(java.util.function.Consumer<Boolean> onReady) {
+    public void ensureBluetoothScoActiveAsync(java.util.function.Consumer<Boolean> onReady) {
         io.execute(() -> {
             boolean ok = true;
             try {
-                ok = prepareCapture();
+                ok = ensureBluetoothScoActive();
             } catch (Exception e) {
-                Log.w(TAG, "prepareCaptureAsync", e);
+                Log.w(TAG, "ensureBluetoothScoActiveAsync", e);
                 ok = false;
             }
             final boolean result = ok;
@@ -170,8 +231,111 @@ public final class KwsAudioRouteManager {
         });
     }
 
+    /** @deprecated préfère {@link #ensureBluetoothScoActiveAsync}. */
+    public void prepareCaptureAsync(java.util.function.Consumer<Boolean> onReady) {
+        ensureBluetoothScoActiveAsync(onReady);
+    }
+
+    /**
+     * Hold SCO pour toute la durée d'écoute wake ({@link VoiceService}).
+     * Idempotent : n'acquiert le ref-count qu'une fois ; réarme le lien si besoin.
+     */
+    public void ensureWakeServiceScoHoldAsync(java.util.function.Consumer<Boolean> onReady) {
+        io.execute(() -> {
+            boolean ok;
+            boolean firstAcquire;
+            try {
+                synchronized (scoLock) {
+                    firstAcquire = !wakeServiceHold;
+                    if (wakeServiceHold) {
+                        ok = rearmWakeServiceScoLocked();
+                    } else {
+                        // ensureBluetoothScoActive synchronise aussi sur scoLock —
+                        // on inligne l'acquisition pour éviter un double-lock.
+                        phoneForced = false;
+                        refreshRouteKind();
+                        logRoute("ensureWakeServiceScoHold");
+                        scoHoldCount.incrementAndGet();
+                        if (activeKind != RouteKind.BLUETOOTH_SCO) {
+                            wakeServiceHold = true;
+                            ok = true;
+                        } else {
+                            ok = establishScoWithFallbacksLocked();
+                            if (ok) {
+                                wakeServiceHold = true;
+                            } else {
+                                scoHoldCount.decrementAndGet();
+                                abandonScoAudioFocus();
+                                Log.w(TAG, "ensureWakeServiceScoHold failed");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "ensureWakeServiceScoHoldAsync", e);
+                ok = false;
+                firstAcquire = false;
+            }
+            final boolean result = ok;
+            final boolean acquired = firstAcquire;
+            try {
+                org.json.JSONObject f = new org.json.JSONObject();
+                f.put("ok", result);
+                f.put("first_acquire", acquired);
+                f.put("want_bt", wantsBluetoothMic());
+                f.put("sco_prepared", scoPrepared);
+                f.put("holds", scoHoldCount.get());
+                f.put("route", describeRoute());
+                f.put("wake_service_hold", wakeServiceHold);
+                f.put("music_active", audioManager.isMusicActive());
+                f.put("a2dp_out", hasBluetoothAudioOutput());
+                f.put("hfp_audio", isHeadsetAudioConnected());
+                f.put("sco_available_offcall", isScoLikelyAvailable());
+                f.put("am_sco_on", audioManager.isBluetoothScoOn());
+                f.put("hfp_devices", countHfpDevices());
+                if (!result) {
+                    f.put("fail_reason", lastScoFailReason == null ? "" : lastScoFailReason);
+                    f.put("phases", scoPhaseLog.toString());
+                    f.put("sco_states", scoStateLog.toString());
+                }
+                com.pegasuscorp.orbe.diag.PegaseDiagLog.kws(app, "sco_service_start", f);
+            } catch (Exception ignored) {}
+            Log.i(TAG, "sco_service_start ok=" + result
+                    + " first=" + acquired
+                    + " prepared=" + scoPrepared
+                    + " fail=" + lastScoFailReason
+                    + " " + describeRoute());
+            if (onReady != null) main.post(() -> onReady.accept(result));
+        });
+    }
+
+    /** Libère le hold VoiceService (si acquis). No-op sinon. */
+    /** Dernière raison d'échec SCO (diag / fallback). */
+    public String lastScoFailReason() {
+        return lastScoFailReason == null ? "" : lastScoFailReason;
+    }
+
+    public void releaseWakeServiceScoHold() {
+        boolean shouldRelease;
+        synchronized (scoLock) {
+            shouldRelease = wakeServiceHold;
+            wakeServiceHold = false;
+        }
+        if (shouldRelease) {
+            Log.i(TAG, "releaseWakeServiceScoHold");
+            releaseBluetoothSco();
+        }
+    }
+
+    /** true si le hold VoiceService est encore actif (handoff wake→STT). */
+    public boolean hasWakeServiceScoHold() {
+        synchronized (scoLock) {
+            return wakeServiceHold;
+        }
+    }
+
     /** Libère un hold ; SCO réellement coupé quand le compteur tombe à 0. */
-    public void releaseCapture() {
+    public void releaseBluetoothSco() {
         synchronized (scoLock) {
             int left = scoHoldCount.decrementAndGet();
             if (left > 0) {
@@ -186,31 +350,183 @@ public final class KwsAudioRouteManager {
         }
     }
 
+    /** @deprecated préfère {@link #releaseBluetoothSco()}. */
+    public void releaseCapture() {
+        releaseBluetoothSco();
+    }
+
     public void releaseCaptureAsync() {
         io.execute(() -> {
             try {
-                releaseCapture();
+                releaseBluetoothSco();
             } catch (Exception e) {
                 Log.w(TAG, "releaseCaptureAsync", e);
             }
         });
     }
 
-    private void releaseCaptureInternal() {
-        if (!scoPrepared && audioManager.getMode() == AudioManager.MODE_NORMAL) return;
-        scoPrepared = false;
+    /** Établit le lien SCO (déjà sous {@link #scoLock}). */
+    private boolean establishScoWithFallbacksLocked() {
+        resetScoDiag();
+        lastScoAttemptAtMs = System.currentTimeMillis();
+        // Duck / pause musique A2DP — sinon le switch HFP/SCO est souvent refusé.
+        if (audioManager.isMusicActive()) {
+            notePhase("music_active_pre");
+            requestScoAudioFocus();
+            sleepQuiet(350L);
+        }
+        boolean ok = false;
+        // Sur API 31+ : VR HFP d'abord (plus fiable pour le micro casque hors appel),
+        // puis setCommunicationDevice, puis startBluetoothSco en dernier recours.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ok = prepareViaHeadsetVoiceRecognition();
+            notePhase("vr1=" + ok);
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareCommunicationDeviceApi31();
+                notePhase("comm=" + ok);
+            }
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareScoLegacy();
+                notePhase("legacy=" + ok);
+            }
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareViaHeadsetVoiceRecognition();
+                notePhase("vr2=" + ok);
+            }
+        } else {
+            ok = prepareScoLegacy();
+            notePhase("legacy=" + ok);
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareViaHeadsetVoiceRecognition();
+                notePhase("vr1=" + ok);
+            }
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareViaHeadsetVoiceRecognition();
+                notePhase("vr2=" + ok);
+            }
+            if (!ok) {
+                cleanupFailedScoAttemptLocked();
+                sleepQuiet(SCO_RETRY_PAUSE_MS);
+                ok = prepareScoLegacy();
+                notePhase("legacy2=" + ok);
+            }
+        }
+        if (!ok) {
+            cleanupFailedScoAttemptLocked();
+            if (lastScoFailReason == null || lastScoFailReason.isEmpty()) {
+                lastScoFailReason = "all_paths_failed";
+            }
+            if (countHfpDevices() == 0 && hasBluetoothAudioOutput()) {
+                lastScoFailReason = "a2dp_only_no_hfp";
+            }
+        } else {
+            lastScoFailReason = "";
+        }
+        return ok;
+    }
+
+    private void resetScoDiag() {
+        lastScoFailReason = "";
+        scoPhaseLog.setLength(0);
+        scoStateLog.setLength(0);
+    }
+
+    private void notePhase(String p) {
+        if (scoPhaseLog.length() > 0) scoPhaseLog.append('|');
+        scoPhaseLog.append(p);
+    }
+
+    private void noteScoState(int state) {
+        if (scoStateLog.length() > 0) scoStateLog.append('>');
+        scoStateLog.append(scoStateLabel(state));
+    }
+
+    /** Remet mode / SCO / VR propres entre tentatives (évite état IN_COMMUNICATION fantôme). */
+    private void cleanupFailedScoAttemptLocked() {
+        try {
+            stopHeadsetVoiceRecognition();
+        } catch (Exception ignored) {}
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 audioManager.clearCommunicationDevice();
-            } else {
-                audioManager.setBluetoothScoOn(false);
-                audioManager.stopBluetoothSco();
             }
+        } catch (Exception ignored) {}
+        try {
+            audioManager.setBluetoothScoOn(false);
+            audioManager.stopBluetoothSco();
+        } catch (Exception ignored) {}
+        try {
             audioManager.setMode(AudioManager.MODE_NORMAL);
-            Log.i(TAG, "capture route released");
-        } catch (Exception e) {
-            Log.w(TAG, "releaseCapture", e);
+        } catch (Exception ignored) {}
+        scoPrepared = false;
+    }
+
+    private int countHfpDevices() {
+        BluetoothHeadset headset;
+        synchronized (headsetProxyLock) {
+            headset = bluetoothHeadset;
         }
+        if (headset == null) return -1;
+        try {
+            java.util.List<BluetoothDevice> devices = headset.getConnectedDevices();
+            return devices == null ? 0 : devices.size();
+        } catch (SecurityException e) {
+            return -2;
+        } catch (Exception e) {
+            return -3;
+        }
+    }
+
+    /** Réarme SCO sans toucher au ref-count (hold wake déjà pris). */
+    private boolean rearmWakeServiceScoLocked() {
+        phoneForced = false;
+        refreshRouteKind();
+        if (activeKind != RouteKind.BLUETOOTH_SCO) {
+            return true;
+        }
+        if (scoPrepared && hasLiveBluetoothScoInput()) {
+            return true;
+        }
+        Log.i(TAG, "rearmWakeServiceSco — lien SCO absent, rétablissement");
+        return establishScoWithFallbacksLocked();
+    }
+
+    private void releaseCaptureInternal() {
+        if (!scoPrepared && audioManager.getMode() == AudioManager.MODE_NORMAL) {
+            abandonScoAudioFocus();
+            return;
+        }
+        scoPrepared = false;
+            try {
+                stopHeadsetVoiceRecognition();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    audioManager.clearCommunicationDevice();
+                } else {
+                    audioManager.setBluetoothScoOn(false);
+                    audioManager.stopBluetoothSco();
+                }
+                // Toujours stopper le SCO legacy si on l'avait démarré en fallback API31.
+                try {
+                    audioManager.setBluetoothScoOn(false);
+                    audioManager.stopBluetoothSco();
+                } catch (Exception ignored) {}
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+                Log.i(TAG, "capture route released");
+            } catch (Exception e) {
+                Log.w(TAG, "releaseCapture", e);
+            } finally {
+                abandonScoAudioFocus();
+            }
     }
 
     public void release() {
@@ -219,8 +535,10 @@ public final class KwsAudioRouteManager {
             pendingRouteNotify = null;
         }
         synchronized (scoLock) {
+            wakeServiceHold = false;
             scoHoldCount.set(0);
             releaseCaptureInternal();
+            phoneForced = false;
         }
         unregisterObservers();
         synchronized (LOCK) {
@@ -230,6 +548,11 @@ public final class KwsAudioRouteManager {
 
     public String describeRoute() {
         refreshRouteKind();
+        return describeRouteLocked();
+    }
+
+    /** Description sans refresh (évite d'annuler {@link #forcePhoneBuiltin()}). */
+    private String describeRouteLocked() {
         StringBuilder sb = new StringBuilder();
         sb.append(activeKind.name());
         if (preferredInput != null) {
@@ -243,6 +566,7 @@ public final class KwsAudioRouteManager {
         sb.append(" source=").append(audioSourceLabel(getAudioSource()));
         sb.append(" mode=").append(modeLabel(audioManager.getMode()));
         sb.append(" holds=").append(scoHoldCount.get());
+        if (phoneForced) sb.append(" phoneForced");
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             sb.append(" scoOn=").append(audioManager.isBluetoothScoOn());
         }
@@ -253,39 +577,131 @@ public final class KwsAudioRouteManager {
         if (record == null || preferredInput == null) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             boolean ok = record.setPreferredDevice(preferredInput);
-            Log.i(TAG, "setPreferredDevice " + ok + " → " + describeRoute());
+            Log.i(TAG, "setPreferredDevice " + ok + " → " + describeRouteLocked());
         }
     }
 
     private boolean prepareCommunicationDeviceApi31() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
-        AudioDeviceInfo target = findBluetoothCommunicationDevice();
-        if (target == null) {
-            // Souvent l'entrée SCO n'existe qu'après startBluetoothSco.
-            Log.w(TAG, "BT audio présent mais pas encore de communication device — SCO legacy");
-            return prepareScoLegacy();
-        }
+        requestScoAudioFocus();
         try {
             audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            boolean set = audioManager.setCommunicationDevice(target);
-            preferredInput = target;
-            scoPrepared = set;
-            Log.i(TAG, "setCommunicationDevice ok=" + set + " " + describeRoute());
-            if (!set) {
-                Log.w(TAG, "setCommunicationDevice false — fallback SCO legacy");
-                return prepareScoLegacy();
-            }
-            return true;
         } catch (Exception e) {
-            Log.w(TAG, "setCommunicationDevice failed — fallback SCO legacy", e);
-            return prepareScoLegacy();
+            Log.w(TAG, "setMode IN_COMMUNICATION", e);
         }
+        AudioDeviceInfo target = findBluetoothCommunicationDevice();
+        if (target != null) {
+            final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicBoolean connected = new AtomicBoolean(false);
+            final AtomicBoolean sawError = new AtomicBoolean(false);
+            BroadcastReceiver waiter = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null) return;
+                    int state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1);
+                    noteScoState(state);
+                    if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                        connected.set(true);
+                        latch.countDown();
+                    } else if (state == AudioManager.SCO_AUDIO_STATE_ERROR) {
+                        sawError.set(true);
+                        latch.countDown();
+                    }
+                }
+            };
+            IntentFilter filter = new IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
+            boolean registered = false;
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    app.registerReceiver(waiter, filter, Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    app.registerReceiver(waiter, filter);
+                }
+                registered = true;
+            } catch (Exception e) {
+                Log.w(TAG, "register SCO waiter before setCommunicationDevice", e);
+                lastScoFailReason = "comm_register_fail";
+            }
+            try {
+                boolean set = audioManager.setCommunicationDevice(target);
+                Log.i(TAG, "setCommunicationDevice ok=" + set
+                        + " type=" + deviceTypeLabel(target.getType())
+                        + " " + describeRouteLocked());
+                if (!set) {
+                    lastScoFailReason = "setCommunicationDevice_false";
+                } else {
+                    boolean scoUp = isHeadsetAudioConnected();
+                    if (!scoUp && registered) {
+                        latch.await(SCO_WAIT_MS, TimeUnit.MILLISECONDS);
+                        scoUp = connected.get() || isHeadsetAudioConnected();
+                    }
+                    if (scoUp) {
+                        preferredInput = findBluetoothInputDevice();
+                        scoPrepared = true;
+                        Log.i(TAG, "communication device SCO ready "
+                                + "preferredInput="
+                                + (preferredInput != null
+                                ? ("id=" + preferredInput.getId()
+                                + " type=" + deviceTypeLabel(preferredInput.getType()))
+                                : "null")
+                                + " " + describeRouteLocked());
+                        return true;
+                    }
+                    lastScoFailReason = sawError.get()
+                            ? "comm_sco_ERROR"
+                            : "comm_set_ok_sco_timeout";
+                    Log.w(TAG, "setCommunicationDevice ok mais SCO non établi reason="
+                            + lastScoFailReason);
+                    try {
+                        audioManager.clearCommunicationDevice();
+                    } catch (Exception ignored) {}
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                lastScoFailReason = "comm_interrupted";
+            } catch (Exception e) {
+                Log.w(TAG, "setCommunicationDevice failed", e);
+                lastScoFailReason = "comm_exception:" + e.getClass().getSimpleName();
+            } finally {
+                if (registered) {
+                    try {
+                        app.unregisterReceiver(waiter);
+                    } catch (Exception ignored) {}
+                }
+            }
+        } else {
+            Log.w(TAG, "BT audio présent mais pas encore de communication device");
+            lastScoFailReason = "no_communication_device";
+        }
+        // Ne pas enchaîner startBluetoothSco ici : le caller tente VR puis legacy.
+        return false;
+    }
+
+    private boolean isHeadsetAudioConnected() {
+        BluetoothHeadset headset;
+        synchronized (headsetProxyLock) {
+            headset = bluetoothHeadset;
+        }
+        if (headset == null) return false;
+        try {
+            java.util.List<BluetoothDevice> devices = headset.getConnectedDevices();
+            if (devices == null) return false;
+            for (BluetoothDevice d : devices) {
+                if (headset.isAudioConnected(d)) return true;
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "isHeadsetAudioConnected", e);
+        }
+        return false;
     }
 
     private boolean prepareScoLegacy() {
-        if (scoPrepared && audioManager.isBluetoothScoOn()) return true;
+        if (scoPrepared && hasLiveBluetoothScoInput()) return true;
+        requestScoAudioFocus();
         final CountDownLatch latch = new CountDownLatch(1);
         final AtomicBoolean connected = new AtomicBoolean(false);
+        final AtomicBoolean failed = new AtomicBoolean(false);
+        final AtomicBoolean sawConnecting = new AtomicBoolean(false);
         BroadcastReceiver waiter = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -294,9 +710,18 @@ public final class KwsAudioRouteManager {
                 if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
                     connected.set(true);
                     latch.countDown();
+                } else if (state == AudioManager.SCO_AUDIO_STATE_CONNECTING) {
+                    sawConnecting.set(true);
                 } else if (state == AudioManager.SCO_AUDIO_STATE_ERROR) {
+                    failed.set(true);
+                    latch.countDown();
+                } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED
+                        && sawConnecting.get()) {
+                    // CONNECTING → DISCONNECTED = refus système (pas le DISCONNECTED initial).
+                    failed.set(true);
                     latch.countDown();
                 }
+                noteScoState(state);
             }
         };
         IntentFilter filter = new IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
@@ -313,18 +738,34 @@ public final class KwsAudioRouteManager {
         try {
             audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
             audioManager.startBluetoothSco();
+            audioManager.setBluetoothScoOn(true);
             boolean ok = latch.await(SCO_WAIT_MS, TimeUnit.MILLISECONDS);
-            if (connected.get() || audioManager.isBluetoothScoOn()) {
-                audioManager.setBluetoothScoOn(true);
+            // isBluetoothScoOn() reflète la demande app, PAS la connexion réelle — ne pas s'y fier.
+            if (connected.get() || hasLiveBluetoothScoInput()) {
                 preferredInput = findBluetoothInputDevice();
+                if (preferredInput == null) {
+                    preferredInput = findInputOfType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO);
+                }
                 scoPrepared = true;
-                Log.i(TAG, "SCO connected awaitOk=" + ok + " " + describeRoute());
+                Log.i(TAG, "SCO connected awaitOk=" + ok + " " + describeRouteLocked());
                 return true;
             }
-            Log.w(TAG, "SCO timeout ok=" + ok + " scoOn=" + audioManager.isBluetoothScoOn());
-            // Ne pas laisser MODE_IN_COMMUNICATION sans SCO
+            Log.w(TAG, "SCO timeout/fail ok=" + ok + " failed=" + failed.get()
+                    + " scoOn=" + audioManager.isBluetoothScoOn()
+                    + " liveInput=" + hasLiveBluetoothScoInput());
+            if (failed.get() && sawConnecting.get()) {
+                lastScoFailReason = "legacy_CONNECTING_to_DISCONNECTED";
+            } else if (failed.get()) {
+                lastScoFailReason = "legacy_SCO_ERROR";
+            } else {
+                lastScoFailReason = "legacy_timeout";
+            }
             try {
+                audioManager.setBluetoothScoOn(false);
                 audioManager.stopBluetoothSco();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    audioManager.clearCommunicationDevice();
+                }
                 audioManager.setMode(AudioManager.MODE_NORMAL);
             } catch (Exception ignored) {}
             return false;
@@ -335,6 +776,302 @@ public final class KwsAudioRouteManager {
             try {
                 app.unregisterReceiver(waiter);
             } catch (Exception ignored) {}
+        }
+    }
+
+    /** Vraie entrée micro SCO (pas juste setBluetoothScoOn / device communication listé). */
+    private boolean hasLiveBluetoothScoInput() {
+        if (findInputOfType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO) != null) return true;
+        // BLE headset en entrée = micro live (pas juste "disponible en communication").
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && findInputOfType(AudioDeviceInfo.TYPE_BLE_HEADSET) != null) {
+            return true;
+        }
+        return false;
+    }
+
+    private void requestScoAudioFocus() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            try {
+                audioManager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+            } catch (Exception e) {
+                Log.w(TAG, "requestAudioFocus legacy", e);
+            }
+            return;
+        }
+        if (scoFocusRequest != null) return;
+        try {
+            scoFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build())
+                    .setOnAudioFocusChangeListener(focusChange ->
+                            Log.i(TAG, "sco audio focus change=" + focusChange))
+                    .build();
+            int r = audioManager.requestAudioFocus(scoFocusRequest);
+            Log.i(TAG, "requestAudioFocus result=" + r);
+        } catch (Exception e) {
+            Log.w(TAG, "requestAudioFocus", e);
+            scoFocusRequest = null;
+        }
+    }
+
+    private void abandonScoAudioFocus() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            try {
+                audioManager.abandonAudioFocus(null);
+            } catch (Exception ignored) {}
+            return;
+        }
+        AudioFocusRequest req = scoFocusRequest;
+        scoFocusRequest = null;
+        if (req == null) return;
+        try {
+            audioManager.abandonAudioFocusRequest(req);
+        } catch (Exception e) {
+            Log.w(TAG, "abandonAudioFocus", e);
+        }
+    }
+
+    private void ensureHeadsetProxy() {
+        synchronized (headsetProxyLock) {
+            if (bluetoothHeadset != null) return;
+            if (headsetProxyRequesting) return;
+            headsetProxyRequesting = true;
+        }
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || !adapter.isEnabled()) {
+                headsetProxyRequesting = false;
+                return;
+            }
+            boolean accepted = adapter.getProfileProxy(app, new BluetoothProfile.ServiceListener() {
+                @Override
+                public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                    if (profile == BluetoothProfile.HEADSET && proxy instanceof BluetoothHeadset) {
+                        synchronized (headsetProxyLock) {
+                            bluetoothHeadset = (BluetoothHeadset) proxy;
+                            headsetProxyRequesting = false;
+                        }
+                        Log.i(TAG, "BluetoothHeadset proxy ready");
+                    }
+                }
+
+                @Override
+                public void onServiceDisconnected(int profile) {
+                    if (profile == BluetoothProfile.HEADSET) {
+                        synchronized (headsetProxyLock) {
+                            bluetoothHeadset = null;
+                            voiceRecognitionDevice = null;
+                            voiceRecognitionActive = false;
+                            headsetProxyRequesting = false;
+                        }
+                        Log.i(TAG, "BluetoothHeadset proxy gone");
+                    }
+                }
+            }, BluetoothProfile.HEADSET);
+            if (!accepted) {
+                headsetProxyRequesting = false;
+                Log.w(TAG, "getProfileProxy(HEADSET) refused");
+            }
+        } catch (SecurityException e) {
+            headsetProxyRequesting = false;
+            Log.w(TAG, "BLUETOOTH_CONNECT manquant pour Headset proxy", e);
+        } catch (Exception e) {
+            headsetProxyRequesting = false;
+            Log.w(TAG, "ensureHeadsetProxy", e);
+        }
+    }
+
+    private BluetoothHeadset waitForHeadsetProxy(long timeoutMs) {
+        ensureHeadsetProxy();
+        long deadline = System.currentTimeMillis() + Math.max(500L, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            synchronized (headsetProxyLock) {
+                if (bluetoothHeadset != null) return bluetoothHeadset;
+            }
+            sleepQuiet(50L);
+        }
+        // 2ᵉ chance : proxy parfois jamais livré après un SCO flappé — reset + re-demande.
+        Log.w(TAG, "Headset proxy timeout — retry getProfileProxy");
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            BluetoothHeadset stale;
+            synchronized (headsetProxyLock) {
+                stale = bluetoothHeadset;
+                bluetoothHeadset = null;
+                headsetProxyRequesting = false;
+            }
+            if (adapter != null && stale != null) {
+                try {
+                    adapter.closeProfileProxy(BluetoothProfile.HEADSET, stale);
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        ensureHeadsetProxy();
+        deadline = System.currentTimeMillis() + Math.max(800L, timeoutMs / 2);
+        while (System.currentTimeMillis() < deadline) {
+            synchronized (headsetProxyLock) {
+                if (bluetoothHeadset != null) return bluetoothHeadset;
+            }
+            sleepQuiet(50L);
+        }
+        synchronized (headsetProxyLock) {
+            return bluetoothHeadset;
+        }
+    }
+
+    /**
+     * Active le lien audio HFP via {@link BluetoothHeadset#startVoiceRecognition}.
+     * Souvent le seul chemin fiable pour le micro casque hors appel (wake / STT).
+     */
+    private boolean prepareViaHeadsetVoiceRecognition() {
+        BluetoothHeadset headset = waitForHeadsetProxy(4_000L);
+        if (headset == null) {
+            Log.w(TAG, "voiceRecognition: pas de proxy Headset");
+            lastScoFailReason = "vr_no_headset_proxy";
+            return false;
+        }
+        java.util.List<BluetoothDevice> connected;
+        try {
+            connected = headset.getConnectedDevices();
+        } catch (SecurityException e) {
+            Log.w(TAG, "voiceRecognition: BLUETOOTH_CONNECT", e);
+            lastScoFailReason = "vr_bt_permission";
+            return false;
+        }
+        if (connected == null || connected.isEmpty()) {
+            Log.w(TAG, "voiceRecognition: aucun casque HFP connecté");
+            lastScoFailReason = "vr_no_hfp_device";
+            return false;
+        }
+        requestScoAudioFocus();
+        try {
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        } catch (Exception ignored) {}
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicBoolean connectedSco = new AtomicBoolean(false);
+        BroadcastReceiver waiter = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null) return;
+                int state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1);
+                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                    connectedSco.set(true);
+                    latch.countDown();
+                } else if (state == AudioManager.SCO_AUDIO_STATE_ERROR) {
+                    latch.countDown();
+                }
+                noteScoState(state);
+            }
+        };
+        IntentFilter filter = new IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                app.registerReceiver(waiter, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                app.registerReceiver(waiter, filter);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "voiceRecognition register waiter", e);
+            return false;
+        }
+        BluetoothDevice chosen = null;
+        boolean started = false;
+        try {
+            for (BluetoothDevice device : connected) {
+                try {
+                    if (headset.isAudioConnected(device)) {
+                        chosen = device;
+                        started = true;
+                        connectedSco.set(true);
+                        Log.i(TAG, "voiceRecognition: audio déjà connecté");
+                        break;
+                    }
+                    boolean ok = headset.startVoiceRecognition(device);
+                    Log.i(TAG, "startVoiceRecognition " + safeBtName(device) + " ok=" + ok);
+                    if (ok) {
+                        chosen = device;
+                        started = true;
+                        break;
+                    }
+                } catch (SecurityException e) {
+                    Log.w(TAG, "startVoiceRecognition denied", e);
+                }
+            }
+            if (!started || chosen == null) {
+                Log.w(TAG, "voiceRecognition: start échoué sur tous les devices");
+                lastScoFailReason = "vr_start_false";
+                return false;
+            }
+            if (!connectedSco.get()) {
+                latch.await(SCO_WAIT_MS, TimeUnit.MILLISECONDS);
+            }
+            boolean live = connectedSco.get() || hasLiveBluetoothScoInput()
+                    || headset.isAudioConnected(chosen);
+            if (!live) {
+                try {
+                    headset.stopVoiceRecognition(chosen);
+                } catch (Exception ignored) {}
+                Log.w(TAG, "voiceRecognition: SCO non établi");
+                lastScoFailReason = "vr_started_sco_timeout";
+                return false;
+            }
+            voiceRecognitionDevice = chosen;
+            voiceRecognitionActive = true;
+            preferredInput = findBluetoothInputDevice();
+            if (preferredInput == null) {
+                preferredInput = findInputOfType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO);
+            }
+            scoPrepared = true;
+            Log.i(TAG, "voiceRecognition SCO ok " + describeRouteLocked());
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            try {
+                app.unregisterReceiver(waiter);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void stopHeadsetVoiceRecognition() {
+        if (!voiceRecognitionActive) return;
+        BluetoothHeadset headset;
+        BluetoothDevice device;
+        synchronized (headsetProxyLock) {
+            headset = bluetoothHeadset;
+            device = voiceRecognitionDevice;
+            voiceRecognitionActive = false;
+            voiceRecognitionDevice = null;
+        }
+        if (headset == null || device == null) return;
+        try {
+            boolean ok = headset.stopVoiceRecognition(device);
+            Log.i(TAG, "stopVoiceRecognition ok=" + ok);
+        } catch (Exception e) {
+            Log.w(TAG, "stopVoiceRecognition", e);
+        }
+    }
+
+    private static String safeBtName(BluetoothDevice device) {
+        if (device == null) return "?";
+        try {
+            String name = device.getName();
+            if (name != null && !name.isEmpty()) return name;
+        } catch (SecurityException ignored) {}
+        return device.getAddress();
+    }
+
+    private static void sleepQuiet(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -413,6 +1150,27 @@ public final class KwsAudioRouteManager {
             } catch (Exception ignored) {}
             return;
         }
+        // Pendant un hold SCO (wake continu ou STT), l'apparition de l'entrée BT_SCO
+        // ne doit pas relancer la capture : release→restart flappe SCO → rms=0.
+        boolean scoHoldStable = scoHoldCount.get() > 0
+                && before == RouteKind.BLUETOOTH_SCO
+                && activeKind == RouteKind.BLUETOOTH_SCO;
+        boolean scoStateOnly = reason != null
+                && reason.contains("SCO_AUDIO_STATE");
+        if (scoHoldStable || (scoStateOnly && activeKind == RouteKind.BLUETOOTH_SCO
+                && before == RouteKind.BLUETOOTH_SCO)) {
+            Log.i(TAG, "route update suppressed (SCO hold/stable) preferredId="
+                    + beforeId + "→" + afterId + " holds=" + scoHoldCount.get());
+            try {
+                JSONObject f = new JSONObject();
+                f.put("reason", reason);
+                f.put("suppressed", true);
+                f.put("holds", scoHoldCount.get());
+                f.put("route", describeRoute());
+                PegaseDiagLog.kws(app, "audio_route_suppressed", f);
+            } catch (Exception ignored) {}
+            return;
+        }
         if (pendingRouteNotify != null) {
             main.removeCallbacks(pendingRouteNotify);
         }
@@ -435,6 +1193,14 @@ public final class KwsAudioRouteManager {
     }
 
     private void refreshRouteKind() {
+        if (phoneForced) {
+            activeKind = RouteKind.PHONE_BUILTIN;
+            if (preferredInput == null
+                    || preferredInput.getType() != AudioDeviceInfo.TYPE_BUILTIN_MIC) {
+                preferredInput = findBuiltinMic();
+            }
+            return;
+        }
         AudioDeviceInfo bt = findBluetoothInputDevice();
         if (bt != null) {
             activeKind = RouteKind.BLUETOOTH_SCO;
@@ -499,10 +1265,9 @@ public final class KwsAudioRouteManager {
     }
 
     private AudioDeviceInfo findBluetoothInputDevice() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            AudioDeviceInfo comm = findBluetoothCommunicationDevice();
-            if (comm != null) return comm;
-        }
+        // Pour AudioRecord.setPreferredDevice : uniquement une vraie entrée micro.
+        // getAvailableCommunicationDevices() renvoie souvent un device "bt_sco" de rôle
+        // communication/sortie — setPreferredDevice échoue alors (false) → rms=0.
         AudioDeviceInfo sco = findInputOfType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO);
         if (sco != null) return sco;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

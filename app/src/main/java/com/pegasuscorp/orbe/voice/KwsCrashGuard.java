@@ -19,7 +19,11 @@ public final class KwsCrashGuard {
     private static final String KEY_FAILS = "fails";
     private static final String KEY_START_MS = "start_ms";
     private static final String KEY_CONFIG_GEN = "config_gen";
-    private static final long CRASH_WINDOW_MS = 8_000L;
+    /**
+     * Fenêtre « mort rapide » après start KWS — aussi délai COOLDOWN après
+     * {@link WakeCoordinator#onCrashGuardTripped()} (sémantique crash-loop, pas anti-écho TTS).
+     */
+    public static final long CRASH_WINDOW_MS = 8_000L;
     private static final int MAX_FAILS = 5;
 
     private KwsCrashGuard() {}
@@ -37,7 +41,8 @@ public final class KwsCrashGuard {
         log(ctx, "crash_guard_config_bump", generation, 0, false);
     }
 
-    static boolean shouldDisableKws(Context ctx) {
+    /** Exposé pour le dashboard debug. */
+    public static boolean shouldDisableKws(Context ctx) {
         boolean disabled = fails(ctx) >= MAX_FAILS;
         if (disabled) {
             log(ctx, "crash_guard_tripped", generation(ctx), fails(ctx), true);

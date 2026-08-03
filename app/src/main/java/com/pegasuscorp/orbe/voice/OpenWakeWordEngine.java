@@ -25,9 +25,9 @@ import ai.onnxruntime.OrtSession;
 /**
  * Wake openWakeWord — pipeline 3 étages (mel → embedding → classifieur).
  * <p>
- * Capture audio via {@link KwsAudioRouteManager} (même chemin que Sherpa / PR #20) :
- * {@code prepareCapture}/{@code releaseCapture} sous {@code captureLock},
- * preferred device, restart sur changement de route.
+ * Capture audio via {@link KwsAudioRouteManager} (même chemin que Sherpa / STT) :
+ * SCO tenu par {@code VoiceService} ({@code ensureWakeServiceScoHold}),
+ * preferred device à l'open mic, restart sur changement de route.
  * <p>
  * Anti-FP : seuil haut, N hits consécutifs, warmup au démarrage, gate énergie.
  */
@@ -395,10 +395,7 @@ public final class OpenWakeWordEngine {
 
     private boolean openMic() {
         synchronized (captureLock) {
-            if (routeManager != null && !routeManager.prepareCapture()) {
-                Log.w(TAG, "prepareCapture failed — fallback micro téléphone");
-                routeManager.forcePhoneBuiltin();
-            }
+            // SCO tenu par VoiceService (ensureWakeServiceScoHold) — pas de prepare/release ici.
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : MediaRecorder.AudioSource.MIC;
@@ -437,9 +434,7 @@ public final class OpenWakeWordEngine {
                 } catch (Exception ignored) {}
                 audioRecord = null;
             }
-            if (routeManager != null) {
-                routeManager.releaseCapture();
-            }
+            // Ne pas releaseBluetoothSco : hold service wake reste actif jusqu'à stop/destroy.
         }
     }
 

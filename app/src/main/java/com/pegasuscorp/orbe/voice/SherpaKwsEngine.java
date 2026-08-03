@@ -389,10 +389,7 @@ public final class SherpaKwsEngine {
 
     private boolean openMic() {
         synchronized (captureLock) {
-            if (routeManager != null && !routeManager.prepareCapture()) {
-                Log.w(TAG, "prepareCapture failed — fallback micro téléphone");
-                routeManager.forcePhoneBuiltin();
-            }
+            // SCO tenu par VoiceService (ensureWakeServiceScoHold) — pas de prepare/release ici.
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : android.media.MediaRecorder.AudioSource.MIC;
@@ -421,6 +418,7 @@ public final class SherpaKwsEngine {
     }
 
     private void closeMic() {
+        long t0 = android.os.SystemClock.elapsedRealtime();
         synchronized (captureLock) {
             if (audioRecord != null) {
                 try {
@@ -431,10 +429,15 @@ public final class SherpaKwsEngine {
                 } catch (Exception ignored) {}
                 audioRecord = null;
             }
-            if (routeManager != null) {
-                routeManager.releaseCapture();
-            }
+            // Ne pas releaseBluetoothSco : hold service wake reste actif jusqu'à stop/destroy.
         }
+        try {
+            org.json.JSONObject f = new org.json.JSONObject();
+            f.put("backend", "sherpa");
+            f.put("close_mic_ms", android.os.SystemClock.elapsedRealtime() - t0);
+            f.put("released_sco", false);
+            WakeToSttTrace.mark(app, "kws_close_mic_done", f);
+        } catch (Exception ignored) {}
     }
 
     private static void sleepQuiet(long ms) {

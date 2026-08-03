@@ -76,7 +76,7 @@ public class WakeWordRecordActivity extends AppCompatActivity {
                             rebuild();
                             // Force VoiceService à recharger le backend (sinon reste sur Sherpa).
                             VoiceWakeClient.get().resetKwsCrashGuard(this);
-                            PegaseWakeService.sync(this);
+                            VoiceWakeClient.get().sync(this);
                         });
                     } catch (Exception e) {
                         main.post(() -> toast("Import échoué : " + e.getMessage()));
@@ -130,7 +130,7 @@ public class WakeWordRecordActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        PegaseWakeService.pause(this);
+        VoiceWakeClient.get().pauseKeepSco(this);
     }
 
     @Override
@@ -138,7 +138,7 @@ public class WakeWordRecordActivity extends AppCompatActivity {
         stopRequested.set(true);
         sessionRunning.set(false);
         if (!isChangingConfigurations()) {
-            PegaseWakeService.resume(this);
+            VoiceWakeClient.get().startListening(this);
         }
         super.onStop();
     }
@@ -213,7 +213,7 @@ public class WakeWordRecordActivity extends AppCompatActivity {
     private void startSession() {
         if (!sessionRunning.compareAndSet(false, true)) return;
         stopRequested.set(false);
-        PegaseWakeService.pause(this);
+        VoiceWakeClient.get().pauseKeepSco(this);
         rebuild();
         io.execute(this::runRecordingSession);
     }
@@ -301,7 +301,7 @@ public class WakeWordRecordActivity extends AppCompatActivity {
                 main.post(() -> {
                     toast(msg);
                     rebuild();
-                    if (ok) PegaseWakeService.sync(this);
+                    if (ok) VoiceWakeClient.get().sync(this);
                 }));
     }
 

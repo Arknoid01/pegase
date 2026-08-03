@@ -10,6 +10,11 @@ import com.pegasuscorp.orbe.voice.IWakeHealthCallback;
 interface IVoiceWakeService {
     void startWakeListening();
     void stopWakeListening();
+    /**
+     * Stoppe le KWS sans couper le SCO — handoff wake→STT / conversation.
+     * Le SCO reste tenu jusqu'à {@link #stopWakeListening} ou un timeout service.
+     */
+    void pauseWakeListeningKeepSco();
     void setGentleMode(boolean gentle);
     void registerCallback(IWakeWordCallback callback);
     void unregisterCallback(IWakeWordCallback callback);
@@ -17,4 +22,12 @@ interface IVoiceWakeService {
     void unregisterHealthCallback(IWakeHealthCallback callback);
     int getWakeHealthCode();
     void resetKwsCrashGuard();
+    /**
+     * Launcher : session STT conversation démarrée (HANDING_OFF → STT_ACTIVE).
+     */
+    void notifySttSessionStarted();
+    /**
+     * Launcher : fin de session STT (STT_ACTIVE → rearm LISTENING_WAKE).
+     */
+    void notifySttSessionEnded();
 }
