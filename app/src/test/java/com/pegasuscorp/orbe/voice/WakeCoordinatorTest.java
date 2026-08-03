@@ -90,6 +90,214 @@ public class WakeCoordinatorTest {
     }
 
     @Test
+    public void onAudioSourceChanged_whileListening_refreezesSourceAndBackend() {
+        List<WakeCoordinator.Snapshot> seen = new ArrayList<>();
+        coord = new WakeCoordinator(
+                routes,
+                source -> source == AudioRouteObserver.AudioSource.BLUETOOTH_HFP
+                        ? WakeCoordinator.WakeBackend.SHERPA
+                        : WakeCoordinator.WakeBackend.OWW,
+                sco, scheduler, CRASH_COOLDOWN_MS, POST_STT_REARM_MS);
+        coord.setListener(seen::add);
+        coord.start();
+        assertEquals(WakeCoordinator.WakeBackend.OWW, coord.getSessionBackend());
+
+        // Proxy HFP arrivé après start() : la session doit être corrigée.
+        assertTrue(coord.onAudioSourceChanged(AudioRouteObserver.AudioSource.BLUETOOTH_HFP));
+        WakeCoordinator.Snapshot s = coord.getState();
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, s.source);
+        assertEquals(WakeCoordinator.WakeBackend.SHERPA, s.backend);
+        assertEquals(WakeCoordinator.WakeState.LISTENING_WAKE, s.state);
+        assertEquals(WakeCoordinator.WakeBackend.SHERPA, seen.get(seen.size() - 1).backend);
+    }
+
+    @Test
+    public void onAudioSourceChanged_sameSource_isNoOp() {
+        coord.start();
+        assertFalse(coord.onAudioSourceChanged(AudioRouteObserver.AudioSource.PHONE_BUILTIN));
+    }
+
+    @Test
+    public void onAudioSourceChanged_duringSttSession_isIgnored() {
+        coord.start();
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+        assertFalse(coord.onAudioSourceChanged(AudioRouteObserver.AudioSource.BLUETOOTH_HFP));
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, coord.getState().source);
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+    }
+
+    @Test
+    public void onAudioSourceChanged_fromIdle_isIgnored() {
+        assertFalse(coord.onAudioSourceChanged(AudioRouteObserver.AudioSource.BLUETOOTH_HFP));
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+    }
+
+    @Test
+    public void notifyScoUnavailable_degradesSessionToPhone() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, coord.getState().source);
+
+        assertTrue(coord.notifyScoUnavailable());
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, coord.getState().source);
+        assertTrue(coord.isScoUnavailableForSession());
+
+        // Session dégradée : le STT qui suit ne doit plus tenter le SCO.
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, sco.lastPrepareSource.get());
+    }
+
+    @Test
+    public void notifyScoUnavailable_latchBlocksPromotionBackToHfp() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.notifyScoUnavailable();
+        // L'observer re-signale le casque : pas de va-et-vient tant que la session dure.
+        assertFalse(coord.onAudioSourceChanged(AudioRouteObserver.AudioSource.BLUETOOTH_HFP));
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, coord.getState().source);
+    }
+
+    @Test
+    public void notifyScoUnavailable_latchClearedByNewSession() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.notifyScoUnavailable();
+        coord.stop();
+        assertFalse(coord.isScoUnavailableForSession());
+        coord.start();
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, coord.getState().source);
+    }
+
+    @Test
+    public void notifyScoUnavailable_fromSttActive_isIgnored() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+        assertFalse(coord.notifyScoUnavailable());
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, coord.getState().source);
+    }
+
+    @Test
+    public void stop_duringSttSession_doesNotReleaseSco() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+
+        // Le launcher coupe le wake pendant que le STT parle : ne rien arracher.
+        coord.stop();
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+        assertEquals(0, sco.releaseCalls.get());
+    }
+
+    @Test
+    public void stop_duringHandingOff_keepsSessionForIncomingStt() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.onWakeDetected();
+        assertEquals(WakeCoordinator.WakeState.HANDING_OFF, coord.getState().state);
+
+        // L'UI vocale s'ouvre et coupe le wake avant que le STT ne soit ouvert.
+        coord.stop();
+        assertEquals(WakeCoordinator.WakeState.HANDING_OFF, coord.getState().state);
+        assertEquals(0, sco.releaseCalls.get());
+
+        // Le STT arrive quand même : il doit récupérer la session (donc le SCO).
+        AtomicReference<Boolean> ready = new AtomicReference<>();
+        coord.requestSttSession(ready::set);
+        assertEquals(Boolean.TRUE, ready.get());
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, sco.lastPrepareSource.get());
+
+        // Puis le stop différé s'applique en fin de phrase, sans rearm.
+        assertTrue(coord.releaseSttSession());
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+        assertFalse(coord.isPostSttRearmPending());
+    }
+
+    @Test
+    public void stop_duringHandingOff_thenRestart_clearsDeferredStop() {
+        coord.start();
+        coord.onWakeDetected();
+        coord.stop();
+        // Réarmement explicite : la session repart proprement.
+        assertTrue(coord.start());
+        assertEquals(WakeCoordinator.WakeState.LISTENING_WAKE, coord.getState().state);
+        coord.requestSttSession(ok -> {});
+        assertTrue(coord.releaseSttSession());
+        assertTrue(coord.isPostSttRearmPending());
+    }
+
+    @Test
+    public void stop_duringStt_appliedAtReleaseWithoutRearm() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+        coord.stop();
+
+        assertTrue(coord.releaseSttSession());
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+        assertEquals(WakeCoordinator.WakeBackend.NONE, coord.getSessionBackend());
+        assertEquals(1, sco.releaseCalls.get());
+        // Arrêt demandé : pas de rearm anti-écho, pas de retour en écoute.
+        assertFalse(coord.isPostSttRearmPending());
+        assertTrue(scheduler.pending.isEmpty());
+        assertFalse(coord.wantsListening());
+    }
+
+    @Test
+    public void stop_duringStt_thenNormalEnd_doesNotLeakStopFlag() {
+        coord.start();
+        coord.requestSttSession(ok -> {});
+        coord.stop();
+        coord.releaseSttSession();
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+
+        // Nouvelle session : le stop différé ne doit pas la contaminer.
+        coord.start();
+        coord.requestSttSession(ok -> {});
+        assertTrue(coord.releaseSttSession());
+        assertTrue(coord.isPostSttRearmPending());
+        assertEquals(WakeCoordinator.WakeState.STT_ACTIVE, coord.getState().state);
+    }
+
+    @Test
+    public void stopNow_duringStt_tearsDownImmediately() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+
+        coord.stopNow();
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+        assertEquals(1, sco.releaseCalls.get());
+    }
+
+    @Test
+    public void stop_outsideStt_stillGoesIdleImmediately() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+        coord.stop();
+        assertEquals(WakeCoordinator.WakeState.IDLE, coord.getState().state);
+        assertFalse(coord.wantsListening());
+    }
+
+    @Test
     public void onWakeDetected_fromListening_goesHandingOff() {
         coord.start();
         assertTrue(coord.onWakeDetected());

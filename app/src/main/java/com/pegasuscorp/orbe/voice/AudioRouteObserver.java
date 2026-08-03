@@ -209,9 +209,17 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
     }
 
     private void recomputeFromCallbacks(String reason) {
-        // Décision stricte : profil HFP CONNECTED → BLUETOOTH_HFP, sinon téléphone.
-        // Les devices SCO (AudioDeviceCallback) ne font qu'informer le log ; pas de polling.
-        AudioSource next = hfpProfileConnected
+        // Deux signaux 100 % callback, jamais de polling :
+        //   1. profil HFP CONNECTED (proxy + broadcast) ;
+        //   2. entrée micro SCO présente (AudioDeviceCallback).
+        // Le 2ᵉ est indispensable : registerAudioDeviceCallback livre les devices déjà
+        // connectés tout de suite, alors que getProfileProxy(HEADSET) est asynchrone.
+        // Avec le seul signal 1, WakeCoordinator.start() peut lire PHONE_BUILTIN avant
+        // l'arrivée du proxy et figer la session sur le micro téléphone casque branché.
+        // Pas de faux positif : une entrée TYPE_BLUETOOTH_SCO implique le profil HFP
+        // (un casque A2DP-only n'expose aucune entrée micro).
+        boolean hfpAvailable = hfpProfileConnected || !scoInputDeviceIds.isEmpty();
+        AudioSource next = hfpAvailable
                 ? AudioSource.BLUETOOTH_HFP
                 : AudioSource.PHONE_BUILTIN;
         if (next == current) {

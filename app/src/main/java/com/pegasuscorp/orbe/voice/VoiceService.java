@@ -111,10 +111,22 @@ public class VoiceService extends Service {
 
         @Override
         public void stopWakeListening() {
+            // Pendant tout le handoff (wake détecté → STT ouvert → phrase finie) le hold
+            // SCO porte la route casque : le lâcher ici fait retomber le STT sur le micro
+            // téléphone (holds 1→0, phoneForced).
+            WakeCoordinator.WakeState st = wakeCoordinator != null
+                    ? wakeCoordinator.getState().state : WakeCoordinator.WakeState.IDLE;
+            boolean handoffInFlight = st == WakeCoordinator.WakeState.HANDING_OFF
+                    || st == WakeCoordinator.WakeState.STT_ACTIVE;
             if (wakeCoordinator != null) wakeCoordinator.stop();
             main.removeCallbacks(releaseKeptScoRunnable);
             stopListening();
-            releaseWakeServiceScoHold();
+            if (handoffInFlight) {
+                Log.i(TAG, "stopWakeListening pendant " + st + " — hold SCO conservé");
+                main.postDelayed(releaseKeptScoRunnable, KEEP_SCO_TIMEOUT_MS);
+            } else {
+                releaseWakeServiceScoHold();
+            }
             refreshForegroundNotification();
         }
 
@@ -244,7 +256,29 @@ public class VoiceService extends Service {
         audioRouteObserver = new AudioRouteObserver(this);
         wakeCoordinator = new WakeCoordinator(this, audioRouteObserver);
         wakeCoordinator.setListener(this::onCoordinatorState);
+        audioRouteObserver.setListener(this::onAudioSourceChanged);
         maybeAutoDownloadKws();
+    }
+
+    /**
+     * Casque HFP branché / débranché pendant l'écoute wake. La décision reste au
+     * {@link WakeCoordinator} : ici on ne fait qu'appliquer la conséquence moteur
+     * (relance capture sur la nouvelle route) si la session a été re-figée.
+     */
+    private void onAudioSourceChanged(AudioRouteObserver.AudioSource source) {
+        main.post(() -> {
+            if (wakeCoordinator == null) return;
+            if (!wakeCoordinator.onAudioSourceChanged(source)) return;
+            diag("wake_source_refrozen", kwsRouteManager != null
+                    ? kwsRouteManager.describeRoute() : "", null);
+            if (source == AudioRouteObserver.AudioSource.PHONE_BUILTIN) {
+                // Plus de casque : rendre le hold SCO au lieu de le garder pour rien.
+                releaseWakeServiceScoHold();
+            }
+            stopKwsPlanned();
+            ensureSessionEngines();
+            if (wantsListening()) scheduleListen(400);
+        });
     }
 
     private void onCoordinatorState(WakeCoordinator.Snapshot snap) {
@@ -267,7 +301,15 @@ public class VoiceService extends Service {
                 if (wantsListening()) scheduleListen(START_LISTEN_DELAY_MS);
             });
         } else {
-            main.post(this::refreshForegroundNotification);
+            main.post(() -> {
+                if (snap.state == WakeCoordinator.WakeState.IDLE) {
+                    // Fin réelle de session (y compris stop différé appliqué après le STT) :
+                    // rendre le hold SCO tout de suite au lieu d'attendre le timeout.
+                    main.removeCallbacks(releaseKeptScoRunnable);
+                    releaseWakeServiceScoHold();
+                }
+                refreshForegroundNotification();
+            });
         }
     }
 
@@ -299,7 +341,7 @@ public class VoiceService extends Service {
     public void onDestroy() {
         if (wakeCoordinator != null) {
             wakeCoordinator.setListener(null);
-            wakeCoordinator.stop();
+            wakeCoordinator.stopNow();
         }
         main.removeCallbacks(releaseKeptScoRunnable);
         stopListening();
@@ -805,7 +847,15 @@ public class VoiceService extends Service {
                                         PegaseDiagLog.kws(VoiceService.this,
                                                 "sco_phone_fallback_no_hfp", f);
                                     } catch (Exception ignored) {}
+                                    // Le coordinator arbitre la dégradation : sinon il reste
+                                    // sur BLUETOOTH_HFP et le STT suivant retente un SCO
+                                    // condamné (~15 s de silence puis error 7).
+                                    if (wakeCoordinator != null) {
+                                        wakeCoordinator.notifyScoUnavailable();
+                                    }
                                     kwsRouteManager.forcePhoneBuiltin();
+                                    // Backend re-sélectionné avec la nouvelle source.
+                                    ensureSessionEngines();
                                     startKwsListenEngine();
                                     return;
                                 }
@@ -834,6 +884,14 @@ public class VoiceService extends Service {
     private void startKwsListenEngine() {
         if (!wantsListening() || !usesLocalWake()) return;
         if (isLocalWakeRunning()) return;
+        // Le backend a pu être re-sélectionné (changement de source / SCO indisponible) :
+        // sans moteur chargé on replanifie au lieu de déréférencer null.
+        if ((useOww() && owwEngine == null) || (useKws() && kwsEngine == null)) {
+            Log.w(TAG, "moteur absent pour backend courant — recharge puis retry");
+            ensureSessionEngines();
+            if (wantsListening()) scheduleListen(400);
+            return;
+        }
         acquireListenWakeLock();
         lastKwsStartMs = System.currentTimeMillis();
         if (useOww()) {

@@ -95,6 +95,19 @@ public final class WakeCoordinator {
             AudioRouteObserver.AudioSource.PHONE_BUILTIN;
     private WakeBackend sessionBackend = WakeBackend.NONE;
     private boolean scoHeldForStt;
+    /**
+     * Le SCO s'est révélé inétablissable pour cette session (casque vu comme HFP mais
+     * lien audio impossible). Verrou anti-va-et-vient : tant qu'il est posé, la session
+     * reste sur {@link AudioRouteObserver.AudioSource#PHONE_BUILTIN} même si l'observer
+     * re-signale un casque. Levé au prochain {@link #start()} / {@link #stop()}.
+     */
+    private boolean scoUnavailableForSession;
+    /**
+     * {@link #stop()} reçu pendant {@link WakeState#STT_ACTIVE} : le STT possède la route,
+     * on ne coupe rien tout de suite. L'arrêt est appliqué à {@link #releaseSttSession()}
+     * (IDLE direct, sans rearm anti-écho).
+     */
+    private boolean stopRequestedDuringHandoff;
     /** True entre {@link #releaseSttSession()} et le retour effectif en LISTENING_WAKE. */
     private boolean postSttRearmPending;
     private Listener listener;
@@ -144,6 +157,8 @@ public final class WakeCoordinator {
         }
         // IDLE ou HANDING_OFF
         cancelPendingTimers();
+        scoUnavailableForSession = false;
+        stopRequestedDuringHandoff = false;
         sessionSource = routeObserver.currentSource();
         sessionBackend = backendSelector.select(sessionSource);
         state = WakeState.LISTENING_WAKE;
@@ -152,9 +167,98 @@ public final class WakeCoordinator {
         return true;
     }
 
-    /** Arrêt explicite (binder stop / destroy) → IDLE. */
+    /**
+     * Source audio changée ({@link AudioRouteObserver} — callback système).
+     * Seule entrée autorisée pour corriger la source figée par {@link #start()} :
+     * couvre le cas où le proxy HFP arrive après le démarrage de l'écoute.
+     *
+     * <p>N'agit qu'en {@link WakeState#LISTENING_WAKE} : re-fige source + backend et
+     * notifie. Dans tous les autres états on ignore — on ne casse jamais un handoff ou
+     * une session STT en cours ; le prochain {@link #start()} relira la source.
+     *
+     * @return true si la session a été re-figée (le service doit relancer la capture).
+     */
+    public synchronized boolean onAudioSourceChanged(AudioRouteObserver.AudioSource source) {
+        if (source == null) return false;
+        if (state != WakeState.LISTENING_WAKE) {
+            Log.d(TAG, "onAudioSourceChanged(" + source + ") ignored from " + state);
+            return false;
+        }
+        if (source == sessionSource) return false;
+        if (source == AudioRouteObserver.AudioSource.BLUETOOTH_HFP && scoUnavailableForSession) {
+            // SCO déjà jugé impossible pour cette session : ne pas relancer la danse SCO.
+            Log.d(TAG, "onAudioSourceChanged(BLUETOOTH_HFP) ignoré — SCO indisponible");
+            return false;
+        }
+        AudioRouteObserver.AudioSource prev = sessionSource;
+        sessionSource = source;
+        sessionBackend = backendSelector.select(source);
+        Log.i(TAG, "source re-figée " + prev + " → " + source + " backend=" + sessionBackend);
+        notifyListenerLocked();
+        return true;
+    }
+
+    /**
+     * Le lien SCO n'a pas pu être établi alors que la session visait le casque.
+     * Le service ne décide rien : il rapporte le fait, le coordinator arbitre et dégrade
+     * la session sur le micro téléphone (source + backend re-sélectionnés) pour que le
+     * wake ET le STT qui suivra soient d'accord sur la même route.
+     *
+     * @return true si la session a été dégradée (le service doit recharger le moteur).
+     */
+    public synchronized boolean notifyScoUnavailable() {
+        if (state != WakeState.LISTENING_WAKE && state != WakeState.HANDING_OFF) {
+            Log.d(TAG, "notifyScoUnavailable ignored from " + state);
+            return false;
+        }
+        scoUnavailableForSession = true;
+        if (sessionSource == AudioRouteObserver.AudioSource.PHONE_BUILTIN) return false;
+        sessionSource = AudioRouteObserver.AudioSource.PHONE_BUILTIN;
+        sessionBackend = backendSelector.select(sessionSource);
+        Log.w(TAG, "SCO indisponible → session dégradée PHONE_BUILTIN backend="
+                + sessionBackend);
+        notifyListenerLocked();
+        return true;
+    }
+
+    /** Exposé tests / diag : SCO jugé impossible pour la session en cours. */
+    public synchronized boolean isScoUnavailableForSession() {
+        return scoUnavailableForSession;
+    }
+
+    /**
+     * Arrêt explicite (binder stop / destroy) → IDLE.
+     *
+     * <p>Pendant {@link WakeState#STT_ACTIVE} l'arrêt est <b>différé</b> : la session STT
+     * possède le lien SCO, le couper ici arrache le micro sous le {@code SpeechRecognizer}
+     * (error 7 / NO_MATCH). « Stop » veut dire « pas de wake en fond », pas « détruis
+     * l'audio en cours » — l'arrêt s'applique à la fin de la session STT.
+     */
     public synchronized void stop() {
+        stop(false);
+    }
+
+    /**
+     * Arrêt inconditionnel — destruction du service : plus personne ne viendra signaler
+     * la fin de la session STT, on ne peut pas différer sous peine de rester STT_ACTIVE
+     * (et de garder le SCO) jusqu'au prochain démarrage.
+     */
+    public synchronized void stopNow() {
+        stop(true);
+    }
+
+    private synchronized void stop(boolean force) {
+        if (!force && (state == WakeState.HANDING_OFF || state == WakeState.STT_ACTIVE)) {
+            // La fenêtre à protéger commence au wake, pas à l'ouverture du STT : entre
+            // HANDING_OFF et STT_ACTIVE le lien SCO est déjà tenu pour la phrase à venir.
+            // Le lâcher ici fait retomber le STT sur le micro téléphone (holds 1→0).
+            stopRequestedDuringHandoff = true;
+            Log.i(TAG, "stop() pendant " + state + " — différé (handoff en cours)");
+            return;
+        }
         cancelPendingTimers();
+        scoUnavailableForSession = false;
+        stopRequestedDuringHandoff = false;
         if (scoHeldForStt) {
             scoGateway.release();
             scoHeldForStt = false;
@@ -258,6 +362,17 @@ public final class WakeCoordinator {
         if (scoHeldForStt) {
             scoGateway.release();
             scoHeldForStt = false;
+        }
+        if (stopRequestedDuringHandoff) {
+            // Un stop est arrivé pendant la session : l'appliquer maintenant, sans rearm.
+            stopRequestedDuringHandoff = false;
+            scoUnavailableForSession = false;
+            cancelPendingTimers();
+            state = WakeState.IDLE;
+            sessionBackend = WakeBackend.NONE;
+            Log.i(TAG, "→ IDLE (stop différé appliqué en fin de STT)");
+            notifyListenerLocked();
+            return true;
         }
         postSttRearmPending = true;
         scheduler.removeCallbacks(leavePostSttRearm);

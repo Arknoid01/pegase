@@ -441,9 +441,29 @@ public class DiscussionFragment extends Fragment {
             return;
         }
         PegaseWakeController.setTextDiscussionActive(false);
-        if (!ChatSessionRegistry.isActive() && !PegaseWakeController.isVoiceChatActive()) {
-            VoiceWakeClient.get().startListening(ctx);
-        }
+        rearmWakeIfSilent(ctx);
+    }
+
+    /**
+     * Réarme le wake en quittant l'onglet — jamais pendant que Pégase parle.
+     * L'analyse d'image / PDF est lue à voix haute ({@code speak}) : rouvrir le micro
+     * tout de suite ferait écouter Pégase sa propre voix (faux positif de mot d'éveil).
+     * Dans ce cas le réarmement est porté par le callback de fin de TTS.
+     */
+    private void rearmWakeIfSilent(Context ctx) {
+        if (ctx == null) return;
+        if (ChatSessionRegistry.isActive() || PegaseWakeController.isVoiceChatActive()) return;
+        VoiceManager voice = ChatVoiceBridge.getSharedVoice(ctx);
+        if (voice != null && voice.isSpeaking()) return;
+        VoiceWakeClient.get().startListening(ctx);
+    }
+
+    /** Fin de lecture d'une réponse texte : réarmer si l'onglet a été quitté entre-temps. */
+    private void rearmWakeAfterSpeech(Context appCtx) {
+        if (appCtx == null) return;
+        if (PegaseWakeController.isTextDiscussionActive()) return;
+        if (ChatSessionRegistry.isActive() || PegaseWakeController.isVoiceChatActive()) return;
+        VoiceWakeClient.get().startListening(appCtx);
     }
 
     /** Livré aussi depuis PegaseInterfaceActivity (onNewIntent / onResume). */
@@ -767,7 +787,9 @@ public class DiscussionFragment extends Fragment {
                 if (thinkingView != null) thinkingView.onComplete();
                 PegaseWakeController.setAssistantThinking(false);
                 try {
-                    ChatVoiceBridge.getSharedVoice(requireActivity()).speak(analysis, null);
+                    Context appCtx = requireContext().getApplicationContext();
+                    ChatVoiceBridge.getSharedVoice(requireActivity())
+                            .speak(analysis, () -> rearmWakeAfterSpeech(appCtx));
                 } catch (Exception ignored) {}
                 finishTextChatReply();
             }

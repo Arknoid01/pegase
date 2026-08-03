@@ -170,24 +170,9 @@ public final class PegaseWakeController {
         logState("userPaused=" + paused);
     }
 
-    /**
-     * @deprecated préférer {@link VoiceWakeClient#startListening} — wrapper conservé
-     * pour compat ; délègue au binder.
-     */
-    @Deprecated
-    public static void resumeWakeIfAllowed(Context context) {
-        if (context == null || !shouldListen()) return;
-        VoiceWakeClient.get().startListening(context);
-    }
-
-    /**
-     * @deprecated préférer {@link VoiceWakeClient#stopListening} — wrapper conservé
-     * pour compat ; délègue au binder.
-     */
-    @Deprecated
-    public static void pauseWake(Context context) {
-        if (context != null) VoiceWakeClient.get().stopListening(context);
-    }
+    // pauseWake / resumeWakeIfAllowed supprimés : plus aucun appelant, et les garder
+    // invitait à re-piloter le wake hors de VoiceWakeClient / WakeCoordinator.
+    // Utiliser VoiceWakeClient.startListening / stopListening / pauseKeepSco.
 
     private static void logState(String change) {
         try {
