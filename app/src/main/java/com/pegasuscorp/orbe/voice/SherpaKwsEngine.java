@@ -2,8 +2,10 @@ package com.pegasuscorp.orbe.voice;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -36,6 +38,8 @@ public final class SherpaKwsEngine {
 
     private static final String TAG = "SherpaKws";
     private static final int SAMPLE_RATE = 16_000;
+    /** Débit natif d'un lien HFP bande étroite (CVSD). */
+    private static final int SCO_NATIVE_RATE = 8_000;
     private static final float INTERVAL_SEC = 0.1f;
     /** Seuil Sherpa global (les lignes keywords.txt peuvent overrider). */
     private static final float KEYWORDS_THRESHOLD = 0.04f;
@@ -61,9 +65,24 @@ public final class SherpaKwsEngine {
     /** Composés (Hey/Ok…) : exigent un pic plus fort que les alias courts. */
     private static final float MIN_COMPOUND_HIT_RMS_DB = -42f;
 
+    /** Salves de parole sans le moindre token avant de capturer un extrait audio. */
+    private static final int DEAF_STREAK_FOR_DUMP = 6;
+    /** Un extrait au plus toutes les 2 min (diagnostic, pas enregistrement continu). */
+    private static final long DEAF_DUMP_MIN_INTERVAL_MS = 120_000L;
+    private static final int DEAF_DUMP_SECONDS = 6;
+
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Listener listener;
+
+    /** Anneau des dernières secondes — alimenté seulement si le diagnostic est armé. */
+    private final RollingAudioBuffer deafBuffer = new RollingAudioBuffer(DEAF_DUMP_SECONDS);
+    private int deafStreak;
+    private long lastDeafDumpMs;
+    /** Fréquence de capture réelle : 8 kHz sur SCO, {@link #SAMPLE_RATE} sinon. */
+    private volatile int captureRate = SAMPLE_RATE;
+    /** Dernier échantillon du bloc précédent — continuité de l'interpolation. */
+    private float lastSample;
 
     private KwsAudioRouteManager routeManager;
     private KeywordSpotter kws;
@@ -231,7 +250,86 @@ public final class SherpaKwsEngine {
     }
 
     private String routeDescription() {
-        return routeManager != null ? routeManager.describeRoute() : "PHONE_BUILTIN source=VOICE_RECOGNITION";
+        String base = routeManager != null
+                ? routeManager.describeRoute()
+                : "PHONE_BUILTIN source=VOICE_RECOGNITION";
+        // describeRoute() interroge le système : il dit quel micro *devrait* servir.
+        // getRoutedDevice() dit lequel alimente réellement la capture — les deux
+        // divergent quand le device préféré disparaît sous un setPreferredDevice
+        // déjà posé (Android bascule alors en silence sur l'entrée par défaut).
+        return base + " " + describeRoutedDevice();
+    }
+
+    /**
+     * Après plusieurs salves de parole sans le moindre token, écrit les dernières
+     * secondes de capture en WAV pour qu'on puisse *écouter* ce que le moteur reçoit.
+     * Diagnostic ponctuel : rien n'est écrit tant que le wake fonctionne.
+     */
+    private void maybeDumpDeafAudio() {
+        if (deafStreak < DEAF_STREAK_FOR_DUMP) return;
+        long now = System.currentTimeMillis();
+        if (now - lastDeafDumpMs < DEAF_DUMP_MIN_INTERVAL_MS) return;
+        lastDeafDumpMs = now;
+        deafStreak = 0;
+        float[] snap = deafBuffer.snapshotSeconds(DEAF_DUMP_SECONDS);
+        if (snap.length == 0) return;
+        short[] pcm = new short[snap.length];
+        for (int i = 0; i < snap.length; i++) {
+            float v = snap[i] * 32768f;
+            pcm[i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, v));
+        }
+        try {
+            File dir = new File(app.getFilesDir(), "diag");
+            if (!dir.exists() && !dir.mkdirs()) return;
+            File dest = new File(dir, "kws_deaf_" + now + ".wav");
+            // Écrit à la fréquence de capture réelle, sinon le 8 kHz SCO se relit
+            // deux fois trop vite et on croit à tort à une voix aiguë.
+            AudioCapture.writeWav(dest, pcm, captureRate);
+            Log.w(TAG, "deaf dump → " + dest.getAbsolutePath());
+            org.json.JSONObject f = new org.json.JSONObject();
+            f.put("file", dest.getName());
+            f.put("seconds", DEAF_DUMP_SECONDS);
+            f.put("route", routeDescription());
+            com.pegasuscorp.orbe.diag.PegaseDiagLog.kws(app, "kws_deaf_dump", f);
+        } catch (Exception e) {
+            Log.w(TAG, "deaf dump failed", e);
+        }
+    }
+
+    /** Périphérique réellement routé par l'{@link AudioRecord} en cours. */
+    private String describeRoutedDevice() {
+        AudioRecord record;
+        synchronized (captureLock) {
+            record = audioRecord;
+        }
+        if (record == null) return "routed=none";
+        try {
+            // Fréquence réellement accordée : si le HAL SCO livre du 8 kHz sans rééchantillonner,
+            // Sherpa reçoit du 16 kHz étiqueté mais deux fois trop rapide → voix aiguë, 0 token.
+            String rate = "rate=" + record.getSampleRate();
+            AudioDeviceInfo dev = record.getRoutedDevice();
+            if (dev == null) return "routed=null " + rate;
+            return "routed=id=" + dev.getId() + ",type=" + routedTypeLabel(dev.getType())
+                    + " " + rate;
+        } catch (Exception e) {
+            return "routed=err";
+        }
+    }
+
+    private static String routedTypeLabel(int type) {
+        switch (type) {
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "BT_SCO";
+            case AudioDeviceInfo.TYPE_BUILTIN_MIC: return "BUILTIN_MIC";
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET: return "WIRED";
+            case AudioDeviceInfo.TYPE_USB_DEVICE:
+            case AudioDeviceInfo.TYPE_USB_HEADSET: return "USB";
+            default:
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                        && type == AudioDeviceInfo.TYPE_BLE_HEADSET) {
+                    return "BLE";
+                }
+                return "type" + type;
+        }
     }
 
     private void loop() {
@@ -257,6 +355,7 @@ public final class SherpaKwsEngine {
             int recentRmsIdx = 0;
             boolean hadSpeech = false;
             int quietAfterSpeech = 0;
+            boolean sawTokensInBurst = false;
             while (wantRun && !routeChanged) {
                 // Ne plus skipper les frames si média : sinon « Pégase » n'est jamais scorée.
                 if (MediaPlaybackGuard.isOtherAudioPlaying(app)) {
@@ -299,9 +398,26 @@ public final class SherpaKwsEngine {
                 if (readCount % PROBE_EVERY_READS == 0) {
                     KwsDiagnostics.maybeLogProbe(routeDescription(), rmsDb, ret);
                 }
-                float[] samples = new float[ret];
-                for (int i = 0; i < ret; i++) {
-                    samples[i] = buffer[i] / 32768.0f;
+                deafBuffer.write(buffer, ret);
+                float[] samples;
+                if (captureRate == SAMPLE_RATE) {
+                    samples = new float[ret];
+                    for (int i = 0; i < ret; i++) {
+                        samples[i] = buffer[i] / 32768.0f;
+                    }
+                } else {
+                    // 8 kHz → 16 kHz : interpolation linéaire (et non un simple doublement
+                    // en escalier, qui recrée exactement l'image spectrale à 4 kHz qu'on
+                    // cherche à éliminer). Continuité assurée par lastSample entre blocs.
+                    samples = new float[ret * 2];
+                    float prev = lastSample;
+                    for (int i = 0; i < ret; i++) {
+                        float cur = buffer[i] / 32768.0f;
+                        samples[2 * i] = (prev + cur) * 0.5f;
+                        samples[2 * i + 1] = cur;
+                        prev = cur;
+                    }
+                    lastSample = prev;
                 }
 
                 if (rmsDb > SPEECH_RMS_DB) {
@@ -315,6 +431,14 @@ public final class SherpaKwsEngine {
                             stream = fresh;
                             KwsDiagnostics.logStreamReset(routeDescription(), "recreate_after_silence");
                         }
+                        // Fin d'une salve de parole : a-t-elle produit le moindre token ?
+                        if (sawTokensInBurst) {
+                            deafStreak = 0;
+                        } else {
+                            deafStreak++;
+                            maybeDumpDeafAudio();
+                        }
+                        sawTokensInBurst = false;
                         hadSpeech = false;
                         quietAfterSpeech = 0;
                     }
@@ -329,8 +453,11 @@ public final class SherpaKwsEngine {
                     String kw = result != null ? result.getKeyword() : null;
                     String[] tokens = result != null ? result.getTokens() : null;
                     float[] timestamps = result != null ? result.getTimestamps() : null;
+                    if (tokens != null && tokens.length > 0) sawTokensInBurst = true;
                     if (kw != null && !kw.trim().isEmpty()) {
                         kws.reset(stream);
+                        deafStreak = 0;
+                        sawTokensInBurst = false;
                         hadSpeech = false;
                         quietAfterSpeech = 0;
                         final String detected = kw.trim();
@@ -393,17 +520,26 @@ public final class SherpaKwsEngine {
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : android.media.MediaRecorder.AudioSource.MIC;
+            // Sur SCO bande étroite, demander 16 kHz oblige le système à rééchantillonner
+            // depuis le 8 kHz du lien. Sur cet appareil cette conversion est cassée :
+            // un échantillon sur deux à zéro et une raie à 4 kHz (mesuré sur kws_deaf_*.wav).
+            // On capture donc à la fréquence native du lien et on double nous-mêmes.
+            captureRate = (routeManager != null
+                    && routeManager.getActiveKind() == KwsAudioRouteManager.RouteKind.BLUETOOTH_SCO)
+                    ? SCO_NATIVE_RATE
+                    : SAMPLE_RATE;
+            lastSample = 0f;
             int min = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE,
+                    captureRate,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT);
             if (min <= 0) return false;
             audioRecord = new AudioRecord(
                     source,
-                    SAMPLE_RATE,
+                    captureRate,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(min * 2, SAMPLE_RATE / 5));
+                    Math.max(min * 2, captureRate / 5));
             if (routeManager != null) {
                 routeManager.applyPreferredDevice(audioRecord);
             }

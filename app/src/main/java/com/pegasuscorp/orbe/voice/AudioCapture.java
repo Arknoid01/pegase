@@ -88,7 +88,13 @@ public final class AudioCapture {
 
     /** WAV 16 kHz mono 16-bit PCM (pipeline openWakeWord). */
     public static void writeWav(File dest, short[] pcm) throws IOException {
+        writeWav(dest, pcm, SAMPLE_RATE);
+    }
+
+    /** Idem, à une fréquence explicite (diagnostic : capture SCO native à 8 kHz). */
+    public static void writeWav(File dest, short[] pcm, int sampleRate) throws IOException {
         if (pcm == null) pcm = new short[0];
+        if (sampleRate <= 0) sampleRate = SAMPLE_RATE;
         int dataBytes = pcm.length * 2;
         ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
         header.put("RIFF".getBytes("US-ASCII"));
@@ -98,8 +104,8 @@ public final class AudioCapture {
         header.putInt(16); // PCM chunk
         header.putShort((short) 1); // PCM
         header.putShort((short) 1); // mono
-        header.putInt(SAMPLE_RATE);
-        header.putInt(SAMPLE_RATE * 2); // byte rate
+        header.putInt(sampleRate);
+        header.putInt(sampleRate * 2); // byte rate
         header.putShort((short) 2); // block align
         header.putShort((short) 16); // bits
         header.put("data".getBytes("US-ASCII"));

@@ -164,6 +164,14 @@ public final class KwsAudioRouteManager {
     public int getAudioSource() {
         switch (activeKind) {
             case BLUETOOTH_SCO:
+                // Surtout pas VOICE_COMMUNICATION ici : cette source passe par la chaîne
+                // AEC/NS/AGC du HAL, qui attend un signal de référence de lecture. Pendant
+                // l'écoute du mot d'éveil rien ne joue — l'AEC sortait alors des buffers de
+                // zéros par salves (mesuré : 46 % du signal perdu, trous de 5 à 492 ms).
+                // VOICE_RECOGNITION est la source prévue pour la reconnaissance : pas de
+                // pré-traitement, et c'est celle qu'utilise SpeechRecognizer lui-même.
+                // Le routage vers le casque reste assuré par setPreferredDevice + le hold SCO.
+                return MediaRecorder.AudioSource.VOICE_RECOGNITION;
             case WIRED_HEADSET:
                 return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
             default:
