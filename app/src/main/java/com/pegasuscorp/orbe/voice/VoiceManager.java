@@ -50,10 +50,6 @@ public class VoiceManager {
      * alors que le wake a déjà forcé le micro téléphone (~15 s de SCO inutile).
      */
     private final AudioRouteObserver audioSourceObserver;
-    /** Alimentation PCM du recognizer sur casque HFP (null hors Bluetooth). */
-    private volatile ScoSttAudioFeeder scoFeeder;
-    /** Voir {@link #attachScoAudioSource} — laissé en place, désactivé par défaut. */
-    private static final boolean FEED_RECOGNIZER_ON_SCO = false;
     private boolean scoHeldForStt;
     /** Une notif STT_ACTIVE par session chat wake (pas à chaque utterance). */
     private boolean coordSttSessionActive;
@@ -262,7 +258,6 @@ public class VoiceManager {
         }
         scoHeldForStt = wantBt && ok;
         Intent i = buildListenIntent(ptt);
-        attachScoAudioSource(i, wantBt && ok);
         try {
             android.util.Log.i("VoiceManager", "startListening route="
                     + audioRoute.describeRoute()
@@ -294,51 +289,6 @@ public class VoiceManager {
             }
             Toast.makeText(appContext, "Micro indisponible", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    /**
-     * Sur casque HFP, fournit notre propre PCM au recognizer plutôt que de le laisser
-     * ouvrir le micro : le rééchantillonnage 8 → 16 kHz du système est cassé sur cet
-     * appareil et lui livrait la même bouillie qu'au wake (cf. {@link ScoSttAudioFeeder}).
-     * En cas d'échec, on ne touche pas à l'intent — chemin normal inchangé.
-     */
-    private void attachScoAudioSource(Intent intent, boolean scoActive) {
-        stopScoFeeder();
-        // Désactivé : le feeder a été écrit pour contourner un rééchantillonnage qu'on
-        // croyait cassé. La vraie cause était startVoiceRecognition() côté SCO ; depuis
-        // qu'on établit un lien ordinaire, le système délivre un flux correct et le
-        // recognizer n'a plus besoin qu'on le nourrisse. À réactiver seulement si le STT
-        // échoue encore alors que le wake fonctionne.
-        if (!FEED_RECOGNIZER_ON_SCO) return;
-        if (!scoActive || !ScoSttAudioFeeder.isSupported()) return;
-        ScoSttAudioFeeder feeder = new ScoSttAudioFeeder(appContext, audioRoute);
-        android.os.ParcelFileDescriptor pfd = feeder.start();
-        if (pfd == null) {
-            WakeToSttTrace.mark(appContext, "stt_feeder_unavailable");
-            return;
-        }
-        scoFeeder = feeder;
-        intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pfd);
-        intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1);
-        intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING,
-                android.media.AudioFormat.ENCODING_PCM_16BIT);
-        intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE,
-                ScoSttAudioFeeder.OUTPUT_RATE);
-        try {
-            org.json.JSONObject f = new org.json.JSONObject();
-            f.put("rate", ScoSttAudioFeeder.OUTPUT_RATE);
-            f.put("route", audioRoute.describeRoute());
-            WakeToSttTrace.mark(appContext, "stt_feeder_started", f);
-        } catch (Exception ignored) {
-            WakeToSttTrace.mark(appContext, "stt_feeder_started");
-        }
-    }
-
-    /** Coupe l'alimentation audio du recognizer (fin de session / erreur). */
-    private void stopScoFeeder() {
-        ScoSttAudioFeeder feeder = scoFeeder;
-        scoFeeder = null;
-        if (feeder != null) feeder.stop();
     }
 
     private void maybeNotifyCoordSttStarted(boolean ptt) {
@@ -481,7 +431,6 @@ public class VoiceManager {
     public void release() {
         cancelScheduledListening();
         cancelPendingSpeakDelay();
-        stopScoFeeder();
         destroyRecognizer();
         releaseSttScoAfterListen();
         endWakeSttHandoff();
@@ -559,9 +508,6 @@ public class VoiceManager {
     private void setListeningActive(boolean active) {
         if (listening == active) return;
         listening = active;
-        // Fin d'écoute (résultat, erreur, fin de parole, arrêt manuel) : rendre le micro.
-        // Fermer le tube signale aussi la fin de flux au recognizer.
-        if (!active) stopScoFeeder();
         // Capturer le listener : PTT peut le nullifier avant l'exécution du post
         // (crash au retour HOME après ouverture d'un lien web / Chrome).
         final OnListeningStateListener listener = listeningStateListener;

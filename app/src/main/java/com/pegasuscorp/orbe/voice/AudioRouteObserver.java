@@ -139,6 +139,12 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
                 if (!BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED.equals(intent.getAction())) {
                     return;
                 }
+                BluetoothDevice dev = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (!isTargetDevice(dev)) {
+                    // Kit mains-libres de voiture, enceinte… : ne pas confondre avec le casque.
+                    Log.d(TAG, "HFP ignoré (hors cible) " + safeAddress(dev));
+                    return;
+                }
                 int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE,
                         BluetoothProfile.STATE_DISCONNECTED);
                 boolean connected = state == BluetoothProfile.STATE_CONNECTED;
@@ -197,7 +203,14 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
         boolean any = false;
         try {
             List<BluetoothDevice> devices = headset.getConnectedDevices();
-            any = devices != null && !devices.isEmpty();
+            if (devices != null) {
+                for (BluetoothDevice d : devices) {
+                    if (isTargetDevice(d)) {
+                        any = true;
+                        break;
+                    }
+                }
+            }
         } catch (SecurityException se) {
             Log.w(TAG, "getConnectedDevices denied", se);
         } catch (Exception e) {
@@ -236,6 +249,46 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
         Listener l = listener;
         if (l != null) {
             main.post(() -> l.onAudioSourceChanged(next));
+        }
+    }
+
+    /**
+     * Le casque visé, si l'utilisateur en a désigné un. Sans réglage, tout appareil HFP
+     * est accepté — comportement historique. Un {@code device} inconnu (broadcast sans
+     * extra) est accepté aussi : mieux vaut un faux positif qu'un wake muet.
+     */
+    private boolean isTargetDevice(BluetoothDevice device) {
+        if (device == null) return true;
+        String target = PegaseWakeStore.getHfpMac(app);
+        if (!target.isEmpty()) {
+            String addr = safeAddress(device);
+            return addr.isEmpty() || addr.equals(target);
+        }
+        // Sans casque désigné : exclure les autoradios, qui exposent tous un profil
+        // mains-libres et feraient croire à un casque disponible en roulant.
+        return !isCarAudio(device);
+    }
+
+    private static boolean isCarAudio(BluetoothDevice device) {
+        try {
+            android.bluetooth.BluetoothClass cls = device.getBluetoothClass();
+            if (cls == null) return false;
+            return cls.getDeviceClass()
+                    == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO;
+        } catch (SecurityException se) {
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String safeAddress(BluetoothDevice device) {
+        if (device == null) return "";
+        try {
+            String a = device.getAddress();
+            return a == null ? "" : a.toUpperCase(java.util.Locale.ROOT);
+        } catch (SecurityException se) {
+            return "";
         }
     }
 

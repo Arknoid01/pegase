@@ -84,6 +84,38 @@ public final class SherpaKwsEngine {
     /** Dernier échantillon du bloc précédent — continuité de l'interpolation. */
     private float lastSample;
 
+    /**
+     * Blocs audio en attente d'inférence. Borné : si le décodage prend du retard on
+     * jette les plus anciens plutôt que de bloquer la lecture — perdre une fenêtre
+     * ancienne coûte moins cher que trouer le flux en cours.
+     */
+    private static final int BLOCK_QUEUE_CAPACITY = 12;
+    private final java.util.concurrent.BlockingQueue<short[]> blocks =
+            new java.util.concurrent.ArrayBlockingQueue<>(BLOCK_QUEUE_CAPACITY);
+    private Thread readerThread;
+    private volatile boolean readerFailed;
+    private volatile int droppedBlocks;
+    /** ~2 s hors route (2 sondes) avant de rouvrir le micro. */
+    private static final int OFF_ROUTE_PROBES_BEFORE_RESTART = 2;
+    /** La session a ouvert le micro sur le casque : toute dérive est une anomalie. */
+    private volatile boolean sessionWantsSco;
+    private int offRouteProbes;
+
+    /** True si l'{@link AudioRecord} lit réellement l'entrée Bluetooth. */
+    private boolean capturingOnSco() {
+        AudioRecord rec;
+        synchronized (captureLock) {
+            rec = audioRecord;
+        }
+        if (rec == null) return false;
+        try {
+            AudioDeviceInfo d = rec.getRoutedDevice();
+            return d != null && d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO;
+        } catch (Exception e) {
+            return true; // information indisponible : ne pas déclencher de réouverture
+        }
+    }
+
     private KwsAudioRouteManager routeManager;
     private KeywordSpotter kws;
     private OnlineStream stream;
@@ -296,6 +328,39 @@ public final class SherpaKwsEngine {
         }
     }
 
+    /**
+     * Android rebascule l'entrée d'un {@link AudioRecord} déjà ouvert, sans changement de
+     * route visible : mesuré sur une session sans le moindre {@code audio_route_changed},
+     * un tiers des relevés capturaient le micro intégré alors que le casque était épinglé.
+     * {@code setPreferredDevice} est une préférence, pas un verrou — on la réaffirme dès
+     * qu'elle est perdue. Purement événementiel, aucun sondage.
+     */
+    private void watchRouting(AudioRecord record) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        try {
+            record.addOnRoutingChangedListener(router -> {
+                AudioRecord rec;
+                synchronized (captureLock) {
+                    rec = audioRecord;
+                }
+                if (rec == null || rec != router) return;
+                AudioDeviceInfo now = rec.getRoutedDevice();
+                if (now != null && now.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return;
+                KwsAudioRouteManager rm = routeManager;
+                if (rm == null || rm.getActiveKind() != KwsAudioRouteManager.RouteKind.BLUETOOTH_SCO) {
+                    return;
+                }
+                Log.w(TAG, "routage perdu ("
+                        + (now == null ? "null" : routedTypeLabel(now.getType()))
+                        + ") — réaffirmation du casque");
+                rm.applyPreferredDevice(rec);
+                KwsDiagnostics.logStreamReset(routeDescription(), "routing_reasserted");
+            }, main);
+        } catch (Exception e) {
+            Log.w(TAG, "addOnRoutingChangedListener", e);
+        }
+    }
+
     /** Périphérique réellement routé par l'{@link AudioRecord} en cours. */
     private String describeRoutedDevice() {
         AudioRecord record;
@@ -335,6 +400,9 @@ public final class SherpaKwsEngine {
     private void loop() {
         running = true;
         try {
+            // Fichiers d'évaluation déposés dans files/diag : joués une fois, hors micro.
+            // Sans effet quand il n'y en a pas.
+            KwsFileEvaluator.runPending(app, kws, SAMPLE_RATE);
             if (!openMic()) {
                 Log.w(TAG, "mic open failed route=" + routeDescription());
                 return;
@@ -348,7 +416,8 @@ public final class SherpaKwsEngine {
             }
             audioRecord.startRecording();
             int bufferSize = Math.max(1, (int) (INTERVAL_SEC * SAMPLE_RATE));
-            short[] buffer = new short[bufferSize];
+            startReader(bufferSize);
+            short[] buffer;
             int emptyStreak = 0;
             float[] recentRms = new float[PEAK_RMS_WINDOW];
             java.util.Arrays.fill(recentRms, -96f);
@@ -361,31 +430,21 @@ public final class SherpaKwsEngine {
                 if (MediaPlaybackGuard.isOtherAudioPlaying(app)) {
                     KwsDiagnostics.maybeLogMediaActive(routeDescription());
                 }
-                int ret = audioRecord.read(buffer, 0, buffer.length);
-                if (ret < 0) {
-                    Log.w(TAG, "AudioRecord.read error=" + ret + " route=" + routeDescription()
-                            + (ret == AudioRecord.ERROR_DEAD_OBJECT ? " DEAD_OBJECT"
-                            : ret == AudioRecord.ERROR_INVALID_OPERATION ? " INVALID_OP"
-                            : ret == AudioRecord.ERROR_BAD_VALUE ? " BAD_VALUE" : ""));
-                    if (ret == AudioRecord.ERROR_DEAD_OBJECT
-                            || ret == AudioRecord.ERROR_INVALID_OPERATION) {
-                        break;
-                    }
+                // Le micro est lu par un thread dédié : l'inférence qui suit ne doit
+                // jamais retarder la lecture, sinon le tampon de capture déborde et
+                // l'audio est perdu (mesuré : jusqu'à 60 % du signal en trous).
+                buffer = takeBlock();
+                if (buffer == null) {
+                    if (readerFailed) break;
                     emptyStreak++;
-                    if (emptyStreak > 40) break;
-                    sleepQuiet(40);
-                    continue;
-                }
-                if (ret == 0) {
-                    emptyStreak++;
-                    if (emptyStreak > 100) {
-                        Log.w(TAG, "AudioRecord empty streak — exit for restart route="
+                    if (emptyStreak > 200) {
+                        Log.w(TAG, "aucun bloc audio — sortie pour redémarrage route="
                                 + routeDescription());
                         break;
                     }
-                    sleepQuiet(20);
                     continue;
                 }
+                int ret = buffer.length;
                 emptyStreak = 0;
                 float rmsDb = KwsDiagnostics.computeRmsDb(buffer, ret);
                 recentRms[recentRmsIdx % PEAK_RMS_WINDOW] = rmsDb;
@@ -397,6 +456,22 @@ public final class SherpaKwsEngine {
                 readCount++;
                 if (readCount % PROBE_EVERY_READS == 0) {
                     KwsDiagnostics.maybeLogProbe(routeDescription(), rmsDb, ret);
+                    // Le micro peut glisser vers l'entrée intégrée en cours de session et
+                    // ne jamais revenir (mesuré : 328 relevés d'affilée sur BUILTIN_MIC
+                    // alors que la session visait le casque). Réaffirmer la préférence ne
+                    // suffit pas une fois la route perdue : on force une réouverture.
+                    if (sessionWantsSco && !capturingOnSco()) {
+                        offRouteProbes++;
+                        if (offRouteProbes >= OFF_ROUTE_PROBES_BEFORE_RESTART) {
+                            Log.w(TAG, "capture hors casque depuis "
+                                    + offRouteProbes + " sondes — réouverture du micro");
+                            KwsDiagnostics.logStreamReset(routeDescription(), "off_route_restart");
+                            routeChanged = true;
+                            break;
+                        }
+                    } else {
+                        offRouteProbes = 0;
+                    }
                 }
                 deafBuffer.write(buffer, ret);
                 float[] samples;
@@ -504,6 +579,8 @@ public final class SherpaKwsEngine {
             KwsDiagnostics.logLoopError(routeDescription(), e.getClass().getSimpleName(),
                     e.getMessage());
         } finally {
+            // Arrêter le lecteur avant de fermer le micro : il lit dessus.
+            stopReader();
             closeMic();
             if (stream != null) {
                 try { stream.release(); } catch (Exception ignored) {}
@@ -512,6 +589,94 @@ public final class SherpaKwsEngine {
             running = false;
             PocketWakeGuard.stop();
         }
+    }
+
+    /**
+     * Thread de lecture pure : il ne fait qu'appeler {@code read()} et déposer le bloc.
+     * Aucun calcul, aucune E/S, aucun verrou partagé avec l'inférence.
+     */
+    private void startReader(int blockSize) {
+        blocks.clear();
+        readerFailed = false;
+        droppedBlocks = 0;
+        readerThread = new Thread(() -> {
+            short[] buf = new short[blockSize];
+            int errStreak = 0;
+            while (wantRun && !routeChanged) {
+                AudioRecord rec;
+                synchronized (captureLock) {
+                    rec = audioRecord;
+                }
+                if (rec == null) break;
+                int n;
+                try {
+                    n = rec.read(buf, 0, buf.length);
+                } catch (Exception e) {
+                    Log.w(TAG, "read", e);
+                    readerFailed = true;
+                    break;
+                }
+                if (n < 0) {
+                    Log.w(TAG, "AudioRecord.read error=" + n
+                            + (n == AudioRecord.ERROR_DEAD_OBJECT ? " DEAD_OBJECT"
+                            : n == AudioRecord.ERROR_INVALID_OPERATION ? " INVALID_OP"
+                            : n == AudioRecord.ERROR_BAD_VALUE ? " BAD_VALUE" : ""));
+                    if (n == AudioRecord.ERROR_DEAD_OBJECT
+                            || n == AudioRecord.ERROR_INVALID_OPERATION) {
+                        readerFailed = true;
+                        break;
+                    }
+                    if (++errStreak > 40) {
+                        readerFailed = true;
+                        break;
+                    }
+                    continue;
+                }
+                if (n == 0) {
+                    if (++errStreak > 200) {
+                        readerFailed = true;
+                        break;
+                    }
+                    continue;
+                }
+                errStreak = 0;
+                short[] block = new short[n];
+                System.arraycopy(buf, 0, block, 0, n);
+                // Jamais bloquant : on préfère perdre le plus ancien bloc.
+                while (!blocks.offer(block)) {
+                    if (blocks.poll() != null) droppedBlocks++;
+                }
+            }
+            readerFailed = true; // débloque le consommateur en sortie
+        }, "kws-mic-reader");
+        readerThread.setPriority(Thread.MAX_PRIORITY);
+        readerThread.start();
+    }
+
+    /** Bloc suivant, ou {@code null} après une courte attente (boucle de sortie). */
+    private short[] takeBlock() {
+        try {
+            return blocks.poll(120, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    private void stopReader() {
+        Thread t = readerThread;
+        readerThread = null;
+        if (t != null) {
+            try {
+                t.join(300);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (droppedBlocks > 0) {
+            Log.w(TAG, "blocs audio jetés (inférence en retard) : " + droppedBlocks);
+        }
+        blocks.clear();
     }
 
     private boolean openMic() {
@@ -547,7 +712,10 @@ public final class SherpaKwsEngine {
             // la cause des corruptions qu'on a chassées — c'était startVoiceRecognition().
             if (routeManager != null) {
                 routeManager.applyPreferredDevice(audioRecord);
+                watchRouting(audioRecord);
             }
+            sessionWantsSco = sco;
+            offRouteProbes = 0;
             boolean ok = audioRecord.getState() == AudioRecord.STATE_INITIALIZED;
             if (ok) {
                 Log.i(TAG, "mic open " + routeDescription());

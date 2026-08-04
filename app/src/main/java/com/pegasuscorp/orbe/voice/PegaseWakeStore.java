@@ -13,6 +13,8 @@ public final class PegaseWakeStore {
     private static final String KEY_GENTLE = "gentle_mode";
     private static final String KEY_LEGACY_CLEANUP = "local_wake_removed_v4";
     private static final String KEY_OWW_THRESHOLD = "oww_threshold";
+    /** Adresse MAC du casque visé — vide = n'importe quel HFP connecté. */
+    private static final String KEY_HFP_MAC = "hfp_mac";
     /** Seuil OWW — modèle v2 hard-neg ; 0.5 = défaut openWakeWord. */
     public static final float DEFAULT_OWW_THRESHOLD = 0.50f;
 
@@ -29,6 +31,21 @@ public final class PegaseWakeStore {
                     .putBoolean(KEY_LEGACY_CLEANUP, true)
                     .apply();
         }
+    }
+
+    /**
+     * Casque visé pour le wake. Vide (défaut) = tout profil HFP connecté est accepté,
+     * ce qui inclut les kits mains-libres de voiture — d'où la possibilité de cibler.
+     */
+    public static String getHfpMac(Context context) {
+        String mac = prefs(context).getString(KEY_HFP_MAC, "");
+        return mac == null ? "" : mac.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /** {@code null} ou vide pour revenir à « n'importe quel casque ». */
+    public static void setHfpMac(Context context, String mac) {
+        String clean = mac == null ? "" : mac.trim().toUpperCase(java.util.Locale.ROOT);
+        prefs(context).edit().putString(KEY_HFP_MAC, clean).apply();
     }
 
     public static boolean isEnabled(Context context) {
