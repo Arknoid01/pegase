@@ -16,6 +16,16 @@ public final class CopilotIntentHandler implements IntentHandler {
 
     @Override
     public RoutedIntent tryHandle(Context context, String text, String fold) {
+        if (looksLikeBackCommand(fold)) {
+            try {
+                return VoiceIntentSupport.routed(context, text,
+                        VoiceIntentSupport.toolJson("ui_action",
+                                new JSONObject().put("action", "back")),
+                        "retour", 0.96);
+            } catch (Exception e) {
+                return null;
+            }
+        }
         if (looksLikeYoutubeSubtitles(fold)) {
             try {
                 return VoiceIntentSupport.routed(context, text,
@@ -33,6 +43,18 @@ public final class CopilotIntentHandler implements IntentHandler {
             return RoutedIntent.withHint(text, r.ok ? "copilote — texte enregistré" : "copilote");
         }
         return null;
+    }
+
+    static boolean looksLikeBackCommand(String fold) {
+        if (fold == null) return false;
+        String f = fold.trim();
+        return f.equals("retour")
+                || f.equals("retour arriere")
+                || f.equals("revenir")
+                || f.equals("page precedente")
+                || f.equals("precedent")
+                || f.equals("back")
+                || f.equals("go back");
     }
 
     static boolean looksLikeYoutubeSubtitles(String fold) {

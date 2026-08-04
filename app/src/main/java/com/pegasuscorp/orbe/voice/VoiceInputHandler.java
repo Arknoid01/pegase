@@ -1146,7 +1146,32 @@ public final class VoiceInputHandler {
             output.speak(result.text, this::scheduleListeningResume);
             return;
         }
+        if (result.text == null || result.text.trim().isEmpty()) {
+            scheduleListeningResume();
+            return;
+        }
+        // Mode silence copilote : coupe la TTS des actions UI, pas les erreurs.
+        if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isToolSpeechMuted(activity)
+                && looksLikeRoutineUiChatter(result.text)) {
+            scheduleListeningResume();
+            return;
+        }
         output.speakWithMood(result.text, interaction.getMood(), this::scheduleListeningResume);
+    }
+
+    /** Phrases d'outil à ne pas lire à voix haute en mode silence. */
+    private static boolean looksLikeRoutineUiChatter(String text) {
+        if (text == null) return true;
+        String t = text.trim().toLowerCase(java.util.Locale.ROOT);
+        if (t.isEmpty()) return true;
+        return t.startsWith("clic ")
+                || t.startsWith("j'ouvre ")
+                || t.startsWith("texte saisi")
+                || t.startsWith("défilement")
+                || t.startsWith("defilement")
+                || t.startsWith("retour")
+                || t.startsWith("séquence ui")
+                || t.startsWith("sequence ui");
     }
 
     /** Voix directe (router local) : pas de synthèse agentique — traduire/résumer en FR. */

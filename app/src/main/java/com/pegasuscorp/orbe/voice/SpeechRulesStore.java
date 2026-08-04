@@ -128,32 +128,59 @@ public final class SpeechRulesStore {
         return BLOCKED_DICTIONARY_KEYS.contains(k);
     }
 
-    public synchronized void putDictionary(String word, String pronunciation) {
-        if (word == null || word.trim().isEmpty()) return;
-        if (pronunciation == null || pronunciation.trim().isEmpty()) return;
-        if (isBlockedDictionaryKey(word)) return;
+    /**
+     * @return true si la règle a bien été persistée (false = clé bloquée / champs vides / erreur).
+     */
+    public synchronized boolean putDictionary(String word, String pronunciation) {
+        if (word == null || word.trim().isEmpty()) return false;
+        if (pronunciation == null || pronunciation.trim().isEmpty()) return false;
+        // Phrase multi-mots → remplacements (évite le dictionnaire phonétique mot à mot).
+        if (word.trim().contains(" ")) {
+            return putReplace(word, pronunciation);
+        }
+        if (isBlockedDictionaryKey(word)) return false;
         try {
-            root.optJSONObject("dictionary").put(word.trim(), pronunciation.trim());
+            ensureStructure();
+            JSONObject dict = root.optJSONObject("dictionary");
+            if (dict == null) return false;
+            dict.put(word.trim(), pronunciation.trim());
             save();
-        } catch (Exception ignored) {}
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    public synchronized void putReplace(String word, String replacement) {
-        if (word == null || word.trim().isEmpty()) return;
-        if (replacement == null || replacement.trim().isEmpty()) return;
+    /** @return true si la règle a bien été persistée. */
+    public synchronized boolean putReplace(String word, String replacement) {
+        if (word == null || word.trim().isEmpty()) return false;
+        if (replacement == null || replacement.trim().isEmpty()) return false;
         try {
-            root.optJSONObject("replace").put(word.trim(), replacement.trim());
+            ensureStructure();
+            JSONObject replace = root.optJSONObject("replace");
+            if (replace == null) return false;
+            replace.put(word.trim(), replacement.trim());
             save();
-        } catch (Exception ignored) {}
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    public synchronized void putExpand(String acronym, String spoken) {
-        if (acronym == null || acronym.trim().isEmpty()) return;
-        if (spoken == null || spoken.trim().isEmpty()) return;
+    /** @return true si la règle a bien été persistée. */
+    public synchronized boolean putExpand(String acronym, String spoken) {
+        if (acronym == null || acronym.trim().isEmpty()) return false;
+        if (spoken == null || spoken.trim().isEmpty()) return false;
         try {
-            root.optJSONObject("expand").put(acronym.trim(), spoken.trim());
+            ensureStructure();
+            JSONObject expand = root.optJSONObject("expand");
+            if (expand == null) return false;
+            expand.put(acronym.trim(), spoken.trim());
             save();
-        } catch (Exception ignored) {}
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public static final class RuleEntry {
@@ -256,6 +283,7 @@ public final class SpeechRulesStore {
                 ensureStructure();
                 migrateSpeedFromPrefs();
                 boolean changed = mergeMissingFromAssets();
+                changed |= upgradeKnownReplaceValues();
                 changed |= purgeBlockedDictionaryKeys();
                 if (changed) save();
                 return;
@@ -271,6 +299,33 @@ public final class SpeechRulesStore {
      * Ajoute les entrées assets absentes (nouvelles prononciations) sans écraser
      * les corrections utilisateur déjà présentes.
      */
+    /**
+     * Met à jour des remplacements seed dont la valeur a évolué (sans écraser
+     * une correction utilisateur différente de l'ancienne valeur seed).
+     */
+    private boolean upgradeKnownReplaceValues() {
+        JSONObject replace = root.optJSONObject("replace");
+        if (replace == null) return false;
+        boolean changed = false;
+        changed |= upgradeReplaceIfLegacy(replace, "dis moi", "di moi", "di mwa");
+        changed |= upgradeReplaceIfLegacy(replace, "dis-moi", "di moi", "di-mwa");
+        changed |= upgradeReplaceIfLegacy(replace, "Dis-moi", "di moi", "di-mwa");
+        return changed;
+    }
+
+    private static boolean upgradeReplaceIfLegacy(JSONObject replace, String key,
+                                                  String legacyValue, String newValue) {
+        if (!replace.has(key)) return false;
+        String cur = replace.optString(key, "").trim();
+        if (!legacyValue.equalsIgnoreCase(cur)) return false;
+        try {
+            replace.put(key, newValue);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private boolean mergeMissingFromAssets() {
         JSONObject defaults = loadDefaultFromAssets();
         if (defaults == null) return false;
@@ -379,8 +434,9 @@ public final class SpeechRulesStore {
             replace.put("github", "guite hub");
             replace.put("android", "androïde");
             replace.put("pegase", "pégase");
-            replace.put("dis moi", "di moi");
-            replace.put("dis-moi", "di moi");
+            replace.put("dis moi", "di mwa");
+            replace.put("dis-moi", "di-mwa");
+            replace.put("Dis-moi", "di-mwa");
             rules.put("replace", replace);
 
             JSONObject expand = new JSONObject();

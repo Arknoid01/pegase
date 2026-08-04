@@ -15,4 +15,13 @@ public class CopilotIntentHandlerTest {
         assertFalse(CopilotIntentHandler.looksLikeYoutubeSubtitles(
                 "lance une video"));
     }
+
+    @Test
+    public void looksLikeBackCommand() {
+        assertTrue(CopilotIntentHandler.looksLikeBackCommand("retour"));
+        assertTrue(CopilotIntentHandler.looksLikeBackCommand("retour arriere"));
+        assertTrue(CopilotIntentHandler.looksLikeBackCommand("back"));
+        assertFalse(CopilotIntentHandler.looksLikeBackCommand("retour sur youtube"));
+        assertFalse(CopilotIntentHandler.looksLikeBackCommand(null));
+    }
 }

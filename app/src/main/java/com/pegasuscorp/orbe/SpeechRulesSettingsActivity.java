@@ -122,11 +122,23 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 showRuleDialog("Nouvelle prononciation", "", "",
                         "Mot ou nom (ex: Qwen)", "Se prononce (ex: Couène)",
                         (word, value) -> {
-                            if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
-                                toast("Mot trop courant — choisis un nom propre (ex: Qwen).");
+                            if (word.contains(" ")) {
+                                if (!rules.putReplace(word, value)) {
+                                    toast("Échec d'enregistrement.");
+                                    return;
+                                }
+                                selectTab(TAB_REPLACE);
+                                toast("Phrase enregistrée dans Remplacer.");
                                 return;
                             }
-                            rules.putDictionary(word, value);
+                            if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
+                                toast("Mot trop courant — choisis un nom propre, ou l'onglet Remplacer pour une phrase (ex: dis moi).");
+                                return;
+                            }
+                            if (!rules.putDictionary(word, value)) {
+                                toast("Échec d'enregistrement.");
+                                return;
+                            }
                             selectTab(TAB_DICT);
                             toast("Prononciation enregistrée.");
                         }));
@@ -149,7 +161,10 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 showRuleDialog("Nouveau remplacement", "", "",
                         "Mot d'origine", "Remplacer par",
                         (word, value) -> {
-                            rules.putReplace(word, value);
+                            if (!rules.putReplace(word, value)) {
+                                toast("Échec d'enregistrement.");
+                                return;
+                            }
                             selectTab(TAB_REPLACE);
                             toast("Remplacement enregistré.");
                         }));
@@ -172,7 +187,10 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 showRuleDialog("Nouvelle épellation", "", "",
                         "Sigle (ex: API)", "Épellation (ex: a p i)",
                         (word, value) -> {
-                            rules.putExpand(word, value);
+                            if (!rules.putExpand(word, value)) {
+                                toast("Échec d'enregistrement.");
+                                return;
+                            }
                             selectTab(TAB_EXPAND);
                             toast("Épellation enregistrée.");
                         }));
@@ -210,9 +228,18 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 "Modifier", e.word, e.value,
                 "Mot", "Valeur",
                 (wordNew, valNew) -> {
+                    if (tab == TAB_DICT && !wordNew.contains(" ")
+                            && SpeechRulesStore.isBlockedDictionaryKey(wordNew)) {
+                        toast("Mot trop courant — utilise Remplacer pour une phrase.");
+                        return;
+                    }
                     removeEntry(tab, e.word);
-                    putEntry(tab, wordNew, valNew);
-                    selectTab(tab);
+                    if (!putEntry(tab, wordNew, valNew)) {
+                        toast("Échec d'enregistrement.");
+                        selectTab(tab);
+                        return;
+                    }
+                    selectTab(tab == TAB_DICT && wordNew.contains(" ") ? TAB_REPLACE : tab);
                     toast("Règle mise à jour.");
                 })));
         actions.addView(spacerH(dp(8)));
@@ -263,12 +290,12 @@ public class SpeechRulesSettingsActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void putEntry(int tab, String word, String value) {
+    private boolean putEntry(int tab, String word, String value) {
         switch (tab) {
-            case TAB_DICT: rules.putDictionary(word, value); break;
-            case TAB_REPLACE: rules.putReplace(word, value); break;
-            case TAB_EXPAND: rules.putExpand(word, value); break;
-            default: break;
+            case TAB_DICT: return rules.putDictionary(word, value);
+            case TAB_REPLACE: return rules.putReplace(word, value);
+            case TAB_EXPAND: return rules.putExpand(word, value);
+            default: return false;
         }
     }
 

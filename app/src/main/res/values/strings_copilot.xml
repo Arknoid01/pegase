@@ -35,6 +35,7 @@
     <string name="copilot_toggle_translation">Traduction à l\'écran</string>
     <string name="copilot_toggle_highlight">Surlignage boutons (a11y)</string>
     <string name="copilot_toggle_notif">Alertes notifications ciblées</string>
+    <string name="copilot_toggle_tool_speech_mute">Silence vocal des actions (clics)</string>
     <string name="copilot_toggle_reflection">Réflexion cachée (intents complexes)</string>
     <string name="copilot_hint_advanced">Fraîcheur du snapshot écran et plan interne avant réponse copilote.</string>
     <string name="copilot_value_screen_age">Fraîcheur max snapshot écran</string>

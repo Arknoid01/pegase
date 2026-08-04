@@ -45,6 +45,7 @@ public class CopilotSettingsActivity extends AppCompatActivity {
 
   private static final AppPreset[] PRESETS = {
       new AppPreset("YouTube", CopilotPrefs.PKG_YOUTUBE),
+      new AppPreset("Brave", "com.brave.browser"),
       new AppPreset("Chrome", "com.android.chrome"),
       new AppPreset("Firefox", "org.mozilla.firefox"),
       new AppPreset("Gmail", "com.google.android.gm"),
@@ -130,6 +131,9 @@ public class CopilotSettingsActivity extends AppCompatActivity {
     });
     addSwitch(getString(R.string.copilot_toggle_notif), CopilotPrefs.isNotificationCopilotEnabled(this), (on) -> {
       CopilotPrefs.setNotificationCopilotEnabled(this, on);
+    });
+    addSwitch(getString(R.string.copilot_toggle_tool_speech_mute), CopilotPrefs.isToolSpeechMuted(this), (on) -> {
+      CopilotPrefs.setToolSpeechMuted(this, on);
     });
 
     addSectionTitle(getString(R.string.copilot_section_advanced));

@@ -31,6 +31,8 @@ public final class CopilotPrefs {
     private static final String KEY_REFLECTION_ENABLED = "reflection_enabled";
     private static final String KEY_SCREEN_MAX_AGE_SEC = "screen_max_age_sec";
     private static final String KEY_SCREEN_MAX_CHARS = "screen_max_chars";
+    /** Coupe la TTS des retours d'outils copilote (clics, etc.) — pas le micro. */
+    private static final String KEY_TOOL_SPEECH_MUTED = "tool_speech_muted";
 
     public static final long DEFAULT_SCREEN_MAX_AGE_MS = 45_000L;
     public static final int DEFAULT_SCREEN_MAX_CHARS = 2_000;
@@ -238,5 +240,14 @@ public final class CopilotPrefs {
         if (n < 200) n = 200;
         if (n > 8000) n = 8000;
         prefs(ctx).edit().putInt(KEY_SCREEN_MAX_CHARS, n).apply();
+    }
+
+    /** True = Pégase n'annonce plus à voix haute les actions UI réussies. */
+    public static boolean isToolSpeechMuted(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_TOOL_SPEECH_MUTED, false);
+    }
+
+    public static void setToolSpeechMuted(Context ctx, boolean muted) {
+        prefs(ctx).edit().putBoolean(KEY_TOOL_SPEECH_MUTED, muted).apply();
     }
 }

@@ -183,12 +183,33 @@ public final class SpeechRulesEditor {
         if (word.isEmpty() || pronunciation.isEmpty()) return null;
         // Nettoie les formules parasites
         pronunciation = pronunciation.replaceAll("(?i)^(c'est\\s+|ça\\s+fait\\s+|ça\\s+se\\s+dit\\s+)", "").trim();
-        if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
-            return MemoryEditResult.failed(
-                    "Je ne peux pas enregistrer « " + word
-                            + " » comme prononciation — trop courant en français.");
+        // Phrase multi-mots → remplacement (ex. « dis moi comme di mwa »).
+        if (word.contains(" ")) {
+            if (!rules.putReplace(word, pronunciation)) {
+                return MemoryEditResult.failed("Impossible d'enregistrer le remplacement.");
+            }
+            return MemoryEditResult.applied(
+                    word + " → " + pronunciation,
+                    "Noté. Je dirai " + word + " comme " + pronunciation + ".");
         }
-        rules.putDictionary(word, pronunciation);
+        if (SpeechRulesStore.isBlockedDictionaryKey(word)) {
+            // « dis moi comme … » parse souvent word=moi : enregistrer la locution.
+            String phrase = "dis " + word;
+            boolean ok = rules.putReplace(phrase, pronunciation);
+            rules.putReplace("dis-" + word, pronunciation);
+            if (!ok) {
+                return MemoryEditResult.failed(
+                        "Je ne peux pas enregistrer « " + word
+                                + " » comme prononciation — trop courant en français."
+                                + " Essaie « Remplacer » pour une phrase, ex. dis moi.");
+            }
+            return MemoryEditResult.applied(
+                    phrase + " → " + pronunciation,
+                    "Noté. Je dirai " + phrase + " comme " + pronunciation + ".");
+        }
+        if (!rules.putDictionary(word, pronunciation)) {
+            return MemoryEditResult.failed("Impossible d'enregistrer la prononciation.");
+        }
         return MemoryEditResult.applied(
                 word + " → " + pronunciation,
                 "Noté. Je prononcerai " + word + " comme " + pronunciation + ".");
@@ -260,8 +281,7 @@ public final class SpeechRulesEditor {
                             ? "Je n'ai pas pu trouver la phonétique, dis-moi comment prononcer le mot."
                             : spoken);
                 }
-                rules.putDictionary(word, value);
-                return MemoryEditResult.applied(summary, spoken);
+                return applyPronunciation(word, value);
             }
             case "none":
             default:

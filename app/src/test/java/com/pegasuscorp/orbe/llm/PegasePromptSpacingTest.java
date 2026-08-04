@@ -37,6 +37,16 @@ public class PegasePromptSpacingTest {
     }
 
     @Test
+    public void sanitizeForSpeech_stripsMarkdownMarkers() {
+        assertEquals("Recette simple",
+                PegasePrompt.sanitizeForSpeech("**Recette** simple"));
+        assertEquals("Titre et corps",
+                PegasePrompt.sanitizeForSpeech("## Titre\net *corps*"));
+        assertEquals("code inline",
+                PegasePrompt.sanitizeForSpeech("`code` inline"));
+    }
+
+    @Test
     public void sanitizeForDisplay_removesThinkingAndMarkdown() {
         String raw = "<think>secret</think> ```json ok ```";
         String out = PegasePrompt.sanitizeForDisplay(raw);

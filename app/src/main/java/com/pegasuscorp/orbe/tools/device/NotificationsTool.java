@@ -35,11 +35,8 @@ public final class NotificationsTool implements Tool {
     @Override
     public String description() {
         return "notifications(action:list|open|dismiss|dismiss_all, index?:int, "
-                + "app?:str, query?:str) — Notifications Android. "
-                + "action=list pour lire, dismiss pour effacer une (index requis), "
-                + "dismiss_all pour tout effacer, open pour ouvrir l'app source (index requis). "
-                + "Utilise pour « mes notifs », « qu'est-ce que j'ai reçu », "
-                + "« efface les notifications ».";
+                + "app?:str, query?:str) — Notifs Android. list=lire ; "
+                + "open/dismiss=index requis ; dismiss_all=tout effacer.";
     }
 
     @Override
@@ -52,10 +49,15 @@ public final class NotificationsTool implements Tool {
             return;
         }
 
-        PegaseNotificationListenerService svc = NotificationAccess.awaitService(ctx, 5);
+        PegaseNotificationListenerService svc = NotificationAccess.awaitService(ctx, 12);
+        if (svc == null) {
+            NotificationAccess.requestRebind(ctx);
+            svc = NotificationAccess.awaitService(ctx, 8);
+        }
         if (svc == null) {
             cb.onError("Je n'arrive pas à me connecter aux notifications. "
-                    + "Vérifie l'accès dans les réglages ou redémarre Orbe.");
+                    + "Désactive puis réactive l'accès notifications pour Orbe dans les réglages, "
+                    + "ou redémarre Orbe.");
             return;
         }
 

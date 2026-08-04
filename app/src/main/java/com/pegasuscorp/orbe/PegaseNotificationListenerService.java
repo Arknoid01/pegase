@@ -222,6 +222,24 @@ public class PegaseNotificationListenerService extends NotificationListenerServi
         if (textCs == null || textCs.length() == 0) {
             textCs = n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
         }
+        if (textCs == null || textCs.length() == 0) {
+            textCs = n.extras.getCharSequence(Notification.EXTRA_SUB_TEXT);
+        }
+        if (textCs == null || textCs.length() == 0) {
+            CharSequence[] lines = n.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+            if (lines != null && lines.length > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (CharSequence line : lines) {
+                    if (line == null || line.length() == 0) continue;
+                    if (sb.length() > 0) sb.append(". ");
+                    sb.append(line.toString().trim());
+                }
+                if (sb.length() > 0) textCs = sb;
+            }
+        }
+        if (textCs == null || textCs.length() == 0) {
+            textCs = n.tickerText;
+        }
         String title = titleCs != null ? titleCs.toString().trim() : "";
         String text = textCs != null ? textCs.toString().trim() : "";
         String pkg = sbn.getPackageName();

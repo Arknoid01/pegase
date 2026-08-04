@@ -98,6 +98,10 @@ public final class SpeechFormatter {
         s = s.replace("«", " ");
         s = s.replace("»", " ");
         s = s.replaceAll("[\\[\\]{}()]", " ");
+        // Filet si sanitizeForSpeech a été contourné
+        s = s.replace("**", " ");
+        s = s.replace("##", " ");
+        s = s.replace("`", " ");
         s = s.replaceAll("\\s+", " ").trim();
         return s;
     }

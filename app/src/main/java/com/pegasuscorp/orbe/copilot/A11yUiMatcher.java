@@ -369,6 +369,71 @@ public final class A11yUiMatcher {
         return findEditable(root);
     }
 
+    /**
+     * Barre d'adresse / omnibox navigateur (Chrome, Brave…) via viewId,
+     * sinon premier champ éditable.
+     * Caller doit {@link AccessibilityNodeInfo#recycle()}.
+     */
+    public static AccessibilityNodeInfo findBrowserSearchField(AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        AccessibilityNodeInfo byId = findByViewIdHint(root,
+                "url_bar", "omnibox", "search_box", "url_bar_title", "search_box_text");
+        if (byId != null) return byId;
+        return findEditable(root);
+    }
+
+    private static AccessibilityNodeInfo findByViewIdHint(AccessibilityNodeInfo root,
+            String... hints) {
+        if (root == null || hints == null || hints.length == 0) return null;
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(AccessibilityNodeInfo.obtain(root));
+        while (!queue.isEmpty()) {
+            AccessibilityNodeInfo node = queue.removeFirst();
+            try {
+                String viewId = node.getViewIdResourceName();
+                if (viewId != null) {
+                    String lower = viewId.toLowerCase(Locale.ROOT);
+                    for (String hint : hints) {
+                        if (hint != null && !hint.isEmpty()
+                                && (lower.endsWith("/" + hint) || lower.contains(hint))) {
+                            recycleQueue(queue);
+                            return AccessibilityNodeInfo.obtain(node);
+                        }
+                    }
+                }
+                for (int i = 0; i < node.getChildCount(); i++) {
+                    AccessibilityNodeInfo child = node.getChild(i);
+                    if (child != null) queue.add(child);
+                }
+            } finally {
+                node.recycle();
+            }
+        }
+        return null;
+    }
+
+    /** Cibles LLM fréquentes pour l'omnibox / recherche navigateur (pas du contenu page). */
+    public static boolean looksLikeBrowserSearchTarget(String raw) {
+        if (raw == null || raw.isEmpty()) return false;
+        String f = SpeechInputNormalizer.fold(raw)
+                .replace('\'', ' ')
+                .replace('’', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (f.isEmpty()) return false;
+        if (f.contains("barre") && (f.contains("adresse") || f.contains("url"))) return true;
+        if (f.contains("omnibox") || f.contains("url bar") || f.contains("search or type")) {
+            return true;
+        }
+        if (f.contains("champ") && f.contains("recherche")) return true;
+        if (f.contains("demande a google") || f.contains("ask google")
+                || f.contains("search google")) {
+            return true;
+        }
+        return f.equals("rechercher") || f.equals("recherche")
+                || f.equals("search") || f.equals("search box");
+    }
+
     private static AccessibilityNodeInfo findScrollable(AccessibilityNodeInfo root) {
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(AccessibilityNodeInfo.obtain(root));
@@ -401,6 +466,38 @@ public final class A11yUiMatcher {
             return editable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
         } finally {
             editable.recycle();
+        }
+    }
+
+    /**
+     * Fallback messageries : presse-papiers + ACTION_PASTE (SET_TEXT souvent ignoré).
+     * Remplace le contenu du presse-papiers pendant l'action.
+     */
+    public static boolean performClipboardPaste(android.content.Context ctx,
+            AccessibilityNodeInfo node, String text) {
+        if (ctx == null || node == null || text == null) return false;
+        AccessibilityNodeInfo target = node.isEditable() ? AccessibilityNodeInfo.obtain(node)
+                : findEditable(node);
+        if (target == null) return false;
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            if (cm == null) return false;
+            android.content.ClipData prev = null;
+            try {
+                prev = cm.getPrimaryClip();
+            } catch (Exception ignored) {}
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("pegase", text));
+            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            boolean ok = target.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+            // Restaure l'ancien clip si possible (évite collage croisé plus tard)
+            try {
+                if (prev != null) cm.setPrimaryClip(prev);
+                else cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""));
+            } catch (Exception ignored) {}
+            return ok;
+        } finally {
+            target.recycle();
         }
     }
 

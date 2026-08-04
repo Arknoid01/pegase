@@ -31,6 +31,14 @@ public final class PegasePrompt {
 
     public static String buildSystem(Context context, EnumSet<ToolTag> allowedTools,
             boolean nativeFunctionCalling) {
+        return buildSystem(context, allowedTools, nativeFunctionCalling, -1);
+    }
+
+    /**
+     * @param personalityMaxChars &lt; 0 = défaut PersonalityGuide ; sinon plafond serré (Groq).
+     */
+    public static String buildSystem(Context context, EnumSet<ToolTag> allowedTools,
+            boolean nativeFunctionCalling, int personalityMaxChars) {
         if (DEBUG_MINIMAL_PROMPT) {
             return "Tu es Pégase. Réponds en français en 1 phrase.";
         }
@@ -39,6 +47,9 @@ public final class PegasePrompt {
         String toolsSection = nativeFunctionCalling
                 ? new ToolRegistry().buildNativeToolsHint()
                 : ToolOrchestrator.promptSection(allowedTools);
+        String personality = personalityMaxChars > 0
+                ? PersonalityGuide.promptBlock(context, personalityMaxChars)
+                : PersonalityGuide.promptBlock(context);
         return "Tu es " + profile.getAssistantName() + ", l'assistant personnel de " + name + ".\n"
                 + "Tu le tutoies toujours.\n"
                 + "Personnalité : " + profile.getAssistantPersonality() + "\n"
@@ -47,7 +58,7 @@ public final class PegasePrompt {
                 + situationLine(context)
                 + learningLine(context)
                 + projectObjectsLine(context)
-                + PersonalityGuide.promptBlock(context)
+                + personality
                 + buildOperationalRules(name, nativeFunctionCalling)
                 + toolsSection;
     }
@@ -198,6 +209,7 @@ public final class PegasePrompt {
         out = out.replaceAll("(?s)<think>.*", "");
         out = out.replace("/no_think", "");
         out = out.replaceAll("```[a-z]*", "").replace("```", "");
+        out = stripMarkdownMarkers(out);
         out = EMOJI.matcher(out).replaceAll("");
         // Soft hyphens Wikipedia → tiret dur (évite soixanteetunième si le Cf est perdu)
         out = out.replace('\u00AD', '-');
@@ -296,6 +308,28 @@ public final class PegasePrompt {
         out = out.replaceAll("(?<=\\S)\\.(?=\\S)", ". ");
         // Espace avant une majuscule collée (VeuxTu → Veux Tu) en secours
         out = out.replaceAll("([a-zàâäéèêëïîôùûüç])([A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ])", "$1 $2");
+        return out;
+    }
+
+    /**
+     * Retire le markdown courant avant TTS / affichage oral
+     * ({@code **gras**}, titres, backticks).
+     */
+    static String stripMarkdownMarkers(String text) {
+        if (text == null || text.isEmpty()) return "";
+        String out = text;
+        // **gras** / __gras__ / *italique* / _italique_
+        out = out.replaceAll("\\*\\*([^*]+)\\*\\*", "$1");
+        out = out.replaceAll("__([^_]+)__", "$1");
+        out = out.replaceAll("(?<!\\w)\\*([^*]+)\\*(?!\\w)", "$1");
+        out = out.replaceAll("(?<!\\w)_([^_]+)_(?!\\w)", "$1");
+        // `code`
+        out = out.replaceAll("`([^`]+)`", "$1");
+        // Titres markdown en début de ligne
+        out = out.replaceAll("(?m)^#{1,6}\\s*", "");
+        // Asterisques / dièses orphelins restants
+        out = out.replace("**", "");
+        out = out.replace("##", "");
         return out;
     }
 
