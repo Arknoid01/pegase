@@ -35,10 +35,8 @@ public final class TimerTool implements Tool {
     @Override
     public String description() {
         return "timer(action:\"start\"|\"list\"|\"recent\"|\"open\", seconds?:int, minutes?:int, "
-                + "duration?:str, when?:str, label?:str, confirm?:bool) — Minuteur Horloge. "
-                + "duration/when : « 5 minutes », « dans 30 minutes », « 1h30 ». "
-                + "label : nom du minuteur. list/open : ouvre les minuteurs. "
-                + "recent : historique Pégase.";
+                + "duration?:str, when?:str, label?:str, confirm?:bool) — Minuteur. "
+                + "duration/when « 5 minutes » / « 1h30 » ; list/open/recent.";
     }
 
     @Override
@@ -89,6 +87,38 @@ public final class TimerTool implements Tool {
     }
 
     private static void launchTimer(Context ctx, int seconds, String label, ToolCallback cb) {
+        // Toujours planifier un minuteur Pégase (exact + notif HIGH) —
+        // ACTION_SET_TIMER via startActivity échoue souvent écran verrouillé / Doze.
+        PegaseTimerScheduler.cancel(ctx);
+        long fireAt = PegaseTimerScheduler.schedule(ctx, seconds, label);
+        if (fireAt <= 0L) {
+            cb.onError("Impossible de planifier le minuteur (alarme exacte refusée).");
+            return;
+        }
+
+        // Bonus : aussi pousser vers l'app Horloge si déverrouillé (UI système).
+        boolean locked = PegaseTimerReceiver.isKeyguardLocked(ctx);
+        if (!locked) {
+            trySystemClockTimer(ctx, seconds, label);
+        }
+
+        long now = System.currentTimeMillis();
+        rememberTimer(seconds);
+        UtilityScheduleStore.get(ctx).recordTimer(seconds, label, now);
+        String spoken = "Minuteur de " + formatLabel(seconds);
+        if (!TextUtils.isEmpty(label)) spoken += " — " + label;
+        spoken += " lancé.";
+        if (locked) {
+            spoken += " Je te préviendrai même écran verrouillé.";
+        }
+        if (PegaseTimerReceiver.isDndBlockingAlarms(ctx)) {
+            spoken += " Attention : le mode Ne pas déranger bloque les alarmes.";
+        }
+        cb.onSuccessAndExit(ToolResult.text(spoken));
+    }
+
+    /** Best-effort Horloge système (peut échouer en arrière-plan). */
+    private static void trySystemClockTimer(Context ctx, int seconds, String label) {
         Intent intent = new Intent(AlarmClock.ACTION_SET_TIMER)
                 .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
                 .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
@@ -96,19 +126,11 @@ public final class TimerTool implements Tool {
         if (!TextUtils.isEmpty(label)) {
             intent.putExtra(AlarmClock.EXTRA_MESSAGE, label);
         }
-
-        if (intent.resolveActivity(ctx.getPackageManager()) != null) {
-            ctx.startActivity(intent);
-            long now = System.currentTimeMillis();
-            rememberTimer(seconds);
-            UtilityScheduleStore.get(ctx).recordTimer(seconds, label, now);
-            String spoken = "Minuteur de " + formatLabel(seconds);
-            if (!TextUtils.isEmpty(label)) spoken += " — " + label;
-            spoken += " lancé.";
-            cb.onSuccessAndExit(ToolResult.text(spoken));
-        } else {
-            cb.onError("Aucune application minuteur sur ce téléphone.");
-        }
+        try {
+            if (intent.resolveActivity(ctx.getPackageManager()) != null) {
+                ctx.startActivity(intent);
+            }
+        } catch (Exception ignored) {}
     }
 
     private static void openTimers(Context ctx, ToolCallback cb) {

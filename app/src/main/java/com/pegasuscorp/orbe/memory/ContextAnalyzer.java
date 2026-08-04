@@ -102,6 +102,7 @@ public final class ContextAnalyzer {
                 return "productivity";
             case WEATHER:
             case SEARCH:
+            case F1:
             case NEWS:
             case NASA:
             case WEB_SEARCH:
@@ -119,6 +120,7 @@ public final class ContextAnalyzer {
             case NAMED_CONTEXT:
                 return "memory";
             case DEVICE:
+            case UI:
             case FLASHLIGHT:
             case VOLUME:
             case CONNECTIVITY:
@@ -128,6 +130,9 @@ public final class ContextAnalyzer {
             case OPEN_APP:
             case OPEN_INTERFACE:
                 return "device";
+            case LIFE_PATTERN:
+            case PROJECT_OBJECT:
+                return "productivity";
             case CALL:
             case SMS:
             case EMAIL:
@@ -169,13 +174,20 @@ public final class ContextAnalyzer {
             t.add(ToolTag.WEATHER);
         }
         // Actualité → Tavily ; faits stables → Wikipedia / Wikidata
+        // (F1 a son tag dédié — ne plus tirer SEARCH via « f1 » seul.)
         if (IntentDetector.needsFreshData(fold)
                 || "fresh_data".equals(intent)
-                || fold.contains("match") || fold.contains("f1")) {
+                || fold.contains("match")) {
             t.add(ToolTag.SEARCH);
         } else if (IntentDetector.looksLikeEncyclopedic(fold)) {
             t.add(ToolTag.WIKIPEDIA);
             t.add(ToolTag.WIKIDATA);
+        }
+        if (IntentDetector.looksLikeF1(fold)) {
+            t.add(ToolTag.F1);
+        }
+        if (IntentDetector.looksLikeUi(fold)) {
+            t.add(ToolTag.UI);
         }
         if ("fresh_data".equals(intent) || fold.contains("actualite") || fold.contains("news")) {
             t.add(ToolTag.NEWS);
@@ -265,6 +277,12 @@ public final class ContextAnalyzer {
         if (IntentDetector.looksLikeBrief(fold) || "brief".equals(intent)) {
             t.add(ToolTag.BRIEF);
         }
+        if (IntentDetector.looksLikeLifePattern(fold)) {
+            t.add(ToolTag.LIFE_PATTERN);
+        }
+        if ("project".equals(intent) || IntentDetector.looksLikeProjectObject(fold)) {
+            t.add(ToolTag.PROJECT_OBJECT);
+        }
         if (IntentDetector.looksLikeOrion(fold) || "orion".equals(intent)) {
             t.add(ToolTag.ORION_MANAGER);
         }
@@ -280,12 +298,35 @@ public final class ContextAnalyzer {
             t.add(ToolTag.ORION_CODE);
         }
 
-        // Intention ambiguë ou demande outil non classée → tout envoyer (mieux qu'un outil manquant).
+        // Intention ambiguë : set « daily » (pas tout le registre — gonfle Groq).
         if (t.equals(BASE_TOOLS) && ("general".equals(intent)
                 || IntentDetector.looksLikeTool(fold))) {
-            t.addAll(EnumSet.allOf(ToolTag.class));
+            t.addAll(DAILY_TOOLS);
         }
         return t;
+    }
+
+    /**
+     * Outils du quotidien — évite Orion/diag/files/git, UI copilote, F1,
+     * life_pattern / project_object, et le tag mort CALENDAR (alias → AGENDA).
+     */
+    private static final EnumSet<ToolTag> DAILY_TOOLS = EnumSet.of(
+            ToolTag.NOTEPAD, ToolTag.MEMORY, ToolTag.NAMED_CONTEXT, ToolTag.DEVICE,
+            ToolTag.TIMER, ToolTag.ALARM, ToolTag.AGENDA,
+            ToolTag.WEATHER, ToolTag.SEARCH, ToolTag.NEWS, ToolTag.WEB_SEARCH,
+            ToolTag.WIKIPEDIA, ToolTag.WIKIDATA, ToolTag.SPOTIFY, ToolTag.YOUTUBE,
+            ToolTag.OPEN_APP, ToolTag.OPEN_INTERFACE, ToolTag.CALL, ToolTag.SMS,
+            ToolTag.EMAIL, ToolTag.SHARE, ToolTag.VOLUME, ToolTag.CONNECTIVITY,
+            ToolTag.FLASHLIGHT, ToolTag.NAVIGATION, ToolTag.CLIPBOARD, ToolTag.CONTACTS,
+            ToolTag.CALCULATOR, ToolTag.SETTINGS, ToolTag.COMPOSITE, ToolTag.BRIEF,
+            ToolTag.NOTIFICATIONS, ToolTag.NASA);
+
+    /**
+     * Tags du set daily (copie). Intent {@code general} ambigu doit renvoyer
+     * exactement ce sous-ensemble — pas {@link EnumSet#allOf(Class)}.
+     */
+    public static EnumSet<ToolTag> dailyToolTags() {
+        return EnumSet.copyOf(DAILY_TOOLS);
     }
 
     private static String detectIntent(String fold, EntityResolver.Resolution entities) {

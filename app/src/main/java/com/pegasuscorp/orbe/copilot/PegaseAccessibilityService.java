@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.pegasuscorp.orbe.FloatingOrbService;
+import com.pegasuscorp.orbe.copilot.apps.CursorMicAction;
 import com.pegasuscorp.orbe.copilot.apps.YouTubeSubtitleAction;
 
 import java.util.concurrent.ExecutorService;
@@ -49,12 +50,25 @@ public class PegaseAccessibilityService extends AccessibilityService {
         super.onCreate();
         instance = this;
         Log.i(TAG, "onCreate — instance bound");
+        try {
+            com.pegasuscorp.orbe.diag.Trace.copilotUi(
+                    "a11y_lifecycle", "create",
+                    "Service accessibilité créé", "", "");
+        } catch (Exception ignored) {}
     }
 
     @Override
     public void onDestroy() {
         Log.w(TAG, "onDestroy — instance cleared");
         if (instance == this) instance = null;
+        try {
+            com.pegasuscorp.orbe.diag.Trace.copilotUi(
+                    "a11y_disconnected", "service_destroy",
+                    "Service accessibilité détruit", "", "");
+        } catch (Exception ignored) {}
+        try {
+            A11yDownAlert.notifyServiceDown(this, "service_destroy");
+        } catch (Exception ignored) {}
         super.onDestroy();
     }
 
@@ -77,6 +91,11 @@ public class PegaseAccessibilityService extends AccessibilityService {
             setServiceInfo(info);
         }
         Log.i(TAG, "onServiceConnected — ready");
+        try {
+            com.pegasuscorp.orbe.diag.Trace.copilotUi(
+                    "a11y_lifecycle", "connected",
+                    "Service accessibilité prêt", "", "");
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -96,7 +115,14 @@ public class PegaseAccessibilityService extends AccessibilityService {
     }
 
     @Override
-    public void onInterrupt() {}
+    public void onInterrupt() {
+        Log.w(TAG, "onInterrupt");
+        try {
+            com.pegasuscorp.orbe.diag.Trace.copilotUi(
+                    "a11y_lifecycle", "interrupted",
+                    "Service accessibilité interrompu", "", "");
+        } catch (Exception ignored) {}
+    }
 
     /**
      * Tap écran (gesture) — chemin principal des clics UI (ACTION_CLICK trop souvent fantôme).
@@ -200,6 +226,24 @@ public class PegaseAccessibilityService extends AccessibilityService {
         if (root == null) return false;
         try {
             return YouTubeSubtitleAction.toggleSubtitles(root);
+        } finally {
+            root.recycle();
+        }
+    }
+
+    /** Clique le micro Cursor web (libellé a11y ≠ « micro »). */
+    public boolean activateCursorMic() {
+        AccessibilityNodeInfo root = A11yRootPicker.preferForegroundRoot(this);
+        if (root == null) return false;
+        try {
+            A11yUiMatcher.Target mic = CursorMicAction.findMic(root);
+            if (mic == null) return false;
+            if (mic.hasBounds()
+                    && tapScreen(mic.left + (mic.right - mic.left) / 2f,
+                    mic.top + (mic.bottom - mic.top) / 2f)) {
+                return true;
+            }
+            return CursorMicAction.clickMic(root);
         } finally {
             root.recycle();
         }

@@ -29,9 +29,7 @@ public final class ShareTool implements Tool {
 
     @Override
     public String description() {
-        return "share(text:str, title?:str) — Ouvre le partage Android (text/plain). "
-                + "Utilise pour « partage ça », « envoie ce texte à… ». "
-                + "Exemple : {\"tool\":\"share\",\"params\":{\"text\":\"Voici le récap du brief.\"}}.";
+        return "share(text:str, title?:str) — Partage Android (text/plain).";
     }
 
     @Override

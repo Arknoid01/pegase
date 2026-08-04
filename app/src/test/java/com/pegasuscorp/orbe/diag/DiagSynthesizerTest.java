@@ -264,12 +264,19 @@ public class DiagSynthesizerTest {
         }
 
         String synthesized = DiagSynthesizer.summarizeArchive(ctx, 7);
-        assertTrue(synthesized.contains(yesterday.toString()) || synthesized.contains("Bilan"));
-        assertTrue(synthesized.toLowerCase().contains("echec")
-                || synthesized.toLowerCase().contains("échec")
-                || synthesized.contains("friction")
-                || synthesized.contains("notepad")
-                || synthesized.contains("outil"));
+        assertTrue(synthesized.contains(yesterday.toString())
+                || synthesized.contains("bilan")
+                || synthesized.contains("Bilan")
+                || synthesized.contains("Petit bilan"));
+        String low = synthesized.toLowerCase();
+        assertTrue(low.contains("echec")
+                || low.contains("échec")
+                || low.contains("raté")
+                || low.contains("rate")
+                || low.contains("souci")
+                || low.contains("friction")
+                || low.contains("outil")
+                || low.contains("compliqué"));
     }
 
     @Test

@@ -184,12 +184,23 @@ public final class DiagDayAggregate {
             if ("user_message".equals(type)) messages++;
             if ("tool_end".equals(type) && !event.optBoolean("ok", true)) toolFails++;
             if ("tool_failure_ctx".equals(type)) toolFails++;
+            boolean copilotFail = false;
+            if ("copilot_ui".equals(type)) {
+                String kind = event.optString("kind", "");
+                if ("matcher_miss".equals(kind) || "whitelist_block".equals(kind)
+                        || "a11y_unavailable".equals(kind)
+                        || "a11y_disconnected".equals(kind)
+                        || "confirm_cancel".equals(kind)) {
+                    toolFails++;
+                    copilotFail = true;
+                }
+            }
             if ("error".equals(type)) errors++;
             if ("llm_reply".equals(type)
                     && event.optString("text", "").startsWith("[error]")) {
                 errors++;
             }
-            if (isToolFail || isError) {
+            if (isToolFail || isError || copilotFail) {
                 appendErrorDetail(details, detailFromEvent(event, t));
             }
             long first = cur.firstTs > 0 ? Math.min(cur.firstTs, t) : t;
@@ -225,6 +236,13 @@ public final class DiagDayAggregate {
         } else if ("tool_end".equals(type) || "tool_failure_ctx".equals(type)) {
             message = firstNonEmpty(event, "error", "message", "text", "result");
             if (TextUtils.isEmpty(message)) message = "échec";
+        } else if ("copilot_ui".equals(type)) {
+            message = firstNonEmpty(event, "detail", "reason", "kind");
+            if (TextUtils.isEmpty(message)) message = "copilote";
+            String pkg = event.optString("pkg", "");
+            if (!TextUtils.isEmpty(pkg)) {
+                message = message + " (" + pkg + ")";
+            }
         } else if ("llm_reply".equals(type)) {
             message = event.optString("text", "");
             if (message.startsWith("[error]")) {

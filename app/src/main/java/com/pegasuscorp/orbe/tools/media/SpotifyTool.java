@@ -36,9 +36,8 @@ public final class SpotifyTool implements Tool {
 
     @Override
     public String description() {
-        return "spotify(action:\"play\"|\"playlist\"|\"pause\"|\"next\"|\"previous\"|\"now_playing\", query?:str)"
-                + " — Lance une piste, une playlist (meilleurs titres d'un artiste), contrôle la lecture "
-                + "(compte Spotify Premium connecté dans les réglages).";
+        return "spotify(action:\"play\"|\"playlist\"|\"pause\"|\"next\"|\"previous\"|\"now_playing\", "
+                + "query?:str) — Contrôle Spotify Premium (play/playlist avec query).";
     }
 
     @Override

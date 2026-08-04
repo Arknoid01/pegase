@@ -31,6 +31,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Alarmes type réveil / minuteur : exactes sans toggle utilisateur (API 31+). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
@@ -195,6 +197,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".DebugDashboardActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:label="Debug" />
+
+        <activity
             android:name=".ApiSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe"
@@ -311,6 +319,11 @@
         <receiver
             android:name=".notepad.NotepadReminderReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".tools.device.PegaseTimerReceiver"
+            android:exported="false"
+            android:directBootAware="true" />
 
         <receiver
             android:name=".prefetch.PrefetchAlarmReceiver"
@@ -443,6 +456,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name=".diag.DiagSuiteReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="com.pegasuscorp.orbe.action.RUN_DIAG_SUITE" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

@@ -145,6 +145,7 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
 
             boolean firstAttempt = true;
             boolean toolsExpandedOnce = false;
+            boolean shrink413Done = false;
             ChatSendOptions currentOpts = opts;
             for (LlmProvider p : chain) {
                 if (health.isUnhealthy(p)) {
@@ -153,6 +154,7 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
                 }
                 String[][] models = ProviderChain.modelsFor(p);
                 boolean providerFailedHard = false;
+                int rateRetries = LlmProvider.ID_GROQ.equals(p.id) ? 1 : 0;
                 for (int i = 0; i < models.length; i++) {
                     String modelId = models[i][0];
                     String modelName = models[i][1];
@@ -161,7 +163,8 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
                         Log.d(TAG, "Essai " + p.id + " / " + modelName);
                         LlmProvider attempt = withModel(p, modelId);
                         OpenAiCompatibleChatBackend backend =
-                                new OpenAiCompatibleChatBackend(appContext, attempt, modelId, 0);
+                                new OpenAiCompatibleChatBackend(appContext, attempt, modelId,
+                                        rateRetries);
                         LlmReply reply = backend.sendBlocking(history, userMessage,
                                 optsFor(p, modelId, currentOpts));
                         if (reply != null && (reply.hasNativeToolCalls()
@@ -197,7 +200,26 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
                     } catch (Exception e) {
                         lastError = e;
                         lastProvider = p.displayName;
+                        long firstMs = System.currentTimeMillis() - t0;
                         Log.w(TAG, p.id + "/" + modelName + " échoué : " + e.getMessage());
+                        if (!shrink413Done
+                                && LlmProvider.ID_GROQ.equals(p.id)
+                                && PromptBudget.isRequestTooLarge(e)
+                                && firstMs <= PromptBudget.GROQ_413_RETRY_MAX_FIRST_MS) {
+                            shrink413Done = true;
+                            currentOpts = optsFor(p, modelId, currentOpts)
+                                    .withPromptBudgetLevel(PromptBudget.Level.EMERGENCY);
+                            Trace.error("fallback", p.id + "/" + modelId
+                                    + " → 413_shrink");
+                            Log.i(TAG, "413 shrink retry (firstMs=" + firstMs + ")");
+                            Trace.prompt413Shrink(p.id, modelId, firstMs, true, 0L);
+                            i--; // rejouer même modèle en EMERGENCY
+                            continue;
+                        }
+                        if (PromptBudget.isRequestTooLarge(e)) {
+                            Trace.prompt413Shrink(p.id, modelId, firstMs, false, 0L);
+                            Trace.error("fallback", p.id + "/" + modelId + " → 413_next");
+                        }
                         // Même provider/modèle : élargir tools une fois si outil inventé
                         if (!toolsExpandedOnce) {
                             ChatSendOptions expanded = expandToolsForMissingCall(
@@ -418,10 +440,14 @@ public final class MultiProviderBackend implements ChatBackend, ProviderTraceSin
     }
 
     private static ChatSendOptions optsFor(LlmProvider p, String modelId, ChatSendOptions opts) {
-        if (opts == null) return ChatSendOptions.legacy();
-        if (!opts.nativeTools) return opts;
-        if (p.nativeFc && CloudModelStore.isToolCapableModel(modelId)) return opts;
-        return opts.withoutNativeTools();
+        ChatSendOptions o = opts != null ? opts : ChatSendOptions.legacy();
+        if (LlmProvider.ID_GROQ.equals(p.id)
+                && o.promptBudgetLevel == PromptBudget.Level.NORMAL) {
+            o = o.withPromptBudgetLevel(PromptBudget.Level.TIGHT);
+        }
+        if (!o.nativeTools) return o;
+        if (p.nativeFc && CloudModelStore.isToolCapableModel(modelId)) return o;
+        return o.withoutNativeTools();
     }
 
     private static LlmProvider withModel(LlmProvider base, String modelId) {

@@ -185,7 +185,6 @@ public class FloatingOrbService extends Service {
         if (currentMode == OverlayMode.COPILOT) {
             setupCopilotBubble();
             bubbleExpanded = CopilotPrefs.isBubbleOpen(this);
-            if (bubbleExpanded) showBubble();
         }
 
         layoutParams = buildLayoutParams();
@@ -204,7 +203,11 @@ public class FloatingOrbService extends Service {
 
         try {
             wm.addView(overlayRoot, layoutParams);
-            if (currentMode == OverlayMode.COPILOT) attachCopilot();
+            if (currentMode == OverlayMode.COPILOT) {
+                attachCopilot();
+                // Après addView seulement — showBubble appelle updateViewLayout.
+                if (bubbleExpanded) showBubble();
+            }
         } catch (Exception e) {
             android.util.Log.e("FloatingOrb", "Overlay impossible", e);
             overlayRoot = null;
@@ -308,6 +311,14 @@ public class FloatingOrbService extends Service {
         dragListener = new DragAndTapListener(wm, layoutParams, overlayRoot,
                 this::orbSizePx,
                 () -> {
+            // AlwaysOn : toujours la bulle copilote, même si un show(VOICE) a
+            // écrasé le mode (ex. après ouverture Chrome / Cursor).
+            if (currentMode != OverlayMode.COPILOT && CopilotPrefs.isAlwaysOn(this)) {
+                currentMode = OverlayMode.COPILOT;
+                applyModeLayout();
+                toggleBubble(true);
+                return;
+            }
             if (currentMode == OverlayMode.COPILOT) {
                 toggleBubble(!bubbleExpanded);
             } else {
@@ -320,6 +331,10 @@ public class FloatingOrbService extends Service {
             }
         }, () -> {
             if (currentMode == OverlayMode.COPILOT) {
+                showCopilotMenu();
+            } else if (CopilotPrefs.isAlwaysOn(this)) {
+                currentMode = OverlayMode.COPILOT;
+                applyModeLayout();
                 showCopilotMenu();
             }
         }, this::onOrbDragSettled);
@@ -465,17 +480,22 @@ public class FloatingOrbService extends Service {
     }
 
     private void showBubble() {
-        if (bubblePanel == null) return;
+        if (bubblePanel == null || overlayRoot == null || layoutParams == null || wm == null) {
+            return;
+        }
+        // Passthrough a11y coincé → taps / updateLayout explosent sur certains OEM.
+        gestureCollapsedBubble = false;
         bubblePanel.setVisibility(View.VISIBLE);
         applyExpandedWindowSize();
         updateWindowFocus();
         applyImeAwareLayout();
-        if (bubblePanel != null) {
-            bubblePanel.post(bubblePanel::focusInput);
-            // Fallback si les insets IME arrivent en retard sur overlay
-            overlayRoot.postDelayed(this::applyImeAwareLayout, 280);
-            overlayRoot.postDelayed(this::applyImeAwareLayout, 560);
-        }
+        bubblePanel.post(() -> {
+            if (bubblePanel == null) return;
+            bubblePanel.focusInput();
+        });
+        // Fallback si les insets IME arrivent en retard sur overlay
+        overlayRoot.postDelayed(this::applyImeAwareLayout, 280);
+        overlayRoot.postDelayed(this::applyImeAwareLayout, 560);
     }
 
     private void hideBubble() {
@@ -526,21 +546,31 @@ public class FloatingOrbService extends Service {
     }
 
     private void applyExpandedWindowSize() {
-        if (layoutParams == null || wm == null) return;
+        if (layoutParams == null || wm == null || overlayRoot == null) return;
+        if (overlayRoot.getParent() == null) return;
         layoutParams.width = dp(BUBBLE_W_DP);
         layoutParams.height = dp(BUBBLE_H_DP) + orbSizePx() + dp(16);
         layoutParams.gravity = Gravity.TOP | Gravity.START;
         clampOrbOnScreen();
-        wm.updateViewLayout(overlayRoot, layoutParams);
+        try {
+            wm.updateViewLayout(overlayRoot, layoutParams);
+        } catch (Exception e) {
+            android.util.Log.w("FloatingOrb", "applyExpandedWindowSize", e);
+        }
     }
 
     private void applyCollapsedWindowSize() {
-        if (layoutParams == null || wm == null) return;
+        if (layoutParams == null || wm == null || overlayRoot == null) return;
+        if (overlayRoot.getParent() == null) return;
         layoutParams.width = orbSizePx();
         layoutParams.height = orbSizePx();
         layoutParams.gravity = Gravity.TOP | Gravity.START;
         clampOrbOnScreen();
-        wm.updateViewLayout(overlayRoot, layoutParams);
+        try {
+            wm.updateViewLayout(overlayRoot, layoutParams);
+        } catch (Exception e) {
+            android.util.Log.w("FloatingOrb", "applyCollapsedWindowSize", e);
+        }
     }
 
     /** Clamp pour que l'orbe (pas toute la bulle) reste dans l'écran. */
@@ -558,7 +588,8 @@ public class FloatingOrbService extends Service {
      * qui empêche justement le clavier sur une fenêtre focusable.
      */
     private void updateWindowFocus() {
-        if (layoutParams == null || wm == null) return;
+        if (layoutParams == null || wm == null || overlayRoot == null) return;
+        if (overlayRoot.getParent() == null) return;
         if (currentMode == OverlayMode.COPILOT && bubbleExpanded) {
             layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                     | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
@@ -571,7 +602,11 @@ public class FloatingOrbService extends Service {
                     WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
         }
         layoutParams.gravity = Gravity.TOP | Gravity.START;
-        wm.updateViewLayout(overlayRoot, layoutParams);
+        try {
+            wm.updateViewLayout(overlayRoot, layoutParams);
+        } catch (Exception e) {
+            android.util.Log.w("FloatingOrb", "updateWindowFocus", e);
+        }
     }
 
     private void showCopilotMenu() {

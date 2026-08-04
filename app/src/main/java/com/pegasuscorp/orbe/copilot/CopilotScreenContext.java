@@ -19,7 +19,7 @@ public final class CopilotScreenContext {
         public final String text;
         public final long ageMs;
 
-        Snapshot(String packageName, String text, long ageMs) {
+        public Snapshot(String packageName, String text, long ageMs) {
             this.packageName = packageName != null ? packageName : "";
             this.text = text != null ? text : "";
             this.ageMs = Math.max(0L, ageMs);
@@ -67,6 +67,9 @@ public final class CopilotScreenContext {
         sb.append("Pour cliquer / expliquer / chercher : appelle ui_action, ui_explain ou ")
                 .append("ui_search avec target = un libellé visible ci-dessus ")
                 .append("(ex. Astronomie et espace). Le matching est local sur l'appareil. ")
+                .append("Si plusieurs gestes (ouvre puis clique puis tape) : ")
+                .append("une seule ui_action avec params.steps=[{action,target?,value?},…] ")
+                .append("— pas plusieurs appels, pas open_app seul. ")
                 .append("INTERDIT de demander view_id, identifiant de vue, resource name ")
                 .append("ou tout id technique — même après un outil. ")
                 .append("Si hésitation, réessaie avec un autre libellé — ")

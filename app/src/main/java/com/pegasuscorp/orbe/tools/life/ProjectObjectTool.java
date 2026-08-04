@@ -29,7 +29,7 @@ public final class ProjectObjectTool implements Tool {
 
     @Override
     public ToolTag tag() {
-        return ToolTag.BRIEF;
+        return ToolTag.PROJECT_OBJECT;
     }
 
     @Override

@@ -406,10 +406,12 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         // sera finalisée dans onDestroy / onInterfaceClosed.
         if (!isFinishing()
                 && android.provider.Settings.canDrawOverlays(this)) {
-            if (ChatVoiceBridge.isChatActive()) {
-                FloatingOrbService.show(this);
-            } else if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(this)) {
+            // AlwaysOn copilote gagne : un chat texte/copilote actif ne doit pas
+            // basculer l'orbe en mode VOICE (sinon tap → MainActivity au lieu de la bulle).
+            if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(this)) {
                 FloatingOrbService.showCopilot(this);
+            } else if (ChatVoiceBridge.isChatActive()) {
+                FloatingOrbService.show(this);
             }
         }
         super.onPause();

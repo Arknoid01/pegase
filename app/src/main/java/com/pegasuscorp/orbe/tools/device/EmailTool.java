@@ -31,10 +31,8 @@ public final class EmailTool implements Tool {
 
     @Override
     public String description() {
-        return "email(to?:str, subject?:str, body?:str) — Pré-remplit le composeur e-mail "
-                + "(mailto). L'utilisateur valide l'envoi. "
-                + "Exemple : {\"tool\":\"email\",\"params\":{\"to\":\"yannick@example.com\","
-                + "\"subject\":\"Salut\",\"body\":\"Voici le récap.\"}}.";
+        return "email(to?:str, subject?:str, body?:str) — Pré-remplit le composeur "
+                + "e-mail (mailto) ; l'utilisateur valide.";
     }
 
     @Override

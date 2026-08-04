@@ -40,11 +40,17 @@ public final class PersonalityGuide {
 
     /** Bloc à injecter dans les prompts système (chat, bureau, Orion). */
     public static String promptBlock(Context context) {
+        return promptBlock(context, MAX_INJECT_CHARS);
+    }
+
+    /** Variante avec plafond chars (ex. budget Groq serré). */
+    public static String promptBlock(Context context, int maxChars) {
         String body = load(context);
         if (body == null || body.trim().isEmpty()) return "";
         body = body.trim();
-        if (body.length() > MAX_INJECT_CHARS) {
-            body = body.substring(0, MAX_INJECT_CHARS - 1).trim() + "\n…";
+        int cap = maxChars > 0 ? Math.min(maxChars, MAX_INJECT_CHARS) : MAX_INJECT_CHARS;
+        if (body.length() > cap) {
+            body = body.substring(0, cap - 1).trim() + "\n…";
         }
         return "\n=== Personnalité Pégase (référence) ===\n" + body + "\n";
     }

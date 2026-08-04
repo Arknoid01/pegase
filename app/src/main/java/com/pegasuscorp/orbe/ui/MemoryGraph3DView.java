@@ -1,11 +1,11 @@
 package com.pegasuscorp.orbe.ui;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -27,7 +27,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Constellation mémoire — ciel immersif, synapses animées, focus au tap, inertie.
+ * Constellation mémoire — ciel immersif, focus au tap, inertie.
+ * Rendu volontairement léger : pas de shaders par nœud/arête à chaque frame.
  */
 public class MemoryGraph3DView extends View {
 
@@ -43,14 +44,14 @@ public class MemoryGraph3DView extends View {
     private static final int CYAN_CORE = Color.parseColor(OrbeTokens.CYAN_CORE);
     private static final int PERSON = Color.parseColor("#7DD3C7");
     private static final int AMBER = Color.parseColor("#E8B84A");
-    private static final int AMBER_SOFT = Color.parseColor("#F5D78A");
     private static final int DEVICE = Color.parseColor("#5EC8E8");
-    private static final int GRID = Color.parseColor("#1435D0DD");
 
     private static final float MIN_DEPTH_DENOM = 0.55f;
     private static final float MAX_NODE_SCALE = 2.2f;
     private static final float FOCAL = 2.85f;
     private static final float TAP_SLOP_DP = 12f;
+    private static final long IDLE_FRAME_NS = 42_000_000L;   // ~24 fps au repos
+    private static final long ACTIVE_FRAME_NS = 16_000_000L; // ~60 fps drag / entrée
 
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -58,17 +59,17 @@ public class MemoryGraph3DView extends View {
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint starPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint platePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint plateText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint plateMuted = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF plateRect = new RectF();
 
-    private final float[] starX = new float[64];
-    private final float[] starY = new float[64];
-    private final float[] starR = new float[64];
-    private final float[] starPhase = new float[64];
+    private static final int STAR_COUNT = 28;
+    private final float[] starX = new float[STAR_COUNT];
+    private final float[] starY = new float[STAR_COUNT];
+    private final float[] starR = new float[STAR_COUNT];
+    private final float[] starPhase = new float[STAR_COUNT];
 
     private MemoryGraphScene.Scene scene = new MemoryGraphScene.Scene(
             new ArrayList<>(), new ArrayList<>());
@@ -96,6 +97,16 @@ public class MemoryGraph3DView extends View {
     private float timeSec;
     private boolean animating;
     private float entrance; // 0→1
+    private long lastFrameNanos;
+
+    private Bitmap skyBitmap;
+    private int skyW;
+    private int skyH;
+
+    private float cosY = 1f;
+    private float sinY = 0f;
+    private float cosX = 1f;
+    private float sinX = 0f;
 
     private final List<DrawNode> drawOrder = new ArrayList<>();
     private final Map<String, Projected> projectedCache = new HashMap<>();
@@ -104,6 +115,18 @@ public class MemoryGraph3DView extends View {
         @Override
         public void doFrame(long frameTimeNanos) {
             if (!animating) return;
+
+            boolean busy = dragging
+                    || entrance < 1f
+                    || Math.abs(velocityY) > 0.00015f
+                    || Math.abs(velocityX) > 0.00015f;
+            long minInterval = busy ? ACTIVE_FRAME_NS : IDLE_FRAME_NS;
+            if (lastFrameNanos != 0 && frameTimeNanos - lastFrameNanos < minInterval) {
+                Choreographer.getInstance().postFrameCallback(this);
+                return;
+            }
+            lastFrameNanos = frameTimeNanos;
+
             if (startNanos == 0) startNanos = frameTimeNanos;
             float t = (frameTimeNanos - startNanos) / 1_000_000_000f;
             float dt = Math.max(0.001f, t - timeSec);
@@ -114,7 +137,6 @@ public class MemoryGraph3DView extends View {
             }
 
             if (!dragging) {
-                // Inertie
                 userRotY += velocityY;
                 userRotX += velocityX;
                 userRotX = clamp(userRotX, -1.15f, 1.15f);
@@ -123,12 +145,11 @@ public class MemoryGraph3DView extends View {
                 if (Math.abs(velocityY) < 0.00015f) velocityY = 0f;
                 if (Math.abs(velocityX) < 0.00015f) velocityX = 0f;
 
-                // Orbite lente quand au repos
                 if (velocityY == 0f && velocityX == 0f && focusedId == null) {
-                    autoRotY = t * 0.18f;
-                    autoRotX = 0.28f + (float) Math.sin(t * 0.45f) * 0.08f;
+                    autoRotY = t * 0.12f;
+                    autoRotX = 0.22f + (float) Math.sin(t * 0.35f) * 0.05f;
                 } else if (focusedId == null) {
-                    autoRotY += dt * 0.05f;
+                    autoRotY += dt * 0.04f;
                 }
             }
             invalidate();
@@ -149,15 +170,13 @@ public class MemoryGraph3DView extends View {
     private void init() {
         setWillNotDraw(false);
         setClickable(true);
+        setLayerType(LAYER_TYPE_HARDWARE, null);
         linePaint.setStyle(Paint.Style.STROKE);
         linePaint.setStrokeCap(Paint.Cap.ROUND);
         nodePaint.setStyle(Paint.Style.FILL);
         glowPaint.setStyle(Paint.Style.FILL);
         ringPaint.setStyle(Paint.Style.STROKE);
         ringPaint.setStrokeCap(Paint.Cap.ROUND);
-        gridPaint.setStyle(Paint.Style.STROKE);
-        gridPaint.setColor(GRID);
-        gridPaint.setStrokeWidth(dp(1));
 
         labelPaint.setColor(Color.parseColor("#E6FFFFFF"));
         labelPaint.setTextAlign(Paint.Align.CENTER);
@@ -172,8 +191,7 @@ public class MemoryGraph3DView extends View {
         plateMuted.setTypeface(OrbeTokens.typeLight());
         plateMuted.setTextSize(sp(11));
 
-        // Champ d'étoiles déterministe
-        for (int i = 0; i < starX.length; i++) {
+        for (int i = 0; i < STAR_COUNT; i++) {
             starX[i] = fract(i * 0.6180339f + 0.17f);
             starY[i] = fract(i * 0.381966f + 0.41f);
             starR[i] = 0.6f + (i % 5) * 0.35f;
@@ -189,15 +207,33 @@ public class MemoryGraph3DView extends View {
         scene = newScene != null ? newScene
                 : new MemoryGraphScene.Scene(new ArrayList<>(), new ArrayList<>());
         nodeIndex.clear();
+        float maxR = 1.6f;
         for (MemoryGraphScene.Node node : scene.nodes) {
             nodeIndex.put(node.id, node);
+            float r = (float) Math.sqrt(node.x * node.x + node.y * node.y + node.z * node.z);
+            if (r > maxR) maxR = r;
         }
+        zoom = clamp(2.15f / maxR, 0.55f, 1.15f);
         focusedId = null;
         focusNeighborIds.clear();
         entrance = 0f;
         startNanos = 0;
         timeSec = 0f;
+        lastFrameNanos = 0;
+        ensureDrawPool();
         invalidate();
+    }
+
+    private void ensureDrawPool() {
+        while (drawOrder.size() < scene.nodes.size()) {
+            drawOrder.add(new DrawNode());
+        }
+        projectedCache.clear();
+        for (int i = 0; i < scene.nodes.size(); i++) {
+            DrawNode dn = drawOrder.get(i);
+            dn.node = scene.nodes.get(i);
+            projectedCache.put(dn.node.id, dn.projected);
+        }
     }
 
     @Override
@@ -209,12 +245,18 @@ public class MemoryGraph3DView extends View {
     @Override
     protected void onDetachedFromWindow() {
         stopAnimation();
+        if (skyBitmap != null) {
+            skyBitmap.recycle();
+            skyBitmap = null;
+            skyW = skyH = 0;
+        }
         super.onDetachedFromWindow();
     }
 
     public void startAnimation() {
         if (animating) return;
         animating = true;
+        lastFrameNanos = 0;
         Choreographer.getInstance().postFrameCallback(frameCallback);
     }
 
@@ -234,7 +276,9 @@ public class MemoryGraph3DView extends View {
                 velocityY = 0f;
                 lastTouchX = downX = event.getX();
                 lastTouchY = downY = event.getY();
-                getParent().requestDisallowInterceptTouchEvent(true);
+                if (getParent() != null) {
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                }
                 return true;
             case MotionEvent.ACTION_MOVE: {
                 float dx = event.getX() - lastTouchX;
@@ -255,7 +299,9 @@ public class MemoryGraph3DView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 dragging = false;
-                getParent().requestDisallowInterceptTouchEvent(false);
+                if (getParent() != null) {
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                }
                 if (!moved && event.getActionMasked() == MotionEvent.ACTION_UP) {
                     handleTap(event.getX(), event.getY());
                 }
@@ -269,7 +315,10 @@ public class MemoryGraph3DView extends View {
         if (scene.isEmpty()) return;
         DrawNode best = null;
         float bestDist = dp(36f);
-        for (DrawNode item : drawOrder) {
+        int n = Math.min(drawOrder.size(), scene.nodes.size());
+        for (int i = 0; i < n; i++) {
+            DrawNode item = drawOrder.get(i);
+            if (item.node == null) continue;
             float r = hitRadius(item);
             float d = (float) Math.hypot(x - item.projected.x, y - item.projected.y);
             if (d < Math.max(bestDist, r * 1.8f) && (best == null || d < bestDist)) {
@@ -316,12 +365,15 @@ public class MemoryGraph3DView extends View {
 
         float cx = w * 0.5f;
         float cy = h * 0.46f;
-        float scale = Math.min(w, h) * 0.38f * zoom * (0.55f + 0.45f * easeOutCubic(entrance));
+        float scale = Math.min(w, h) * 0.42f * zoom * (0.55f + 0.45f * easeOutCubic(entrance));
         float rotY = autoRotY + userRotY;
         float rotX = autoRotX + userRotX;
+        cosY = (float) Math.cos(rotY);
+        sinY = (float) Math.sin(rotY);
+        cosX = (float) Math.cos(rotX);
+        sinX = (float) Math.sin(rotX);
 
-        drawBackground(canvas, w, h);
-        drawNebula(canvas, w, h);
+        drawSkyCached(canvas, w, h);
         drawStars(canvas, w, h);
 
         if (scene.isEmpty()) {
@@ -329,71 +381,64 @@ public class MemoryGraph3DView extends View {
             return;
         }
 
-        rebuildProjections(cx, cy, scale, rotY, rotX);
-
-        drawOrbitalRings(canvas, cx, cy, scale, rotY, rotX);
-        drawGrid(canvas, cx, cy, scale, rotY, rotX);
+        rebuildProjections(cx, cy, scale);
         drawEdges(canvas);
         drawNodes(canvas);
         drawFocusPlate(canvas, w, h);
         drawCornerCaption(canvas, w, h);
     }
 
-    private void rebuildProjections(float cx, float cy, float scale, float rotY, float rotX) {
-        projectedCache.clear();
-        drawOrder.clear();
-        for (MemoryGraphScene.Node node : scene.nodes) {
-            Projected p = project(node.x, node.y, node.z, cx, cy, scale, rotY, rotX);
-            projectedCache.put(node.id, p);
-            drawOrder.add(new DrawNode(node, p));
+    private void drawSkyCached(Canvas canvas, int w, int h) {
+        if (skyBitmap == null || skyW != w || skyH != h) {
+            if (skyBitmap != null) skyBitmap.recycle();
+            skyBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            skyW = w;
+            skyH = h;
+            Canvas sky = new Canvas(skyBitmap);
+            fillPaint.setShader(new LinearGradient(0, 0, 0, h,
+                    new int[]{BG_TOP, BG_MID, BG_BOTTOM},
+                    new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+            sky.drawRect(0, 0, w, h, fillPaint);
+            fillPaint.setShader(null);
+
+            glowPaint.setShader(new RadialGradient(
+                    w * 0.35f, h * 0.4f, Math.max(w, h) * 0.55f,
+                    Color.argb(38, 53, 208, 221),
+                    Color.TRANSPARENT, Shader.TileMode.CLAMP));
+            sky.drawRect(0, 0, w, h, glowPaint);
+            glowPaint.setShader(new RadialGradient(
+                    w * 0.72f, h * 0.62f, Math.max(w, h) * 0.4f,
+                    Color.argb(28, 232, 184, 74),
+                    Color.TRANSPARENT, Shader.TileMode.CLAMP));
+            sky.drawRect(0, 0, w, h, glowPaint);
+            glowPaint.setShader(new RadialGradient(
+                    w * 0.5f, h * 0.5f, Math.max(w, h) * 0.72f,
+                    Color.TRANSPARENT, Color.argb(160, 0, 0, 0), Shader.TileMode.CLAMP));
+            sky.drawRect(0, 0, w, h, glowPaint);
+            glowPaint.setShader(null);
         }
-        Collections.sort(drawOrder, (a, b) -> Float.compare(a.projected.depth, b.projected.depth));
+        canvas.drawBitmap(skyBitmap, 0, 0, null);
     }
 
-    private void drawBackground(Canvas canvas, int w, int h) {
-        fillPaint.setShader(new LinearGradient(0, 0, 0, h,
-                new int[]{BG_TOP, BG_MID, BG_BOTTOM},
-                new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
-        canvas.drawRect(0, 0, w, h, fillPaint);
-        fillPaint.setShader(null);
-    }
-
-    private void drawNebula(Canvas canvas, int w, int h) {
-        // Voile cyan discret — pas un glow flashy, une brume
-        glowPaint.setShader(new RadialGradient(
-                w * 0.35f, h * 0.4f, Math.max(w, h) * 0.55f,
-                Color.argb(38, 53, 208, 221),
-                Color.TRANSPARENT, Shader.TileMode.CLAMP));
-        canvas.drawRect(0, 0, w, h, glowPaint);
-
-        glowPaint.setShader(new RadialGradient(
-                w * 0.72f, h * 0.62f, Math.max(w, h) * 0.4f,
-                Color.argb(28, 232, 184, 74),
-                Color.TRANSPARENT, Shader.TileMode.CLAMP));
-        canvas.drawRect(0, 0, w, h, glowPaint);
-        glowPaint.setShader(null);
-
-        // Vignette
-        glowPaint.setShader(new RadialGradient(
-                w * 0.5f, h * 0.5f, Math.max(w, h) * 0.72f,
-                Color.TRANSPARENT, Color.argb(160, 0, 0, 0), Shader.TileMode.CLAMP));
-        canvas.drawRect(0, 0, w, h, glowPaint);
-        glowPaint.setShader(null);
+    private void rebuildProjections(float cx, float cy, float scale) {
+        int n = scene.nodes.size();
+        ensureDrawPool();
+        for (int i = 0; i < n; i++) {
+            DrawNode item = drawOrder.get(i);
+            MemoryGraphScene.Node node = item.node;
+            projectInto(node.x, node.y, node.z, cx, cy, scale, item.projected);
+        }
+        Collections.sort(drawOrder.subList(0, n),
+                (a, b) -> Float.compare(a.projected.depth, b.projected.depth));
     }
 
     private void drawStars(Canvas canvas, int w, int h) {
-        for (int i = 0; i < starX.length; i++) {
-            float twinkle = 0.45f + 0.55f * (0.5f + 0.5f * (float) Math.sin(timeSec * (1.1f + (i % 7) * 0.13f) + starPhase[i]));
-            int alpha = (int) ((28 + (i % 9) * 10) * twinkle);
+        for (int i = 0; i < STAR_COUNT; i++) {
+            float twinkle = 0.55f + 0.45f * (0.5f + 0.5f
+                    * (float) Math.sin(timeSec * (0.7f + (i % 5) * 0.11f) + starPhase[i]));
+            int alpha = (int) ((24 + (i % 7) * 8) * twinkle);
             starPaint.setColor(Color.argb(alpha, 255, 255, 255));
-            float x = starX[i] * w;
-            float y = starY[i] * h;
-            float r = dp(starR[i]);
-            canvas.drawCircle(x, y, r, starPaint);
-            if (i % 11 == 0) {
-                starPaint.setAlpha(Math.min(255, alpha + 40));
-                canvas.drawCircle(x, y, r * 0.35f, starPaint);
-            }
+            canvas.drawCircle(starX[i] * w, starY[i] * h, dp(starR[i]), starPaint);
         }
     }
 
@@ -408,96 +453,37 @@ public class MemoryGraph3DView extends View {
         plateMuted.setTextAlign(Paint.Align.LEFT);
     }
 
-    private void drawOrbitalRings(Canvas canvas, float cx, float cy, float scale,
-            float rotY, float rotX) {
-        ringPaint.setColor(Color.argb(40, 53, 208, 221));
-        ringPaint.setStrokeWidth(dp(1.1f));
-        for (int ring = 0; ring < 3; ring++) {
-            float radius = 0.55f + ring * 0.28f;
-            Path path = new Path();
-            boolean first = true;
-            int steps = 48;
-            for (int i = 0; i <= steps; i++) {
-                float a = (float) (i * Math.PI * 2 / steps);
-                float x = radius * (float) Math.cos(a);
-                float z = radius * (float) Math.sin(a);
-                Projected p = project(x, -0.05f * ring, z, cx, cy, scale, rotY, rotX);
-                if (first) {
-                    path.moveTo(p.x, p.y);
-                    first = false;
-                } else {
-                    path.lineTo(p.x, p.y);
-                }
-            }
-            path.close();
-            ringPaint.setAlpha(28 + ring * 10);
-            canvas.drawPath(path, ringPaint);
-        }
-    }
-
-    private void drawGrid(Canvas canvas, float cx, float cy, float scale,
-            float rotY, float rotX) {
-        int lines = 7;
-        float extent = 1.25f;
-        for (int i = 0; i <= lines; i++) {
-            float t = -extent + (2f * extent * i / lines);
-            drawGridLine(canvas, cx, cy, scale, rotY, rotX, -extent, t, extent, t);
-            drawGridLine(canvas, cx, cy, scale, rotY, rotX, t, -extent, t, extent);
-        }
-    }
-
-    private void drawGridLine(Canvas canvas, float cx, float cy, float scale,
-            float rotY, float rotX,
-            float x1, float z1, float x2, float z2) {
-        Projected a = project(x1, -0.95f, z1, cx, cy, scale, rotY, rotX);
-        Projected b = project(x2, -0.95f, z2, cx, cy, scale, rotY, rotX);
-        gridPaint.setAlpha((int) (22 + 55 * Math.min(a.depth, b.depth)));
-        canvas.drawLine(a.x, a.y, b.x, b.y, gridPaint);
-    }
-
     private void drawEdges(Canvas canvas) {
+        // Au repos : squelette entités seulement. Au focus : liens de l'étoile.
         for (MemoryGraphScene.Edge edge : scene.edges) {
+            boolean hot = focusedId != null
+                    && (focusedId.equals(edge.fromId) || focusedId.equals(edge.toId));
+            if (focusedId == null) {
+                if (!edge.entityLink) continue;
+            } else if (!hot) {
+                continue;
+            }
+
             Projected pa = projectedCache.get(edge.fromId);
             Projected pb = projectedCache.get(edge.toId);
             if (pa == null || pb == null) continue;
 
-            boolean hot = focusedId != null
-                    && (focusedId.equals(edge.fromId) || focusedId.equals(edge.toId));
-            boolean dim = focusedId != null && !hot;
-            float dimFactor = dim ? 0.18f : 1f;
-
             int baseColor = edge.entityLink ? CYAN : AMBER;
-            int alpha = (int) ((edge.frozen ? 200 : (70 + edge.weight * 130)) * dimFactor * entrance);
+            int alpha = (int) ((edge.frozen ? 170 : (55 + edge.weight * 100)) * entrance);
+            if (hot) alpha = Math.min(255, alpha + 60);
             linePaint.setColor(baseColor);
             linePaint.setAlpha(Math.max(0, Math.min(255, alpha)));
-            linePaint.setStrokeWidth(dp(hot ? 2.2f : (edge.entityLink ? 1.5f : 1.1f)));
+            linePaint.setStrokeWidth(dp(hot ? 2f : (edge.entityLink ? 1.3f : 1.1f)));
             canvas.drawLine(pa.x, pa.y, pb.x, pb.y, linePaint);
-
-            if (hot || edge.frozen || edge.weight > 0.75) {
-                linePaint.setAlpha((int) (36 * dimFactor));
-                linePaint.setStrokeWidth(dp(hot ? 6f : 3.5f));
-                canvas.drawLine(pa.x, pa.y, pb.x, pb.y, linePaint);
-            }
-
-            // Synapse — pulse qui voyage sur le lien
-            if (!dim && entrance > 0.6f) {
-                float phase = fract(timeSec * (0.35f + (float) edge.weight * 0.25f)
-                        + edge.fromId.hashCode() * 0.001f);
-                float px = pa.x + (pb.x - pa.x) * phase;
-                float py = pa.y + (pb.y - pa.y) * phase;
-                int pulseAlpha = (int) (160 * dimFactor * (0.4f + 0.6f * (float) Math.sin(phase * Math.PI)));
-                glowPaint.setShader(new RadialGradient(
-                        px, py, dp(hot ? 7f : 4.5f),
-                        Color.argb(pulseAlpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)),
-                        Color.TRANSPARENT, Shader.TileMode.CLAMP));
-                canvas.drawCircle(px, py, dp(hot ? 7f : 4.5f), glowPaint);
-                glowPaint.setShader(null);
-            }
         }
     }
 
     private void drawNodes(Canvas canvas) {
-        for (DrawNode item : drawOrder) {
+        int n = Math.min(drawOrder.size(), scene.nodes.size());
+        int entityLabelsLeft = focusedId == null ? 6 : 0;
+
+        for (int i = 0; i < n; i++) {
+            DrawNode item = drawOrder.get(i);
             MemoryGraphScene.Node node = item.node;
             Projected p = item.projected;
             boolean focused = node.id.equals(focusedId);
@@ -513,50 +499,51 @@ public class MemoryGraph3DView extends View {
             radius *= 0.4f + 0.6f * easeOutCubic(entrance);
 
             int core = nodeColor(node);
-            float alphaMul = dim ? 0.22f : 1f;
+            float alphaMul = dim ? 0.2f : 1f;
 
-            float glowR = Math.max(radius * (focused ? 3.2f : 2.4f), 1f);
-            int glowA = (int) ((focused ? 150 : 95) * alphaMul);
-            glowPaint.setShader(new RadialGradient(
-                    p.x, p.y, glowR,
-                    Color.argb(glowA, Color.red(core), Color.green(core), Color.blue(core)),
-                    Color.TRANSPARENT, Shader.TileMode.CLAMP));
-            canvas.drawCircle(p.x, p.y, glowR, glowPaint);
-            glowPaint.setShader(null);
-
-            // Anneau de focus qui respire
-            if (focused) {
-                float breathe = 0.85f + 0.15f * (0.5f + 0.5f * (float) Math.sin(timeSec * 2.4f));
-                ringPaint.setColor(CYAN_CORE);
-                ringPaint.setAlpha(160);
-                ringPaint.setStrokeWidth(dp(1.4f));
-                canvas.drawCircle(p.x, p.y, radius * 1.55f * breathe, ringPaint);
+            // Halo soft sans RadialGradient (coûteux) — cercle translucide.
+            if (focused || (!dim && node.kind == MemoryGraphScene.NodeKind.ENTITY)) {
+                glowPaint.setColor(Color.argb(
+                        (int) ((focused ? 90 : 45) * alphaMul),
+                        Color.red(core), Color.green(core), Color.blue(core)));
+                canvas.drawCircle(p.x, p.y, radius * (focused ? 2.6f : 2.0f), glowPaint);
             }
 
-            // Core
+            if (focused) {
+                float breathe = 0.88f + 0.12f * (0.5f + 0.5f * (float) Math.sin(timeSec * 2.2f));
+                ringPaint.setColor(CYAN_CORE);
+                ringPaint.setAlpha(150);
+                ringPaint.setStrokeWidth(dp(1.3f));
+                canvas.drawCircle(p.x, p.y, radius * 1.5f * breathe, ringPaint);
+            }
+
             nodePaint.setColor(core);
-            nodePaint.setAlpha((int) (240 * alphaMul));
+            nodePaint.setAlpha((int) (235 * alphaMul));
             canvas.drawCircle(p.x, p.y, radius, nodePaint);
 
-            // Highlight specular
-            nodePaint.setColor(Color.WHITE);
-            nodePaint.setAlpha((int) (70 * alphaMul));
-            canvas.drawCircle(p.x - radius * 0.28f, p.y - radius * 0.28f, radius * 0.28f, nodePaint);
+            if (focused) {
+                nodePaint.setColor(Color.WHITE);
+                nodePaint.setAlpha((int) (70 * alphaMul));
+                canvas.drawCircle(p.x - radius * 0.28f, p.y - radius * 0.28f,
+                        radius * 0.28f, nodePaint);
+            }
 
-            boolean showLabel = focused || neighbor
-                    || (focusedId == null
-                        && node.kind == MemoryGraphScene.NodeKind.ENTITY
-                        && nodeScale > 0.7f
-                        && radius > dp(5f));
+            boolean showLabel = focused || neighbor;
+            if (!showLabel && focusedId == null
+                    && node.kind == MemoryGraphScene.NodeKind.ENTITY
+                    && entityLabelsLeft > 0
+                    && nodeScale > 0.75f
+                    && radius > dp(5f)) {
+                showLabel = true;
+                entityLabelsLeft--;
+            }
             if (showLabel) {
-                String label = focused ? node.label : clipLabel(node.label, focused ? 28 : 14);
+                String label = clipLabel(node.label, focused ? 28 : 14);
                 labelPaint.setTextSize(sp(focused ? 12f : 9.5f));
-                labelPaint.setAlpha((int) ((focused ? 240 : 175) * alphaMul));
                 labelPaint.setTypeface(focused ? OrbeTokens.typeMedium() : OrbeTokens.typeLight());
-                // Ombre légère pour lisibilité
-                labelPaint.setColor(Color.argb((int) (120 * alphaMul), 0, 0, 0));
+                labelPaint.setColor(Color.argb((int) (110 * alphaMul), 0, 0, 0));
                 canvas.drawText(label, p.x + dp(0.5f), p.y - radius - dp(5f) + dp(0.5f), labelPaint);
-                labelPaint.setColor(Color.argb((int) ((focused ? 245 : 210) * alphaMul), 255, 255, 255));
+                labelPaint.setColor(Color.argb((int) ((focused ? 245 : 200) * alphaMul), 255, 255, 255));
                 canvas.drawText(label, p.x, p.y - radius - dp(5f), labelPaint);
             }
         }
@@ -579,7 +566,6 @@ public class MemoryGraph3DView extends View {
         canvas.drawRoundRect(plateRect, dp(12), dp(12), platePaint);
         platePaint.setStyle(Paint.Style.FILL);
 
-        // Pastille couleur
         float dotX = plateRect.left + dp(18);
         float dotY = plateRect.centerY();
         nodePaint.setColor(nodeColor(node));
@@ -636,21 +622,18 @@ public class MemoryGraph3DView extends View {
         return entityType.substring(0, 1).toUpperCase(Locale.ROOT) + entityType.substring(1);
     }
 
-    private Projected project(float x, float y, float z, float cx, float cy, float scale,
-            float rotY, float rotX) {
-        float cosY = (float) Math.cos(rotY);
-        float sinY = (float) Math.sin(rotY);
+    private void projectInto(float x, float y, float z, float cx, float cy, float scale,
+            Projected out) {
         float xr = x * cosY - z * sinY;
         float zr = x * sinY + z * cosY;
-
-        float cosX = (float) Math.cos(rotX);
-        float sinX = (float) Math.sin(rotX);
         float yr = y * cosX - zr * sinX;
         float zf = y * sinX + zr * cosX;
-
         float depth = 1f / Math.max(MIN_DEPTH_DENOM, FOCAL + zf);
         float s = Math.min(scale * depth, scale * (1f / MIN_DEPTH_DENOM));
-        return new Projected(cx + xr * s, cy + yr * s, depth, s);
+        out.x = cx + xr * s;
+        out.y = cy + yr * s;
+        out.depth = depth;
+        out.scale = s;
     }
 
     private static float clamp(float v, float min, float max) {
@@ -682,23 +665,11 @@ public class MemoryGraph3DView extends View {
     }
 
     private static final class Projected {
-        final float x, y, depth, scale;
-
-        Projected(float x, float y, float depth, float scale) {
-            this.x = x;
-            this.y = y;
-            this.depth = depth;
-            this.scale = scale;
-        }
+        float x, y, depth, scale;
     }
 
     private static final class DrawNode {
-        final MemoryGraphScene.Node node;
-        final Projected projected;
-
-        DrawNode(MemoryGraphScene.Node node, Projected projected) {
-            this.node = node;
-            this.projected = projected;
-        }
+        MemoryGraphScene.Node node;
+        final Projected projected = new Projected();
     }
 }

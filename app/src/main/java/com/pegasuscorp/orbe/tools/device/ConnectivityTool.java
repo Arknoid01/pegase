@@ -35,9 +35,7 @@ public final class ConnectivityTool implements Tool {
     public String description() {
         return "connectivity(target:\"wifi\"|\"bluetooth\", "
                 + "action:\"status\"|\"on\"|\"off\"|\"toggle\"|\"panel\") — "
-                + "Wi-Fi et Bluetooth : status=état actuel, on/off/toggle=activer/désactiver, "
-                + "panel=ouvre le panneau système Android. "
-                + "Utilise pour « active le wifi », « bluetooth on/off », « état du réseau ».";
+                + "Wi-Fi / Bluetooth : status, on/off/toggle, panel système.";
     }
 
     @Override

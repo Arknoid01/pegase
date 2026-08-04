@@ -39,6 +39,7 @@ public final class DiagScriptRunner {
     private Listener activeListener;
     private boolean stressWasEnabled;
     private long suiteStartedAt;
+    private String activeSuiteId = DiagScripts.SUITE_ID;
     private int okCount;
     private int errorCount;
     private int timeoutCount;
@@ -60,6 +61,16 @@ public final class DiagScriptRunner {
     }
 
     public void runMiniSuite(Context context, Listener listener) {
+        runSuite(context, DiagScripts.miniSuite(), DiagScripts.SUITE_ID, listener);
+    }
+
+    /** Suite tags conditionnels (tools_chars + has_ui/f1/life/project). */
+    public void runTagsSuite(Context context, Listener listener) {
+        runSuite(context, DiagScripts.tagsSuite(), DiagScripts.TAGS_SUITE_ID, listener);
+    }
+
+    private void runSuite(Context context, List<DiagScript> scripts, String suiteId,
+            Listener listener) {
         Context app = context.getApplicationContext();
         if (running) {
             if (listener != null) listener.onCannotStart("Une suite est déjà en cours.");
@@ -75,6 +86,7 @@ public final class DiagScriptRunner {
         running = true;
         activeListener = listener;
         appContext = app;
+        activeSuiteId = suiteId != null ? suiteId : DiagScripts.SUITE_ID;
         okCount = 0;
         errorCount = 0;
         timeoutCount = 0;
@@ -88,9 +100,8 @@ public final class DiagScriptRunner {
         DiagScriptRunStore.markStarted(app);
         Trace.state("idle", "script_suite_running");
 
-        List<DiagScript> scripts = DiagScripts.miniSuite();
         int backedUpTurns = isolation.prepareCleanSession(app);
-        Trace.scriptSuiteStart(DiagScripts.SUITE_ID, scripts.size(), DiagScripts.COOLDOWN_MS,
+        Trace.scriptSuiteStart(activeSuiteId, scripts.size(), DiagScripts.COOLDOWN_MS,
                 backedUpTurns);
 
         PegaseSession session = PegaseSession.get(app);
@@ -150,6 +161,9 @@ public final class DiagScriptRunner {
         notifyProgress(index, scripts.size(), script.label, "envoi…");
         Trace.scriptStep(script.id, index, script.query, "start", null);
 
+        Channel ch = script.channel != null ? script.channel : Channel.TEXT;
+        session.init(new SessionContext(ch, false));
+
         AtomicBoolean finished = new AtomicBoolean(false);
         pendingTimeout = () -> {
             if (!finished.compareAndSet(false, true)) return;
@@ -200,7 +214,7 @@ public final class DiagScriptRunner {
     private void finishSuite(Context app, int stepCount) {
         clearPending();
         long duration = System.currentTimeMillis() - suiteStartedAt;
-        Trace.scriptSuiteEnd(DiagScripts.SUITE_ID, okCount, errorCount + timeoutCount, duration);
+        Trace.scriptSuiteEnd(activeSuiteId, okCount, errorCount + timeoutCount, duration);
 
         DiagScriptResult result;
         try {

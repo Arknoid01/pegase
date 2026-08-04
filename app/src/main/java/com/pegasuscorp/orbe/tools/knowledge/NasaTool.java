@@ -31,9 +31,7 @@ public final class NasaTool implements Tool {
 
     @Override
     public String description() {
-        return "nasa() — Récupère l'image astronomique du jour de la NASA avec son explication. "
-                + "Utilise pour toute question sur la photo du jour de la NASA, l'astronomie, "
-                + "ou si Yannick veut une info spatiale fraîche.";
+        return "nasa() — Image astronomique du jour NASA (APOD) + explication.";
     }
 
     @Override

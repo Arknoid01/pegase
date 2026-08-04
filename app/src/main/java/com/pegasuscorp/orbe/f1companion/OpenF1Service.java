@@ -213,7 +213,7 @@ public final class OpenF1Service {
             }
             snap.results.add(r);
         }
-        snap.results.sort((a, b) -> Integer.compare(a.position, b.position));
+        snap.sortResults();
     }
 
     private static void fillGrid(WeekendSnapshot snap, Map<Integer, DriverInfo> drivers)

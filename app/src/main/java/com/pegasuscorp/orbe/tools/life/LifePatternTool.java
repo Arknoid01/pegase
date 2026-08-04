@@ -29,7 +29,7 @@ public final class LifePatternTool implements Tool {
 
     @Override
     public ToolTag tag() {
-        return ToolTag.BRIEF;
+        return ToolTag.LIFE_PATTERN;
     }
 
     @Override

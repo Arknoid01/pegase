@@ -42,10 +42,8 @@ public final class AlarmTool implements Tool {
     @Override
     public String description() {
         return "alarm(action:\"add\"|\"list\"|\"recent\", hour?:int, minute?:int, time?:str, "
-                + "label?:str, message?:str, days?:int[]) — Réveil Horloge Android. "
-                + "label/message : nom affiché (« chauffer les plats »). "
-                + "time : « 7h30 » si hour absent. days : 1=lun…7=dim (répétition). "
-                + "list : ouvre Horloge. recent : alarmes créées par Pégase.";
+                + "label?:str, message?:str, days?:int[]) — Réveil Horloge. "
+                + "time « 7h30 » si hour absent ; days 1=lun…7=dim ; list/recent.";
     }
 
     @Override

@@ -27,14 +27,12 @@ public final class ScreenCaptureTool implements Tool {
 
     @Override
     public ToolTag tag() {
-        return ToolTag.DEVICE;
+        return ToolTag.UI;
     }
 
     @Override
     public String description() {
-        return "screen_capture(prompt?:str) — Capture l'écran actuel et l'analyse "
-                + "(OCR / vision). Utilise quand l'utilisateur demande ce qu'il voit, "
-                + "une analyse d'écran, ou « qu'est-ce qu'il y a sur cette page ».";
+        return "screen_capture(prompt?:str) — Capture l'écran et l'analyse (OCR / vision).";
     }
 
     @Override

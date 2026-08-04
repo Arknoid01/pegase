@@ -84,7 +84,8 @@ public final class DiagSynthesizer {
 
         JSONObject report = target.equals(java.time.LocalDate.now())
                 ? DiagParser.ensureReport(ctx) : null;
-        String body = DiagNlGenerator.synthesizeSummary(detail, report);
+        // Bilan oral / auto : registre simplifié (analyze garde le mode technique).
+        String body = DiagNlGenerator.synthesizeSummarySimple(ctx, detail, report);
         return prependCoverage(coverage, reconcile, body);
     }
 
@@ -232,7 +233,8 @@ public final class DiagSynthesizer {
         if (!hasAnyIssues(daysFound)) {
             return NOTHING_TO_REPORT_YESTERDAY;
         }
-        return DiagNlGenerator.synthesizeWeekly(daysFound, days);
+        // Prefetch / bilan auto — jamais le registre technique analyze/Cursor.
+        return DiagNlGenerator.synthesizeWeeklySimple(ctx, daysFound, days);
     }
 
     /** true si au moins une friction / anomalie dans les buckets. */
@@ -577,6 +579,16 @@ public final class DiagSynthesizer {
 
     static String synthesizeWeekly(List<DiagParser.DayBucket> days, int requestedDays) {
         return DiagNlGenerator.synthesizeWeekly(days, requestedDays);
+    }
+
+    static String synthesizeWeeklySimple(android.content.Context ctx,
+            List<DiagParser.DayBucket> days, int requestedDays) {
+        return DiagNlGenerator.synthesizeWeeklySimple(ctx, days, requestedDays);
+    }
+
+    static String synthesizeSummarySimple(android.content.Context ctx,
+            List<JSONObject> events, JSONObject report) {
+        return DiagNlGenerator.synthesizeSummarySimple(ctx, events, report);
     }
 
     static String synthesizeHesitations(List<JSONObject> events) {

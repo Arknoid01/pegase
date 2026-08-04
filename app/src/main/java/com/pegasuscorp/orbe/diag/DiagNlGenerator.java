@@ -1,5 +1,7 @@
 package com.pegasuscorp.orbe.diag;
 
+import android.content.Context;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -13,6 +15,10 @@ import java.util.Map;
 /**
  * Synthèses NL à partir des events / rapport diag
  * (summary, weekly, hesitations, failures).
+ * <p>
+ * Deux registres : {@link #synthesizeSummary} / {@link #synthesizeWeekly} (technique,
+ * analyze / Cursor) et {@link #synthesizeSummarySimple} / {@link #synthesizeWeeklySimple}
+ * (bilan auto, langage courant).
  */
 public final class DiagNlGenerator {
 
@@ -229,6 +235,304 @@ public final class DiagNlGenerator {
             sb.append(". Tu veux le détail d'un jour en particulier ?");
         }
         return sb.toString().trim();
+    }
+
+    /**
+     * Bilan auto (brief / prefetch) — langage courant, groupements, tendance,
+     * apps copilote, corrections déjà notées.
+     */
+    static String synthesizeWeeklySimple(Context ctx, List<DiagParser.DayBucket> days,
+            int requestedDays) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Petit bilan sur ").append(requestedDays).append(" jour")
+                .append(requestedDays > 1 ? "s" : "").append(" :");
+
+        int daysWithIssues = 0;
+        int totalMsg = 0;
+        Map<String, Integer> issueBuckets = new LinkedHashMap<>();
+        Map<String, Integer> failsByApp = new LinkedHashMap<>();
+        DayStats latestIssues = null;
+        DayStats previousIssues = null;
+
+        for (int i = 0; i < days.size(); i++) {
+            DiagParser.DayBucket day = days.get(i);
+            DayStats st = statsOf(day.events);
+            totalMsg += st.messages;
+            collectSimpleIssueBuckets(day.events, issueBuckets, failsByApp);
+            if (st.hasIssues()) {
+                daysWithIssues++;
+                // loadArchiveDays met aujourd'hui en premier → premier = plus récent.
+                if (latestIssues == null) {
+                    latestIssues = st;
+                } else if (previousIssues == null) {
+                    previousIssues = st;
+                }
+            }
+            sb.append("\n— ").append(simpleDayLabel(day.label)).append(" : ");
+            if (!st.hasIssues() && st.messages == 0 && st.bureauActions == 0
+                    && st.copilotIssues == 0) {
+                sb.append("rien de notable.");
+            } else if (!st.hasIssues()) {
+                sb.append(st.messages).append(" message")
+                        .append(st.messages > 1 ? "s" : "").append(", tout va bien.");
+            } else {
+                sb.append(simpleDayFriction(st));
+            }
+        }
+
+        sb.append("\n\n");
+        if (daysWithIssues == 0) {
+            sb.append("Rien de grave — ")
+                    .append(totalMsg).append(" message")
+                    .append(totalMsg > 1 ? "s" : "")
+                    .append(" au total, pas de souci marquant.");
+        } else {
+            sb.append(daysWithIssues).append(" jour")
+                    .append(daysWithIssues > 1 ? "s" : "")
+                    .append(" un peu compliqué")
+                    .append(daysWithIssues > 1 ? "s" : "").append('.');
+            String trend = simpleTrend(latestIssues, previousIssues);
+            if (!trend.isEmpty()) sb.append(' ').append(trend);
+            appendGroupedSimpleIssues(sb, issueBuckets);
+            appendFailsByApp(sb, failsByApp);
+            appendKnownCorrections(sb, ctx, issueBuckets, failsByApp);
+        }
+        return sb.toString().trim();
+    }
+
+    /** Session du jour — registre simplifié (même vocabulaire que le bilan auto). */
+    static String synthesizeSummarySimple(Context ctx, List<JSONObject> events,
+            JSONObject report) {
+        List<JSONObject> real = DiagParser.withoutStress(events);
+        if (real.isEmpty()) {
+            return "Pas encore de traces pour aujourd'hui — rien à raconter.";
+        }
+        DayStats st = statsOf(real);
+        Map<String, Integer> issueBuckets = new LinkedHashMap<>();
+        Map<String, Integer> failsByApp = new LinkedHashMap<>();
+        collectSimpleIssueBuckets(real, issueBuckets, failsByApp);
+
+        StringBuilder sb = new StringBuilder();
+        if (!st.hasIssues()) {
+            sb.append("Aujourd'hui ça a bien tourné — ")
+                    .append(st.messages).append(" message")
+                    .append(st.messages > 1 ? "s" : "").append(", pas de souci.");
+        } else {
+            sb.append("Bilan du jour : ").append(simpleDayFriction(st));
+            appendGroupedSimpleIssues(sb, issueBuckets);
+            appendFailsByApp(sb, failsByApp);
+            appendKnownCorrections(sb, ctx, issueBuckets, failsByApp);
+            if (st.slow > 0) {
+                sb.append("\nQuelques réponses ont mis du temps (mineur).");
+            }
+        }
+        if (report != null && report.optInt("anomalies_total", 0) > 0
+                && issueBuckets.isEmpty()) {
+            sb.append("\nQuelques frictions ont été notées automatiquement.");
+        }
+        return sb.toString().trim();
+    }
+
+    private static void collectSimpleIssueBuckets(List<JSONObject> events,
+            Map<String, Integer> issueBuckets, Map<String, Integer> failsByApp) {
+        if (events == null) return;
+        for (JSONObject e : events) {
+            String type = e.optString("type");
+            if ("copilot_ui".equals(type)) {
+                String kind = e.optString("kind", "");
+                if ("matcher_miss".equals(kind)) {
+                    bump(issueBuckets, "clic_manqué");
+                    String pkg = e.optString("pkg", "");
+                    if (!pkg.isEmpty()) bump(failsByApp, pkg);
+                } else if ("whitelist_block".equals(kind)) {
+                    bump(issueBuckets, "app_non_autorisée");
+                } else if ("confirm_cancel".equals(kind)) {
+                    bump(issueBuckets, "clic_annulé");
+                } else if ("a11y_unavailable".equals(kind)
+                        || "a11y_disconnected".equals(kind)) {
+                    bump(issueBuckets, "accessibilité");
+                }
+            } else if ("tool_end".equals(type) && !e.optBoolean("ok", true)) {
+                bump(issueBuckets, "outil_raté");
+            } else if ("tool_failure_ctx".equals(type)) {
+                bump(issueBuckets, "outil_raté");
+            } else if ("phantom_blocked".equals(type)) {
+                bump(issueBuckets, "fausse_annonce");
+            } else if (("reasoning_card".equals(type) || "bureau_edit".equals(type))
+                    && e.optBoolean("potentialHallucination", false)) {
+                bump(issueBuckets, "souvenir_inventé");
+            } else if ("bureau_edit".equals(type) && e.optBoolean("fallback", false)) {
+                bump(issueBuckets, "repli_bureau");
+            }
+        }
+    }
+
+    private static void appendGroupedSimpleIssues(StringBuilder sb,
+            Map<String, Integer> issueBuckets) {
+        if (issueBuckets.isEmpty()) return;
+        sb.append("\nEn gros :");
+        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(issueBuckets.entrySet());
+        sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        int n = 0;
+        for (Map.Entry<String, Integer> e : sorted) {
+            if (n++ >= MAX_ITEMS) break;
+            sb.append("\n— ").append(simpleIssuePhrase(e.getKey(), e.getValue()));
+        }
+    }
+
+    private static void appendFailsByApp(StringBuilder sb, Map<String, Integer> failsByApp) {
+        if (failsByApp.isEmpty()) return;
+        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(failsByApp.entrySet());
+        sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        Map.Entry<String, Integer> top = sorted.get(0);
+        if (top.getValue() < 1) return;
+        sb.append("\nÇa rate surtout sur ").append(appLabel(top.getKey()));
+        if (top.getValue() > 1) {
+            sb.append(" (").append(top.getValue()).append(" fois)");
+        }
+        sb.append('.');
+    }
+
+    private static void appendKnownCorrections(StringBuilder sb, Context ctx,
+            Map<String, Integer> issueBuckets, Map<String, Integer> failsByApp) {
+        if (ctx == null) return;
+        List<String> hints = new ArrayList<>();
+        for (String k : issueBuckets.keySet()) hints.add(simpleIssueHint(k));
+        for (String pkg : failsByApp.keySet()) {
+            hints.add(appLabel(pkg));
+            hints.add("copilote " + appLabel(pkg));
+            hints.add(pkg);
+        }
+        List<String> known = new ArrayList<>();
+        for (String hint : hints) {
+            String match = CorrectionsStore.findPendingMatch(ctx, hint);
+            if (match != null && !alreadyMentions(known, match)) {
+                known.add(match);
+            }
+        }
+        if (known.isEmpty()) return;
+        sb.append("\nDéjà noté, pas encore réglé :");
+        for (String k : known) {
+            if (known.indexOf(k) >= 3) break;
+            sb.append("\n— ").append(preview(k, 90));
+        }
+    }
+
+    private static String simpleTrend(DayStats latest, DayStats previous) {
+        if (latest == null || previous == null) return "";
+        int a = latest.issueScore();
+        int b = previous.issueScore();
+        if (a > b + 1) return "Le souci s'aggrave un peu.";
+        if (a + 1 < b) return "Ça s'améliore par rapport à avant.";
+        return "Le même genre de souci persiste.";
+    }
+
+    private static String simpleDayFriction(DayStats st) {
+        List<String> parts = new ArrayList<>();
+        parts.add(st.messages + " message" + (st.messages > 1 ? "s" : ""));
+        if (st.copilotIssues > 0) {
+            parts.add(st.copilotIssues + " souci"
+                    + (st.copilotIssues > 1 ? "s" : "") + " copilote");
+        }
+        if (st.toolFails > st.copilotIssues) {
+            int other = st.toolFails - st.copilotIssues;
+            if (other > 0) {
+                parts.add(other + " outil" + (other > 1 ? "s" : "") + " qui a raté");
+            }
+        } else if (st.toolFails > 0 && st.copilotIssues == 0) {
+            parts.add(st.toolFails + " truc" + (st.toolFails > 1 ? "s" : "") + " qui a raté");
+        }
+        if (st.phantom > 0) {
+            parts.add(st.phantom > 1 ? "quelques fausses annonces bloquées"
+                    : "une fausse annonce bloquée");
+        }
+        if (st.hallucinations > 0) {
+            parts.add(st.hallucinations > 1
+                    ? "des souvenirs inventés"
+                    : "un souvenir inventé");
+        }
+        if (st.bureauFallbacks > 0) parts.add("repli bureau");
+        if (st.errors > 0) parts.add("erreurs");
+        return joinFr(parts) + ".";
+    }
+
+    private static String simpleIssuePhrase(String key, int count) {
+        String base;
+        switch (key) {
+            case "clic_manqué":
+                base = count > 1
+                        ? count + " fois le même souci : je ne trouvais pas quoi cliquer"
+                        : "je ne trouvais pas quoi cliquer";
+                break;
+            case "app_non_autorisée":
+                base = "une appli n'était pas autorisée pour le copilote";
+                break;
+            case "clic_annulé":
+                base = "un clic a été annulé";
+                break;
+            case "accessibilité":
+                base = "le contrôle d'écran n'était pas prêt";
+                break;
+            case "outil_raté":
+                base = count > 1
+                        ? count + " fois un outil a raté"
+                        : "un outil a raté";
+                break;
+            case "fausse_annonce":
+                base = "j'allais dire que c'était fait sans l'avoir fait (corrigé)";
+                break;
+            case "souvenir_inventé":
+                base = "j'ai inventé un souvenir — mineur, à surveiller";
+                break;
+            case "repli_bureau":
+                base = "le bureau a dû se débrouiller sans le cloud";
+                break;
+            default:
+                base = key;
+        }
+        return capitalize(base) + ".";
+    }
+
+    private static String simpleIssueHint(String key) {
+        switch (key) {
+            case "clic_manqué": return "copilote clic";
+            case "accessibilité": return "accessibilité";
+            case "outil_raté": return "outil";
+            case "souvenir_inventé": return "hallucination";
+            case "fausse_annonce": return "fantôme";
+            default: return key.replace('_', ' ');
+        }
+    }
+
+    private static String simpleDayLabel(String label) {
+        if (label == null || label.isEmpty()) return "jour";
+        return label;
+    }
+
+    static String appLabel(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return "une appli";
+        String p = pkg.toLowerCase(Locale.ROOT);
+        if (p.contains("whatsapp")) return "WhatsApp";
+        if (p.contains("chrome")) return "Chrome";
+        if (p.contains("instagram")) return "Instagram";
+        if (p.contains("telegram")) return "Telegram";
+        if (p.contains("youtube")) return "YouTube";
+        if (p.contains("spotify")) return "Spotify";
+        if (p.contains("facebook") || p.contains("messenger")) return "Messenger";
+        int dot = pkg.lastIndexOf('.');
+        if (dot >= 0 && dot + 1 < pkg.length()) {
+            String last = pkg.substring(dot + 1);
+            if (last.length() > 1) {
+                return Character.toUpperCase(last.charAt(0)) + last.substring(1);
+            }
+            return last;
+        }
+        return pkg;
+    }
+
+    private static void bump(Map<String, Integer> map, String key) {
+        if (key == null || key.isEmpty()) return;
+        map.merge(key, 1, Integer::sum);
     }
 
     static String synthesizeHesitations(List<JSONObject> events) {
@@ -459,6 +763,19 @@ public final class DiagNlGenerator {
                 case "error":
                     st.errors++;
                     break;
+                case "copilot_ui": {
+                    String kind = e.optString("kind", "");
+                    if ("matcher_miss".equals(kind) || "whitelist_block".equals(kind)
+                            || "a11y_unavailable".equals(kind)
+                            || "a11y_disconnected".equals(kind)
+                            || "confirm_cancel".equals(kind)) {
+                        st.copilotIssues++;
+                        st.toolFails++;
+                    } else if ("confirm_ask".equals(kind)) {
+                        st.hesitations++;
+                    }
+                    break;
+                }
                 default:
                     break;
             }
@@ -546,6 +863,10 @@ public final class DiagNlGenerator {
             case "script_history_polluted": return "historique pollué";
             case "past_reference_no_source": return "hallucination (passé sans source)";
             case "phantom_action": return "action fantôme";
+            case "copilot_matcher_miss": return "copilote (cible introuvable)";
+            case "copilot_whitelist_block": return "copilote (whitelist)";
+            case "copilot_confirm_stale": return "copilote (confirm sans réponse)";
+            case "copilot_a11y_down": return "copilote (accessibilité)";
             default: return type;
         }
     }
@@ -574,12 +895,19 @@ public final class DiagNlGenerator {
         int bureauActions;
         int errors;
         int slow;
+        int copilotIssues;
         long p95 = -1;
 
         boolean hasIssues() {
             return toolFails > 0 || hesitations > 0 || phantom > 0
                     || hallucinations > 0
-                    || bureauFallbacks > 0 || errors > 0 || slow > 0;
+                    || bureauFallbacks > 0 || errors > 0 || slow > 0
+                    || copilotIssues > 0;
+        }
+
+        int issueScore() {
+            return toolFails + hesitations + phantom + hallucinations
+                    + bureauFallbacks + errors + (slow > 0 ? 1 : 0);
         }
     }
 

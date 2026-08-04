@@ -20,19 +20,28 @@ public final class ConversationHistorySelector {
 
     public static List<ChatBackend.Turn> selectForPrompt(Context context,
             List<ChatBackend.Turn> fullHistory, String userMessage) {
+        return selectForPrompt(context, fullHistory, userMessage, RECENT_TURN_LIMIT);
+    }
+
+    public static List<ChatBackend.Turn> selectForPrompt(Context context,
+            List<ChatBackend.Turn> fullHistory, String userMessage, int recentTurnLimit) {
         if (fullHistory == null || fullHistory.isEmpty()) {
             return Collections.emptyList();
         }
         List<ChatBackend.Turn> cleaned = ConversationHistorySanitizer.stripPoisonTurns(fullHistory);
         if (cleaned.isEmpty()) return Collections.emptyList();
-        int recentStart = Math.max(0, cleaned.size() - RECENT_TURN_LIMIT);
+        int limit = recentTurnLimit > 0 ? recentTurnLimit : RECENT_TURN_LIMIT;
+        int recentStart = Math.max(0, cleaned.size() - limit);
         List<ChatBackend.Turn> recent = new ArrayList<>(
                 cleaned.subList(recentStart, cleaned.size()));
 
         if (recentStart == 0) return recent;
 
         List<ChatBackend.Turn> older = cleaned.subList(0, recentStart);
-        List<ChatBackend.Turn> extras = findRelevantOlder(older, userMessage);
+        int extrasMax = limit <= 3 ? 0 : MAX_EXTRA_RELEVANT;
+        List<ChatBackend.Turn> extras = extrasMax == 0
+                ? Collections.emptyList()
+                : findRelevantOlder(older, userMessage);
         if (extras.isEmpty()) return recent;
 
         List<ChatBackend.Turn> out = new ArrayList<>(extras);

@@ -16,5 +16,13 @@ public enum DiagCategory {
     /** Latence LLM &gt; 5 s. */
     SLOW_RESPONSE,
     /** Repli local / modèle de secours. */
-    FALLBACK_USED
+    FALLBACK_USED,
+    /** Copilote : cible UI introuvable (matcher). */
+    COPILOT_MATCHER,
+    /** Copilote : app hors whitelist. */
+    COPILOT_WHITELIST,
+    /** Copilote : confirmation Oui/Non (ask / cancel / stale). */
+    COPILOT_CONFIRM,
+    /** Copilote : service d'accessibilité indisponible ou coupé. */
+    COPILOT_A11Y
 }

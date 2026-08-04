@@ -8,13 +8,17 @@ import com.pegasuscorp.orbe.tools.Tool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 
 import android.content.Context;
+import android.text.TextUtils;
 
+import com.pegasuscorp.orbe.notepad.NotepadDateHelper;
 import com.pegasuscorp.orbe.notepad.NotepadStore;
+import com.pegasuscorp.orbe.objects.ProjectObjectStore;
+import com.pegasuscorp.orbe.voice.SpeechInputNormalizer;
 
 import org.json.JSONObject;
 
 /**
- * Bloc-notes : liste des choses à faire.
+ * Bloc-notes : notes / rappels (dueDate ≠ reminderAt).
  */
 public final class NotepadTool implements Tool {
 
@@ -30,19 +34,22 @@ public final class NotepadTool implements Tool {
 
     @Override
     public String description() {
-        return "notepad(action:add|list|remove|done|clear, text:string OBLIGATOIRE pour add, "
-                + "due_date?:string, priority?:0-2, reminder_at?:number) — "
-                + "Bloc-notes personnel (tâches / liste). "
+        return "notepad(action:add|list|list_history|list_tomorrow|remove|done|clear, "
+                + "text:string OBLIGATOIRE pour add, due_date?:yyyy-MM-dd, "
+                + "reminder_at?:epoch_ms, projet_tag?:str) — "
+                + "Bloc-notes personnel. "
                 + "RÈGLE STRICTE add : NE JAMAIS noter une phrase informative ou conversationnelle. "
                 + "Exemple à NE PAS noter : « j'ai un buffet avec des courgettes » = information, pas une demande. "
                 + "UNIQUEMENT action=add si l'utilisateur utilise EXPLICITEMENT : "
                 + "« note », « ajoute », « écris », « rappelle-moi », « mets dans la liste ». "
                 + "Si le doute existe → NE PAS appeler add : DEMANDER confirmation avant de noter. "
                 + "Pour action=add : text = contenu exact à noter. "
+                + "Rappel sans heure : passer is_reminder:true (ou due_date) — le device "
+                + "applique un défaut (dans 1 h, ou 9 h si un jour est donné) et l'annonce. "
                 + "EXEMPLE valide : {\"tool\":\"notepad\",\"params\":{\"action\":\"add\","
                 + "\"text\":\"Courgette, huile d'olive\"}} (après « note courgette… »). "
                 + "Ne jamais appeler add sans text. "
-                + "list pour lire, done pour cocher, remove pour supprimer. "
+                + "list = résumé actif/proche ; list_history = historique ; done / remove / clear. "
                 + "NE PAS confondre avec memory (mémoire long terme).";
     }
 
@@ -53,13 +60,15 @@ public final class NotepadTool implements Tool {
 
         switch (action) {
             case "list":
-            case "list_tomorrow": {
-                String speech = "list_tomorrow".equals(action)
-                        ? store.formatForTomorrow()
-                        : store.formatForSpeech();
-                cb.onSuccess(ToolResult.text(speech));
+                cb.onSuccess(ToolResult.text(store.formatSummary()));
                 break;
-            }
+            case "list_tomorrow":
+                cb.onSuccess(ToolResult.text(store.formatForTomorrow()));
+                break;
+            case "list_history":
+            case "history":
+                cb.onSuccess(ToolResult.text(store.formatHistorySpeech()));
+                break;
             case "add": {
                 String text = params.optString("text", "").trim();
                 if (text.isEmpty()) {
@@ -67,10 +76,30 @@ public final class NotepadTool implements Tool {
                     return;
                 }
                 String due = params.optString("due_date", "").trim();
-                int priority = params.optInt("priority", 0);
                 long reminderAt = params.optLong("reminder_at", 0);
-                if (store.add(text, due, priority, reminderAt)) {
-                    cb.onSuccess(ToolResult.text("C'est noté, j'ai ajouté « " + text + " » à ta liste."));
+                String fold = SpeechInputNormalizer.fold(text).replace('\'', ' ');
+                boolean forceReminder = params.optBoolean("is_reminder", false)
+                        || params.optBoolean("reminder", false)
+                        || reminderAt > 0
+                        || !due.isEmpty();
+                NotepadDateHelper.ReminderResolution res = NotepadDateHelper.resolveReminder(
+                        text, fold, due, reminderAt, forceReminder);
+                String tag = params.optString("projet_tag", "").trim();
+                if (tag.isEmpty()) {
+                    tag = ProjectObjectStore.getInstance(ctx).bestEffortTagFor(text);
+                }
+                NotepadStore.Item item = store.add(text, res.dueDate, res.reminderAt, tag, res);
+                if (item != null) {
+                    StringBuilder reply = new StringBuilder("C'est noté, j'ai ajouté « ")
+                            .append(text).append(" »");
+                    if (!TextUtils.isEmpty(res.spokenWhen)) {
+                        reply.append(" — je te rappelle ").append(res.spokenWhen);
+                    } else if (!res.dueDate.isEmpty()) {
+                        reply.append(" pour ")
+                                .append(NotepadDateHelper.formatDateLabel(res.dueDate));
+                    }
+                    reply.append(".");
+                    cb.onSuccess(ToolResult.text(reply.toString()));
                 } else {
                     cb.onError("Je n'ai pas pu ajouter cet élément.");
                 }
@@ -108,7 +137,7 @@ public final class NotepadTool implements Tool {
                 cb.onSuccess(ToolResult.text("Ta liste des choses à faire est vide."));
                 break;
             default:
-                cb.onSuccess(ToolResult.text(store.formatForSpeech()));
+                cb.onSuccess(ToolResult.text(store.formatSummary()));
                 break;
         }
     }

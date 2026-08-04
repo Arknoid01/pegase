@@ -26,7 +26,7 @@ public final class UiExplainTool implements Tool {
 
     @Override
     public ToolTag tag() {
-        return ToolTag.DEVICE;
+        return ToolTag.UI;
     }
 
     @Override

@@ -197,6 +197,8 @@ public class ToolRegistry {
                     + "(actualité / prix / scores — plusieurs sources)\n");
             sb.append("  Foot/sport→ {\"tool\":\"search\",\"params\":{\"query\":\"PSG dernier match résultat\","
                     + "\"question\":\"Quel est le dernier match du PSG ?\"}}\n");
+        }
+        if (tags.contains(ToolTag.F1)) {
             sb.append("  F1        → {\"tool\":\"f1\",\"params\":{\"action\":\"debrief\",\"mode\":\"quick\"}} "
                     + "(« tu en as pensé quoi du GP », débrief, stratégie — fiche OpenF1, pas search)\n");
             sb.append("  F1 refresh→ {\"tool\":\"f1\",\"params\":{\"action\":\"refresh\"}}\n");
@@ -298,10 +300,28 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.DEVICE)) {
             sb.append("  Téléphone → {\"tool\":\"device\",\"params\":{\"action\":\"battery\"}} "
                     + "ou action:\"time\" / \"date\"\n");
-            sb.append("  UI copilote→ {\"tool\":\"ui_action\",\"params\":{\"action\":\"click\","
-                    + "\"target\":\"Astronomie et espace\"}} — un seul champ target "
-                    + "(libellé visible) ; le device matche tout seul ; type/scroll/back ; "
+        }
+        if (tags.contains(ToolTag.UI)) {
+            sb.append("  UI copilote→ click seul : {\"tool\":\"ui_action\",\"params\":"
+                    + "{\"action\":\"click\",\"target\":\"Astronomie et espace\"}} "
+                    + "(libellé visible, jamais viewId) ; type/scroll/back. "
+                    + "Phrase multi (ouvre+clique+tape) : UNE ui_action avec "
+                    + "steps:[{action:\"open\",name:\"Chrome\"},"
+                    + "{action:\"click\",target:\"barre d'adresse\"},"
+                    + "{action:\"type\",value:\"Wikipedia\"}] — name=libellé app "
+                    + "(pas package com.xxx), pas N appels, pas open_app seul. "
                     + "ui_explain / ui_search sur élément visible\n");
+            sb.append("  Cursor micro→ {\"tool\":\"copilot_action\",\"params\":"
+                    + "{\"action\":\"cursor_mic\"}} ou ui_action click target micro "
+                    + "(page cursor.com)\n");
+        }
+        if (tags.contains(ToolTag.LIFE_PATTERN)) {
+            sb.append("  Rythme    → {\"tool\":\"life_pattern\",\"params\":{\"action\":\"add\","
+                    + "\"utterance\":\"ajoute un rythme ménage de 18h30 à 19h45\"}}\n");
+        }
+        if (tags.contains(ToolTag.PROJECT_OBJECT)) {
+            sb.append("  Fiche projet→ {\"tool\":\"project_object\",\"params\":{\"action\":\"add\","
+                    + "\"label\":\"cuisine\",\"status\":\"en cours\"}}\n");
         }
         if (tags.contains(ToolTag.NAVIGATION)) {
             sb.append("  Navigation→ {\"tool\":\"navigation\",\"params\":{\"destination\":\"Lyon\"}}\n");

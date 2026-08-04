@@ -72,6 +72,7 @@ public class MemoryRepository implements MemoryStore {
         sessionsFile = new File(memoryDir, "sessions.json");
         turnsFile = new File(memoryDir, "recent_turns.json");
         loadAll();
+        purgeEphemeralNoise();
         seedDefaultsIfEmpty();
         backfillGraphLinks();
         applyNaturalDecayIfDue(System.currentTimeMillis());
@@ -364,6 +365,10 @@ public class MemoryRepository implements MemoryStore {
 
     public void addPermanentMemory(MemoryEntry entry) {
         if (entry == null) return;
+        if (EphemeralMemoryFilter.isNoise(entry.content)) {
+            Log.d(TAG, "Souvenir éphemère ignoré: " + entry.content);
+            return;
+        }
         MemoryLinker.autoLink(appContext, entry);
         for (MemoryEntry existing : permanentMemories) {
             MemoryGraph.linkSharedEntities(entry, existing);
@@ -648,6 +653,26 @@ public class MemoryRepository implements MemoryStore {
         permanentMemories = readPermanent();
         sessionSummaries = readSessions();
         recentTurns = readTurns();
+    }
+
+    /** Retire les accusés d'outils déjà stockés par erreur (clics UI, etc.). */
+    private void purgeEphemeralNoise() {
+        List<MemoryEntry> kept = new ArrayList<>();
+        List<MemoryEntry> dropped = new ArrayList<>();
+        for (MemoryEntry e : permanentMemories) {
+            if (e != null && EphemeralMemoryFilter.isNoise(e.content)) {
+                dropped.add(e);
+            } else if (e != null) {
+                kept.add(e);
+            }
+        }
+        if (dropped.isEmpty()) return;
+        permanentMemories = kept;
+        savePermanent();
+        for (MemoryEntry e : dropped) {
+            deleteVectorAsync(e);
+            Log.d(TAG, "Purge éphémère: " + e.content);
+        }
     }
 
     private List<MemoryEntry> readPermanent() {

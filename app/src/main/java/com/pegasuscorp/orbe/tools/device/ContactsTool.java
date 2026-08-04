@@ -33,10 +33,8 @@ public final class ContactsTool implements Tool {
     @Override
     public String description() {
         return "contacts(action:\"search\"|\"call\"|\"sms\", query:str, message?:str) — "
-                + "Cherche un contact (READ_CONTACTS). "
-                + "search=liste les correspondances ; call=ouvre le composeur d'appel ; "
-                + "sms=ouvre le composeur SMS (message optionnel). "
-                + "Exemple : {\"tool\":\"contacts\",\"params\":{\"action\":\"search\",\"query\":\"maman\"}}.";
+                + "Contact (READ_CONTACTS). search=liste ; call/sms=composeur "
+                + "(message optionnel pour sms).";
     }
 
     @Override

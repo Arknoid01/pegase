@@ -339,7 +339,103 @@ public final class DiagReport {
         for (JSONObject a : detectBureauLlmFallback(events)) anomalies.put(a);
         for (JSONObject a : detectBureauLlmError(events)) anomalies.put(a);
         for (JSONObject a : detectPastReferenceHallucination(events)) anomalies.put(a);
+        for (JSONObject a : detectCopilotMatcherMiss(events)) anomalies.put(a);
+        for (JSONObject a : detectCopilotWhitelistBlock(events)) anomalies.put(a);
+        for (JSONObject a : detectCopilotConfirmStale(events)) anomalies.put(a);
+        for (JSONObject a : detectCopilotA11yDown(events)) anomalies.put(a);
         return anomalies;
+    }
+
+    /** Cible UI introuvable (events {@code copilot_ui} kind=matcher_miss). */
+    static List<JSONObject> detectCopilotMatcherMiss(List<JSONObject> events) {
+        List<JSONObject> out = new ArrayList<>();
+        if (events == null) return out;
+        for (JSONObject e : events) {
+            if (!isCopilotKind(e, "matcher_miss")) continue;
+            String pkg = e.optString("pkg", "");
+            String target = e.optString("target", "");
+            out.add(anomaly("copilot_matcher_miss", "medium", e.optLong("t"),
+                    "Copilote : élément introuvable"
+                            + (target.isEmpty() ? "" : " (« " + target + " »)")
+                            + (pkg.isEmpty() ? "" : " sur " + pkg) + ".",
+                    map("pkg", pkg, "target", target,
+                            "reason", e.optString("reason"),
+                            "detail", e.optString("detail"))));
+        }
+        return out;
+    }
+
+    /** App hors whitelist copilote. */
+    static List<JSONObject> detectCopilotWhitelistBlock(List<JSONObject> events) {
+        List<JSONObject> out = new ArrayList<>();
+        if (events == null) return out;
+        for (JSONObject e : events) {
+            if (!isCopilotKind(e, "whitelist_block")) continue;
+            String pkg = e.optString("pkg", "");
+            out.add(anomaly("copilot_whitelist_block", "low", e.optLong("t"),
+                    "Copilote : app non autorisée"
+                            + (pkg.isEmpty() ? "." : " (" + pkg + ")."),
+                    map("pkg", pkg, "reason", e.optString("reason"))));
+        }
+        return out;
+    }
+
+    /**
+     * Confirmation Oui/Non sans réponse dans ~2 min
+     * (confirm_ask sans confirm_ok / confirm_cancel appariés).
+     */
+    static List<JSONObject> detectCopilotConfirmStale(List<JSONObject> events) {
+        List<JSONObject> out = new ArrayList<>();
+        if (events == null || events.isEmpty()) return out;
+        final long windowMs = 120_000L;
+        List<JSONObject> pending = new ArrayList<>();
+        long endT = events.get(events.size() - 1).optLong("t", System.currentTimeMillis());
+        for (JSONObject e : events) {
+            if (!"copilot_ui".equals(e.optString("type"))) continue;
+            String kind = e.optString("kind", "");
+            if ("confirm_ask".equals(kind)) {
+                pending.add(e);
+            } else if ("confirm_ok".equals(kind) || "confirm_cancel".equals(kind)) {
+                if (!pending.isEmpty()) pending.remove(0);
+            }
+        }
+        for (JSONObject ask : pending) {
+            long t = ask.optLong("t");
+            if (endT - t < windowMs) continue;
+            out.add(anomaly("copilot_confirm_stale", "medium", t,
+                    "Copilote : confirmation Oui/Non sans réponse"
+                            + (ask.optString("target").isEmpty() ? "."
+                            : " (« " + ask.optString("target") + " »)."),
+                    map("pkg", ask.optString("pkg"),
+                            "target", ask.optString("target"),
+                            "detail", ask.optString("detail"))));
+        }
+        return out;
+    }
+
+    /** Service d'accessibilité off / déconnecté. */
+    static List<JSONObject> detectCopilotA11yDown(List<JSONObject> events) {
+        List<JSONObject> out = new ArrayList<>();
+        if (events == null) return out;
+        for (JSONObject e : events) {
+            if (!"copilot_ui".equals(e.optString("type"))) continue;
+            String kind = e.optString("kind", "");
+            if (!"a11y_unavailable".equals(kind) && !"a11y_disconnected".equals(kind)) {
+                continue;
+            }
+            out.add(anomaly("copilot_a11y_down", "high", e.optLong("t"),
+                    "Copilote : accessibilité indisponible ("
+                            + e.optString("reason", kind) + ").",
+                    map("kind", kind, "reason", e.optString("reason"),
+                            "detail", e.optString("detail"))));
+        }
+        return out;
+    }
+
+    private static boolean isCopilotKind(JSONObject e, String kind) {
+        return e != null
+                && "copilot_ui".equals(e.optString("type"))
+                && kind.equals(e.optString("kind"));
     }
 
     /**

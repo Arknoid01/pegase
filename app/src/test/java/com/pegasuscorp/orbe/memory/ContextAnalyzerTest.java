@@ -64,11 +64,106 @@ public class ContextAnalyzerTest {
         assertFalse(tools.contains(ToolTag.SPOTIFY));
     }
 
+    /**
+     * Garde-fou post-daily : general ambigu élargit au set quotidien volontaire,
+     * pas à tout le registre (Orion/diag/files gonflent Groq).
+     */
     @Test
-    public void toolsFor_ambiguousGeneralIncludesAll() {
+    public void toolsFor_ambiguousGeneralUsesDailySubsetNotFullRegistry() {
         String fold = SpeechInputNormalizer.fold("Dis-moi des trucs").replace('\'', ' ');
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
-        assertEquals(EnumSet.allOf(ToolTag.class), tools);
+        EnumSet<ToolTag> daily = ContextAnalyzer.dailyToolTags();
+
+        assertEquals("general ambigu → exactement le set daily", daily, tools);
+        assertNotEquals("ne doit pas renvoyer tout le registre",
+                EnumSet.allOf(ToolTag.class), tools);
+        assertTrue("daily doit rester un vrai sous-ensemble",
+                daily.size() < ToolTag.values().length);
+
+        // Hors chemin quotidien — ne doivent jamais glisser dans general ambigu.
+        assertFalse(tools.contains(ToolTag.ORION_MANAGER));
+        assertFalse(tools.contains(ToolTag.ORION_CODE));
+        assertFalse(tools.contains(ToolTag.GIT_COMMIT));
+        assertFalse(tools.contains(ToolTag.DIAG));
+        assertFalse(tools.contains(ToolTag.FILES));
+        assertFalse(tools.contains(ToolTag.CREATE_FILE));
+        // Étape 2 tags : UI / F1 / life / project hors daily ; CALENDAR mort.
+        assertFalse(tools.contains(ToolTag.UI));
+        assertFalse(tools.contains(ToolTag.F1));
+        assertFalse(tools.contains(ToolTag.LIFE_PATTERN));
+        assertFalse(tools.contains(ToolTag.PROJECT_OBJECT));
+        assertFalse(tools.contains(ToolTag.CALENDAR));
+
+        // Cœur daily toujours présent (régression si quelqu'un vide DAILY_TOOLS).
+        assertTrue(tools.contains(ToolTag.NOTEPAD));
+        assertTrue(tools.contains(ToolTag.DEVICE));
+        assertTrue(tools.contains(ToolTag.WEATHER));
+        assertTrue(tools.contains(ToolTag.SEARCH));
+        assertTrue(tools.contains(ToolTag.WIKIPEDIA));
+        assertTrue(tools.contains(ToolTag.CALL));
+        assertTrue(tools.contains(ToolTag.AGENDA));
+    }
+
+    @Test
+    public void toolsFor_f1PhraseAddsF1NotViaSearchAlone() {
+        String fold = SpeechInputNormalizer.fold("Tu en as pensé quoi du GP ?")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeF1(fold));
+        EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
+        assertTrue(tools.contains(ToolTag.F1));
+        // Pas d'actualité → pas SEARCH forcé par le seul « f1/gp ».
+        assertFalse(tools.contains(ToolTag.SEARCH));
+    }
+
+    @Test
+    public void toolsFor_uiPhraseAddsUiNotInDaily() {
+        String fold = SpeechInputNormalizer.fold("Clique sur le bouton micro")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeUi(fold));
+        EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
+        assertTrue(tools.contains(ToolTag.UI));
+        assertFalse(ContextAnalyzer.dailyToolTags().contains(ToolTag.UI));
+    }
+
+    @Test
+    public void looksLikeUi_realisticIconAndScreenPhrases() {
+        String[] mustMatch = {
+                "Ouvre l'icône Astronomie",
+                "Ouvre l icone",
+                "Appuie sur l'icône",
+                "Tape sur le bouton",
+                "Explique ce qui est a l ecran",
+                "Active le micro",
+                "Lance la saisie vocale",
+        };
+        for (String p : mustMatch) {
+            String fold = SpeechInputNormalizer.fold(p).replace('\'', ' ');
+            assertTrue("looksLikeUi: " + p, IntentDetector.looksLikeUi(fold));
+            assertTrue("UI tag: " + p,
+                    ContextAnalyzer.toolsFor("general", fold).contains(ToolTag.UI));
+        }
+        // open_app — ne doit pas tirer UI
+        String openApp = SpeechInputNormalizer.fold("Ouvre Cursor").replace('\'', ' ');
+        assertFalse(IntentDetector.looksLikeUi(openApp));
+        // multi-étape ouvre + clique/tape → UI (pas short-circuit open_app)
+        String multi = SpeechInputNormalizer.fold(
+                "Ouvre Chrome, clique Rechercher, tape Wikipedia")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeUi(multi));
+        String openTape = SpeechInputNormalizer.fold("Ouvre Chrome et tape Wikipedia")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeUi(openTape));
+    }
+
+    @Test
+    public void toolsFor_lifePatternSeparateFromBrief() {
+        String fold = SpeechInputNormalizer.fold(
+                        "Ajoute un rythme ménage de 18h30 à 19h45")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeLifePattern(fold));
+        EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
+        assertTrue(tools.contains(ToolTag.LIFE_PATTERN));
+        assertFalse(tools.contains(ToolTag.BRIEF));
     }
 
     @Test
@@ -262,6 +357,7 @@ public class ContextAnalyzerTest {
         assertFalse(IntentDetector.looksLikeEncyclopedic(fold));
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("fresh_data", fold);
         assertTrue(tools.contains(ToolTag.SEARCH));
+        assertTrue("actualité F1 → SEARCH + compagnon F1", tools.contains(ToolTag.F1));
     }
 
     @Test

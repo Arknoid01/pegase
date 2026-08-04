@@ -205,7 +205,7 @@ public final class CopilotBubblePanel extends FrameLayout {
 
     public void setSending(boolean sending) {
         this.sending = sending;
-        input.setEnabled(!sending);
+        if (input != null) input.setEnabled(!sending);
     }
 
     public void addUserMessage(String text) {

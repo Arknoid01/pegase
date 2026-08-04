@@ -38,7 +38,7 @@ public final class F1CompanionTool implements Tool {
 
     @Override
     public ToolTag tag() {
-        return ToolTag.SEARCH;
+        return ToolTag.F1;
     }
 
     @Override

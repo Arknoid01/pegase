@@ -34,10 +34,7 @@ public final class DeviceTool implements Tool {
     @Override
     public String description() {
         return "device(action:string) — Infos téléphone. "
-                + "action obligatoire : battery (niveau de charge), time (heure), date (jour). "
-                + "Pour « batterie / charge » → action=battery. "
-                + "Pour « quelle heure » → action=time. "
-                + "Pour « quelle date / quel jour » → action=date.";
+                + "action obligatoire : battery | time | date.";
     }
 
     @Override

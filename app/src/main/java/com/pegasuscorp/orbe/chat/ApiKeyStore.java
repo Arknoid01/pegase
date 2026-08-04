@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.chat;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.text.TextUtils;
 
 /**
@@ -238,6 +239,7 @@ public final class ApiKeyStore {
     // --- Localisation de l'utilisateur (pour la météo) ---
     private static final String KEY_USER_CITY   = "user_city";
     private static final String KEY_USER_COORDS = "user_coords"; // "lat,lon"
+    private static final String KEY_USER_COORDS_UPDATED_MS = "user_coords_updated_ms";
 
     public static String getUserCity(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -252,7 +254,20 @@ public final class ApiKeyStore {
                 .getString(KEY_USER_COORDS, "").trim();
     }
     public static void setUserCoords(Context context, String coords) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_USER_COORDS, coords == null ? "" : coords.trim()).apply();
+        String trimmed = coords == null ? "" : coords.trim();
+        SharedPreferences.Editor ed = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_USER_COORDS, trimmed);
+        if (trimmed.isEmpty()) {
+            ed.remove(KEY_USER_COORDS_UPDATED_MS);
+        } else {
+            ed.putLong(KEY_USER_COORDS_UPDATED_MS, System.currentTimeMillis());
+        }
+        ed.apply();
+    }
+
+    /** Epoch millis du dernier enregistrement de {@link #setUserCoords}, ou 0 si inconnu. */
+    public static long getUserCoordsUpdatedMs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_USER_COORDS_UPDATED_MS, 0L);
     }
 }

@@ -7,6 +7,7 @@ import android.net.Uri;
 import androidx.core.content.FileProvider;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
+import com.pegasuscorp.orbe.tools.ToolTag;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -14,6 +15,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -424,6 +426,66 @@ public final class Trace {
     }
 
     /**
+     * Répartition du prompt avant POST (chars ≈ tokens×4).
+     * Parts : system, history, user, tools, total + budget_level.
+     */
+    public static void promptBudget(String provider, String model, String budgetLevel,
+            int systemChars, int historyChars, int userChars, int toolsChars, int totalChars) {
+        promptBudget(provider, model, budgetLevel, systemChars, historyChars, userChars,
+                toolsChars, totalChars, null);
+    }
+
+    /**
+     * Comme {@link #promptBudget(String, String, String, int, int, int, int, int)} + tags
+     * autorisés (vérif UI/F1/life/project conditionnels).
+     */
+    public static void promptBudget(String provider, String model, String budgetLevel,
+            int systemChars, int historyChars, int userChars, int toolsChars, int totalChars,
+            EnumSet<ToolTag> allowedTools) {
+        JSONObject o = base("llm_prompt_budget");
+        put(o, "provider", provider);
+        put(o, "model", model);
+        put(o, "budget_level", budgetLevel);
+        try {
+            o.put("system_chars", Math.max(0, systemChars));
+            o.put("history_chars", Math.max(0, historyChars));
+            o.put("user_chars", Math.max(0, userChars));
+            o.put("tools_chars", Math.max(0, toolsChars));
+            o.put("total_chars", Math.max(0, totalChars));
+            o.put("est_tokens", Math.max(0, totalChars) / 4);
+            if (allowedTools != null && !allowedTools.isEmpty()) {
+                JSONArray tags = new JSONArray();
+                for (ToolTag t : allowedTools) {
+                    tags.put(t.name());
+                }
+                o.put("allowed_tags", tags);
+                o.put("tags_count", allowedTools.size());
+                o.put("has_ui", allowedTools.contains(ToolTag.UI));
+                o.put("has_f1", allowedTools.contains(ToolTag.F1));
+                o.put("has_life_pattern", allowedTools.contains(ToolTag.LIFE_PATTERN));
+                o.put("has_project_object", allowedTools.contains(ToolTag.PROJECT_OBJECT));
+            }
+        } catch (Exception ignored) {
+        }
+        write(o);
+    }
+
+    /** Coût d'un retry shrink 413 (mesure p95). */
+    public static void prompt413Shrink(String provider, String model, long firstAttemptMs,
+            boolean retried, long shrinkRetryMs) {
+        JSONObject o = base("llm_413_shrink");
+        put(o, "provider", provider);
+        put(o, "model", model);
+        try {
+            o.put("first_attempt_ms", Math.max(0L, firstAttemptMs));
+            o.put("retried", retried);
+            o.put("413_shrink_retry_ms", Math.max(0L, shrinkRetryMs));
+        } catch (Exception ignored) {
+        }
+        write(o);
+    }
+
+    /**
      * Callback LLM ignoré — tour utilisateur plus récent entre-temps.
      * Explique un {@code provider_used} sans {@code llm_reply} associé.
      */
@@ -464,6 +526,47 @@ public final class Trace {
         put(o, "user_msg", truncateUserMsg(userMessage));
         put(o, "category", DiagCategory.FAILURE.name());
         write(o);
+    }
+
+    /**
+     * Événement copilote UI (matcher, whitelist, confirm, a11y).
+     * Event {@code type=copilot_ui}.
+     *
+     * @param kind {@code matcher_miss}, {@code whitelist_block}, {@code confirm_ask},
+     *             {@code confirm_ok}, {@code confirm_cancel}, {@code a11y_unavailable},
+     *             {@code a11y_disconnected}
+     */
+    public static void copilotUi(String kind, String reason, String detail,
+            String pkg, String target) {
+        JSONObject o = base("copilot_ui");
+        put(o, "kind", kind != null ? kind : "");
+        put(o, "tool", "ui_action");
+        put(o, "reason", reason != null ? reason : "");
+        put(o, "detail", detail != null ? detail : "");
+        put(o, "pkg", pkg != null ? pkg : "");
+        put(o, "target", truncateUserMsg(target));
+        put(o, "category", copilotCategory(kind).name());
+        write(o);
+    }
+
+    private static DiagCategory copilotCategory(String kind) {
+        if (kind == null) return DiagCategory.FAILURE;
+        switch (kind) {
+            case "matcher_miss":
+                return DiagCategory.COPILOT_MATCHER;
+            case "whitelist_block":
+                return DiagCategory.COPILOT_WHITELIST;
+            case "confirm_ask":
+            case "confirm_ok":
+            case "confirm_cancel":
+                return DiagCategory.COPILOT_CONFIRM;
+            case "a11y_unavailable":
+            case "a11y_disconnected":
+            case "a11y_lifecycle":
+                return DiagCategory.COPILOT_A11Y;
+            default:
+                return DiagCategory.FAILURE;
+        }
     }
 
     /** Attend que la file d'écriture async soit drainée (tests). */

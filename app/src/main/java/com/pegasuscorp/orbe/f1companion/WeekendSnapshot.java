@@ -5,6 +5,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -99,11 +100,55 @@ public final class WeekendSnapshot {
         return !results.isEmpty();
     }
 
+    /**
+     * Classement course : P1…Pn puis DNF/DNS/DSQ (position ≤ 0 ou flags).
+     * OpenF1 met souvent {@code position: 0} sur les abandons — un tri naïf
+     * les place avant le vainqueur et casse le podium.
+     */
+    public static final Comparator<ResultRow> RACE_RESULT_ORDER = (a, b) -> {
+        int pa = classificationRank(a);
+        int pb = classificationRank(b);
+        int c = Integer.compare(pa, pb);
+        if (c != 0) return c;
+        return Integer.compare(
+                a != null ? a.driverNumber : 0,
+                b != null ? b.driverNumber : 0);
+    };
+
+    /** Rang pour tri : 1..n classés, sinon très grand (fin de liste). */
+    static int classificationRank(ResultRow r) {
+        if (r == null) return Integer.MAX_VALUE;
+        if (r.dnf || r.dns || r.dsq) return Integer.MAX_VALUE - 1;
+        if (r.position <= 0) return Integer.MAX_VALUE - 1;
+        return r.position;
+    }
+
+    public void sortResults() {
+        results.sort(RACE_RESULT_ORDER);
+    }
+
+    /** Vainqueur (P1 classé), ou null. */
+    public ResultRow winner() {
+        for (ResultRow r : results) {
+            if (r != null && r.position == 1 && !r.dnf && !r.dns && !r.dsq) return r;
+        }
+        return null;
+    }
+
+    /** Podium P1–P3 par position réelle (ignore les DNF en tête de liste API). */
     public String podiumLine() {
-        if (results.size() < 3) return "";
+        ResultRow[] podium = new ResultRow[3];
+        for (ResultRow r : results) {
+            if (r == null || r.dnf || r.dns || r.dsq) continue;
+            if (r.position >= 1 && r.position <= 3) {
+                podium[r.position - 1] = r;
+            }
+        }
+        if (podium[0] == null) return "";
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < Math.min(3, results.size()); i++) {
-            ResultRow r = results.get(i);
+        for (int i = 0; i < 3; i++) {
+            ResultRow r = podium[i];
+            if (r == null) break;
             if (i > 0) sb.append(", ");
             sb.append(r.driver.isEmpty() ? "#" + r.driverNumber : r.driver);
         }
@@ -149,6 +194,7 @@ public final class WeekendSnapshot {
             for (int i = 0; i < res.length(); i++) {
                 s.results.add(ResultRow.fromJson(res.optJSONObject(i)));
             }
+            s.sortResults();
         }
         JSONArray grid = o.optJSONArray("qualifying");
         if (grid != null) {

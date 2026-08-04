@@ -32,15 +32,28 @@ public final class SessionSummarizer {
         String userName = UserProfileStore.getInstance(context).getUserName();
         StringBuilder transcript = new StringBuilder();
         for (ChatBackend.Turn t : sessionTurns) {
+            if (t == null || t.system) continue;
+            if (!t.fromUser && EphemeralMemoryFilter.isNoise(t.text)) continue;
+            if (t.fromUser && EphemeralMemoryFilter.isNoise(t.text)) continue;
             transcript.append(t.fromUser ? userName + ": " : "Pégase: ")
                     .append(t.text).append("\n");
         }
+        if (transcript.length() == 0) return;
 
         String prompt =
                 "Résume cette conversation entre " + userName + " et Pégase. "
                 + "Réponds UNIQUEMENT en JSON valide, sans markdown, avec les clés : "
                 + "topic, summary, important_facts (tableau), decisions (tableau), "
-                + "pending_topics (tableau). En français.\n\n"
+                + "pending_topics (tableau). En français.\n"
+                + "important_facts / decisions : uniquement faits durables "
+                + "(préférences, projets, décisions qui comptent demain). "
+                + "EXCLUS : actions UI, clics, identifiants de vue, confirmations d'outil, "
+                + "intentions de clic du type « veut cliquer sur … ».\n"
+                + "pending_topics : liste BLANCHE stricte — seulement des rappels / tâches "
+                + "explicitement reportées par l'utilisateur (ex. « rappelle-moi demain », "
+                + "« à faire plus tard », « on en reparlera »). "
+                + "Si aucun rappel de ce type : tableau vide []. "
+                + "N'y mets JAMAIS une négociation UI en cours ni une intention de clic.\n\n"
                 + transcript;
 
         ChatBackend backend = ChatBackendFactory.create(context);
@@ -54,6 +67,10 @@ public final class SessionSummarizer {
                 SessionSummary summary = parseSummary(text);
                 if (summary == null) {
                     summary = fallbackSummary(context, sessionTurns);
+                } else {
+                    // Le LLM omet souvent les pending → radicaux sur tours user
+                    LocalSessionExtractor.enrich(summary, sessionTurns);
+                    scrubSummary(summary);
                 }
                 MemoryRepository.getInstance(context).addSessionSummary(summary);
             }
@@ -112,6 +129,16 @@ public final class SessionSummarizer {
         s.summary = sb.toString().trim();
         if (s.summary.isEmpty()) s.summary = "Courte discussion avec Pégase.";
         LocalSessionExtractor.enrich(s, turns);
+        scrubSummary(s);
         return s;
+    }
+
+    /** Coupe le bruit UI / pending non whitelistés avant disque + consolidator. */
+    static void scrubSummary(SessionSummary s) {
+        if (s == null) return;
+        s.importantFacts.removeIf(item -> !EphemeralMemoryFilter.isDurableSessionItem(item));
+        s.decisions.removeIf(item -> !EphemeralMemoryFilter.isDurableSessionItem(item));
+        s.pendingTopics.removeIf(item -> !EphemeralMemoryFilter.isDurablePending(item));
+        EphemeralMemoryFilter.dedupePendingList(s.pendingTopics);
     }
 }

@@ -13,6 +13,7 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.memory.MemoryEntry;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
+import com.pegasuscorp.orbe.memory.EphemeralMemoryFilter;
 
 import org.json.JSONObject;
 
@@ -37,7 +38,9 @@ public final class MemoryTool implements Tool {
                 + "Mémoire permanente : préférences, habitudes, infos personnelles durables. "
                 + "Utilise pour « souviens-toi que j'aime... », « retiens que je... », "
                 + "« n'oublie pas que... ». "
-                + "NE PAS utiliser pour des tâches ou listes — utilise notepad pour ça.";
+                + "NE PAS utiliser pour des tâches ou listes — utilise notepad pour ça. "
+                + "NE JAMAIS mémoriser un résultat d'outil / action UI "
+                + "(clic, scroll, saisie, ouverture d'app).";
     }
 
     @Override
@@ -51,6 +54,11 @@ public final class MemoryTool implements Tool {
                 String text = params.optString("text", "").trim();
                 if (text.isEmpty()) {
                     cb.onError("Précise ce que je dois retenir.");
+                    return;
+                }
+                if (EphemeralMemoryFilter.isNoise(text)) {
+                    cb.onSuccess(ToolResult.text(
+                            "Ça, c'est juste une action du moment — je ne le garde pas en mémoire."));
                     return;
                 }
                 repo.addPermanentMemory(new MemoryEntry(

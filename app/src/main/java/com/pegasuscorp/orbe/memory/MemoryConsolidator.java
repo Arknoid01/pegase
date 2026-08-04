@@ -33,13 +33,16 @@ public final class MemoryConsolidator {
 
     public static void promoteSession(Context context, SessionSummary summary) {
         if (context == null || summary == null) return;
-        promoteItems(context, summary.importantFacts, "session", 0.72);
-        promoteItems(context, summary.decisions, "decision", 0.68);
-        promoteItems(context, summary.pendingTopics, "pending", 0.65);
+        // Faits / décisions : défense secondaire (bruit UI / intention de clic).
+        promoteItems(context, summary.importantFacts, "session", 0.72, false);
+        promoteItems(context, summary.decisions, "decision", 0.68, false);
+        // Pending : liste blanche uniquement (rappel humain reporté) — jamais
+        // d'intention de clic / négociation UI / « veut cliquer sur … ».
+        promoteItems(context, summary.pendingTopics, "pending", 0.65, true);
     }
 
     private static void promoteItems(Context context, List<String> items, String category,
-            double importance) {
+            double importance, boolean pendingWhitelist) {
         if (items == null || items.isEmpty()) return;
         MemoryRepository repo = MemoryRepository.getInstance(context);
         String today = today();
@@ -47,6 +50,15 @@ public final class MemoryConsolidator {
             if (item == null) continue;
             String trimmed = item.trim();
             if (trimmed.isEmpty()) continue;
+            if (pendingWhitelist) {
+                if (!EphemeralMemoryFilter.isDurablePending(trimmed)) {
+                    Log.d(TAG, "Pending ignoré (pas whitelist durable): " + trimmed);
+                    continue;
+                }
+            } else if (!EphemeralMemoryFilter.isDurableSessionItem(trimmed)) {
+                Log.d(TAG, "Élément ignoré (éphémère): " + trimmed);
+                continue;
+            }
             if (isDuplicate(repo, context, trimmed)) {
                 Log.d(TAG, "Élément ignoré (doublon): " + trimmed);
                 continue;
@@ -57,10 +69,11 @@ public final class MemoryConsolidator {
     }
 
     static boolean isDuplicate(MemoryRepository repo, Context context, String fact) {
-        String lower = fact.toLowerCase(Locale.ROOT);
         List<MemoryEntry> existing = repo.getAllPermanentMemories();
         for (MemoryEntry e : existing) {
             if (e.content == null) continue;
+            if (EphemeralMemoryFilter.samePendingIntent(e.content, fact)) return true;
+            String lower = fact.toLowerCase(Locale.ROOT);
             String ec = e.content.toLowerCase(Locale.ROOT);
             if (ec.contains(lower) || lower.contains(ec)) return true;
         }

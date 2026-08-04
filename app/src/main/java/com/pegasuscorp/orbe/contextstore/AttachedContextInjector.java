@@ -20,12 +20,21 @@ public final class AttachedContextInjector {
     private AttachedContextInjector() {}
 
     public static String wrapUserMessage(Context context, String userMessage) {
+        return wrapUserMessage(context, userMessage, -1);
+    }
+
+    /**
+     * @param maxAttachedChars &lt; 0 = budget cloud/local par défaut ; sinon plafond explicite.
+     */
+    public static String wrapUserMessage(Context context, String userMessage,
+            int maxAttachedChars) {
         if (context == null) return userMessage != null ? userMessage : "";
         String msg = userMessage != null ? userMessage : "";
         ContextualFileStore store = ContextualFileStore.getInstance(context);
         if (store.getLoadedFilenames().isEmpty()) return msg;
 
         int budget = ModelStore.useLocalLlm(context) ? MAX_CHARS_LOCAL : MAX_CHARS_CLOUD;
+        if (maxAttachedChars > 0) budget = Math.min(budget, maxAttachedChars);
         String docs = store.buildPromptSection(budget);
         if (TextUtils.isEmpty(docs)) return msg;
 

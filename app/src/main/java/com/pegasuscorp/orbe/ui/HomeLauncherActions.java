@@ -19,6 +19,9 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.pegasuscorp.orbe.AppPickerActivity;
 import com.pegasuscorp.orbe.R;
 import com.pegasuscorp.orbe.ShortcutStore;
+import com.pegasuscorp.orbe.tools.device.PegaseTimerReceiver;
+import com.pegasuscorp.orbe.tools.device.PegaseTimerScheduler;
+import com.pegasuscorp.orbe.tools.device.UtilityScheduleStore;
 import com.pegasuscorp.orbe.voice.VoiceInputHandler;
 
 /**
@@ -239,16 +242,26 @@ public final class HomeLauncherActions {
 
     public void startTimer(int seconds) {
         AppCompatActivity activity = host.activity();
-        Intent i = new Intent(AlarmClock.ACTION_SET_TIMER)
-                .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-                .putExtra(AlarmClock.EXTRA_SKIP_UI, true);
-        if (i.resolveActivity(activity.getPackageManager()) != null) {
-            activity.startActivity(i);
-            VoiceInputHandler voiceInput = host.voiceInput();
-            if (voiceInput != null) voiceInput.speakTimerStarted();
-        } else {
-            Toast.makeText(activity, "Aucune app de minuteur", Toast.LENGTH_SHORT).show();
+        PegaseTimerScheduler.cancel(activity);
+        long fireAt = PegaseTimerScheduler.schedule(activity, seconds, null);
+        if (fireAt <= 0L) {
+            Toast.makeText(activity, "Impossible de planifier le minuteur", Toast.LENGTH_SHORT).show();
+            return;
         }
+        if (!PegaseTimerReceiver.isKeyguardLocked(activity)) {
+            Intent i = new Intent(AlarmClock.ACTION_SET_TIMER)
+                    .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+                    .putExtra(AlarmClock.EXTRA_SKIP_UI, true);
+            try {
+                if (i.resolveActivity(activity.getPackageManager()) != null) {
+                    activity.startActivity(i);
+                }
+            } catch (Exception ignored) {}
+        }
+        UtilityScheduleStore.get(activity).recordTimer(seconds, null, System.currentTimeMillis());
+        VoiceInputHandler voiceInput = host.voiceInput();
+        if (voiceInput != null) voiceInput.speakTimerStarted();
+        else Toast.makeText(activity, "Minuteur lancé", Toast.LENGTH_SHORT).show();
     }
 
     public void launchAppByLabel(String label) {

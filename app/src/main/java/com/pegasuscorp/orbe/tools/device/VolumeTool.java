@@ -30,8 +30,7 @@ public final class VolumeTool implements Tool {
     @Override
     public String description() {
         return "volume(action:\"up\"|\"down\"|\"mute\"|\"unmute\"|\"status\", steps?:int) — "
-                + "Volume média du téléphone. steps=nombre de crans (défaut 1). "
-                + "Exemple : {\"tool\":\"volume\",\"params\":{\"action\":\"mute\"}}.";
+                + "Volume média ; steps=crans (défaut 1).";
     }
 
     @Override

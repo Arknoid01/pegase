@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.notepad;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.memory.MemoryEditResult;
+import com.pegasuscorp.orbe.objects.ProjectObjectStore;
 
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -41,10 +42,12 @@ public final class NotepadEditor {
     private static final Pattern MARK_DONE = Pattern.compile(
             "(?i)(?:coche|marque)\\s+(.+?)\\s+comme\\s+fait");
 
+    private final Context appContext;
     private final NotepadStore store;
 
     public NotepadEditor(Context context) {
-        store = NotepadStore.getInstance(context.getApplicationContext());
+        appContext = context.getApplicationContext();
+        store = NotepadStore.getInstance(appContext);
     }
 
     public static boolean looksLikeNotepadEdit(String text) {
@@ -61,6 +64,7 @@ public final class NotepadEditor {
         }
         return looksLikeListRequest(fold)
                 || looksLikeTomorrowRequest(fold)
+                || looksLikeHistoryRequest(fold)
                 || looksLikeClearRequest(fold);
     }
 
@@ -88,6 +92,12 @@ public final class NotepadEditor {
                     "D'accord, j'ai vidé ta liste des choses à faire.");
         }
 
+        if (looksLikeHistoryRequest(fold)) {
+            return MemoryEditResult.applied(
+                    "Historique",
+                    store.formatHistorySpeech());
+        }
+
         if (looksLikeTomorrowRequest(fold)) {
             return MemoryEditResult.applied(
                     "Liste demain",
@@ -96,8 +106,8 @@ public final class NotepadEditor {
 
         if (looksLikeListRequest(fold)) {
             return MemoryEditResult.applied(
-                    store.getActiveItems().size() + " élément(s)",
-                    store.formatForSpeech());
+                    store.getNearActive().size() + " élément(s)",
+                    store.formatSummary());
         }
 
         Matcher m = REMOVE.matcher(trimmed);
@@ -125,16 +135,22 @@ public final class NotepadEditor {
 
         String toAdd = extractAddText(trimmed);
         if (toAdd != null) {
-            String due = NotepadDateHelper.parseDueDate(fold);
-            int priority = NotepadDateHelper.parsePriority(fold);
-            long reminderAt = NotepadDateHelper.parseReminderAtMillis(trimmed, fold);
-            if (store.add(toAdd, due, priority, reminderAt)) {
+            boolean forceReminder = REMIND.matcher(trimmed).find()
+                    || fold.contains("rappelle");
+            NotepadDateHelper.ReminderResolution res = NotepadDateHelper.resolveReminder(
+                    trimmed, fold, "", 0, forceReminder);
+            String tag = ProjectObjectStore.getInstance(appContext).bestEffortTagFor(toAdd);
+            NotepadStore.Item item = store.add(toAdd, res.dueDate, res.reminderAt, tag, res);
+            if (item != null) {
                 String shortText = truncate(toAdd, 45);
                 StringBuilder reply = new StringBuilder("C'est noté, j'ai ajouté « ")
                         .append(toAdd).append(" »");
-                if (!due.isEmpty()) reply.append(" pour ").append(NotepadDateHelper.formatDateLabel(due));
-                if (priority > 0) reply.append(" (").append(NotepadDateHelper.priorityLabel(priority)).append(")");
-                if (reminderAt > System.currentTimeMillis()) reply.append(", avec rappel");
+                if (!res.spokenWhen.isEmpty()) {
+                    reply.append(" — je te rappelle ").append(res.spokenWhen);
+                } else if (!res.dueDate.isEmpty()) {
+                    reply.append(" pour ")
+                            .append(NotepadDateHelper.formatDateLabel(res.dueDate));
+                }
                 reply.append(".");
                 return MemoryEditResult.applied("Ajouté : " + shortText, reply.toString());
             }
@@ -164,6 +180,15 @@ public final class NotepadEditor {
                 || fold.contains("ma liste de demain")
                 || fold.contains("quoi demain")
                 || fold.contains("pour demain");
+    }
+
+    private static boolean looksLikeHistoryRequest(String fold) {
+        return fold.contains("vieilles notes")
+                || fold.contains("historique")
+                || fold.contains("notes de la semaine")
+                || fold.contains("anciennes notes")
+                || fold.contains("voir tout")
+                || fold.contains("toutes mes notes");
     }
 
     private static boolean looksLikeListRequest(String fold) {

@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.memory.ConversationHistorySanitizer;
+import com.pegasuscorp.orbe.memory.MemoryPromptBuilder;
 import com.pegasuscorp.orbe.memory.MemoryStore;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.memory.SessionSummarizer;
@@ -399,11 +400,19 @@ public class ConversationManager {
         return "unknown";
     }
 
-    private static int estimatePromptChars(List<ChatBackend.Turn> turns, String payload) {
+    private int estimatePromptChars(List<ChatBackend.Turn> turns, String payload) {
         int n = payload != null ? payload.length() : 0;
         if (turns != null) {
             for (ChatBackend.Turn t : turns) {
                 if (t.text != null) n += t.text.length();
+            }
+        }
+        // Inclure le system (sous-estimé auparavant → diag trompeur sur Groq 413).
+        if (appContext != null && payload != null) {
+            try {
+                String system = MemoryPromptBuilder.buildFullSystem(appContext, payload);
+                n += system.length();
+            } catch (Exception ignored) {
             }
         }
         return n;
@@ -443,6 +452,16 @@ public class ConversationManager {
     }
 
     public void recordToolReply(String spokenReply) {
+        recordToolReply(spokenReply, true);
+    }
+
+    /**
+     * @param includeInSessionSummary si false (outils UI) : garde l'historique LLM/UI
+     *                                de la Discussion en cours, mais n'alimente ni
+     *                                {@code sessionTurns} (résumé) ni {@code recent_turns}
+     *                                — évite la promotion « pending » du bruit de clic.
+     */
+    public void recordToolReply(String spokenReply, boolean includeInSessionSummary) {
         String cleaned = ConversationHistorySanitizer.forAssistant(spokenReply);
         if (cleaned.isEmpty()) {
             userTurnPending = false;
@@ -451,11 +470,12 @@ public class ConversationManager {
 
         toolSucceededThisTurn = true;
         replaceOrAppendAssistant(history, cleaned);
-        replaceOrAppendAssistant(sessionTurns, cleaned);
+        if (includeInSessionSummary) {
+            replaceOrAppendAssistant(sessionTurns, cleaned);
+            memory.replaceLastAssistantTurn(cleaned);
+        }
         trimHistory(history);
         userTurnPending = false;
-
-        memory.replaceLastAssistantTurn(cleaned);
     }
 
     /**

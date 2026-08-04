@@ -29,6 +29,7 @@ import com.pegasuscorp.orbe.memory.IntentDetector;
 import com.pegasuscorp.orbe.memory.ContextBuilder;
 import com.pegasuscorp.orbe.memory.ContextIntent;
 import com.pegasuscorp.orbe.memory.ContextSnapshot;
+import com.pegasuscorp.orbe.memory.EphemeralMemoryFilter;
 import com.pegasuscorp.orbe.orion.OrionPromptRewriter;
 import com.pegasuscorp.orbe.orion.CodeLearnStore;
 import com.pegasuscorp.orbe.orion.TaskRisk;
@@ -45,6 +46,7 @@ import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolDispatcher;
 import com.pegasuscorp.orbe.tools.ToolRegistry;
 import com.pegasuscorp.orbe.tools.ToolResult;
+import com.pegasuscorp.orbe.tools.ToolTag;
 import com.pegasuscorp.orbe.voice.LockSessionPolicy;
 import com.pegasuscorp.orbe.voice.SpeechInputNormalizer;
 import com.pegasuscorp.orbe.voice.handlers.SystemIntentHandler;
@@ -53,6 +55,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -815,6 +818,12 @@ public class PegaseSession {
     private boolean tryOpenAppLocalShortCircuit(ConversationManager conv, String userText,
             SessionObserver obs) {
         if (userText == null || userText.trim().isEmpty()) return false;
+        // « ouvre l'icône / le bouton » → ui_action (copilote), pas open_app.
+        String foldUi = SpeechInputNormalizer.fold(userText).replace('\'', ' ')
+                .replace('’', ' ');
+        if (IntentDetector.looksLikeUi(foldUi)) {
+            return false;
+        }
         com.pegasuscorp.orbe.voice.IntentParser.Command cmd =
                 new com.pegasuscorp.orbe.voice.LocalKeywordParser(appContext).parse(userText);
         if (cmd == null
@@ -1062,15 +1071,22 @@ public class PegaseSession {
         if (intent == null) {
             intent = ContextAnalyzer.analyze(appContext, userMessage);
         }
+        EnumSet<ToolTag> tools = EnumSet.copyOf(intent.allowedTools);
+        // Copilote a11y : toujours exposer ui_* / copilot_action / capture.
+        if (channel == Channel.COPILOT) {
+            tools.add(ToolTag.UI);
+        }
         if (!useNativeFunctionCalling()) {
-            return ChatSendOptions.legacy(channel).withIntent(intent);
+            return ChatSendOptions.legacy(channel)
+                    .withAllowedTools(tools)
+                    .withIntent(intent);
         }
         if (channel == Channel.VOICE) {
-            return ChatSendOptions.forVoice(intent.allowedTools)
+            return ChatSendOptions.forVoice(tools)
                     .withIntent(intent)
                     .withVoiceTokenBudget(appContext);
         }
-        return ChatSendOptions.forText(intent.allowedTools).withIntent(intent);
+        return ChatSendOptions.forText(tools).withIntent(intent);
     }
 
     private boolean useNativeFunctionCalling() {
@@ -1565,7 +1581,8 @@ public class PegaseSession {
             return;
         }
 
-        conv.recordToolReply(result.text);
+        conv.recordToolReply(result.text,
+                !EphemeralMemoryFilter.isUiToolId(toolId));
         publishReasoningForReply(result.text);
         if (exit) {
             notifyToolExit(obs, result);

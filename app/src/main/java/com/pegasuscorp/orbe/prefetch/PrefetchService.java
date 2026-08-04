@@ -9,6 +9,7 @@ import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.diag.DiagBehaviorIndex;
 import com.pegasuscorp.orbe.diag.DiagSynthesizer;
 import com.pegasuscorp.orbe.diag.Trace;
+import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 import com.pegasuscorp.orbe.routines.CustomRoutineStore;
 import com.pegasuscorp.orbe.tools.HttpJson;
 import com.pegasuscorp.orbe.tools.knowledge.TavilySearchService;
@@ -17,7 +18,6 @@ import com.pegasuscorp.orbe.tools.knowledge.WeatherTool;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.net.URLEncoder;
 import java.time.LocalDate;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -229,43 +229,40 @@ public final class PrefetchService {
         try {
             String savedCoords = ApiKeyStore.getUserCoords(ctx);
             String savedCity = ApiKeyStore.getUserCity(ctx);
-            double[] gps = WeatherTool.parseCoords(savedCoords);
-            double lat;
-            double lon;
-            String cityName;
+            long savedCoordsUpdatedMs = ApiKeyStore.getUserCoordsUpdatedMs(ctx);
+            double[] savedGps = WeatherTool.parseCoords(savedCoords);
+            LocationSituationReader.Snapshot live = LocationSituationReader.read(ctx);
+            long now = System.currentTimeMillis();
 
-            if (gps != null) {
-                lat = gps[0];
-                lon = gps[1];
-                cityName = savedCity.isEmpty()
-                        ? String.format(Locale.FRENCH, "%.2f°, %.2f°", lat, lon)
-                        : savedCity;
-            } else {
-                String searchCity = savedCity.isEmpty() ? "Paris" : savedCity;
-                String geoUrl = "https://geocoding-api.open-meteo.com/v1/search"
-                        + "?name=" + URLEncoder.encode(searchCity, "UTF-8")
-                        + "&count=1&language=fr&format=json";
-                JSONObject geo = HttpJson.get(geoUrl);
-                JSONArray results = geo.optJSONArray("results");
-                if (results == null || results.length() == 0) {
-                    return null;
-                }
-                JSONObject loc = results.getJSONObject(0);
-                lat = loc.getDouble("latitude");
-                lon = loc.getDouble("longitude");
-                cityName = loc.optString("name", searchCity);
+            WeatherTool.ResolvedLocation resolved =
+                    WeatherTool.resolveHomeLocation(ctx, now);
+            if (!resolved.ok()) {
+                String source = resolved.source != null && resolved.source.startsWith("prefetch_")
+                        ? resolved.source
+                        : ("prefetch_" + (resolved.source == null ? "error" : resolved.source));
+                WeatherTool.logLocationDiag(ctx, now, "", savedCity, savedCoords,
+                        savedCoordsUpdatedMs, savedGps, live, null, null, null,
+                        source, resolved.searchCity);
+                return null;
             }
+
+            String source = resolved.source.startsWith("prefetch_")
+                    ? resolved.source
+                    : ("prefetch_" + resolved.source);
+            WeatherTool.logLocationDiag(ctx, now, "", savedCity, savedCoords,
+                    savedCoordsUpdatedMs, savedGps, live,
+                    resolved.lat, resolved.lon, resolved.cityName, source, resolved.searchCity);
 
             int forecastDays = Math.max(1, Math.min(7, days));
             String weatherUrl = "https://api.open-meteo.com/v1/forecast"
-                    + "?latitude=" + lat + "&longitude=" + lon
+                    + "?latitude=" + resolved.lat + "&longitude=" + resolved.lon
                     + "&daily=weathercode,temperature_2m_max,temperature_2m_min,"
                     + "precipitation_sum,windspeed_10m_max"
                     + "&current_weather=true"
                     + "&timezone=auto"
                     + "&forecast_days=" + forecastDays;
             JSONObject weather = HttpJson.get(weatherUrl);
-            return formatWeather(cityName, forecastDays, weather);
+            return formatWeather(resolved.cityName, forecastDays, weather);
         } catch (Exception e) {
             return null;
         }

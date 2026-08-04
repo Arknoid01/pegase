@@ -89,6 +89,26 @@ public final class CorrectionsStore {
         return listPendingItems(read(ctx));
     }
 
+    /**
+     * Première correction en attente qui chevauche {@code hint}, ou null.
+     * Sert au bilan simplifié (« déjà noté, pas encore réglé »).
+     */
+    public static synchronized String findPendingMatch(Context ctx, String hint) {
+        if (hint == null || hint.trim().isEmpty()) return null;
+        String qKey = foldKey(hint);
+        if (qKey.isEmpty()) return null;
+        for (String item : listPendingItems(ctx)) {
+            String ik = foldKey(item);
+            if (ik.isEmpty()) continue;
+            if (ik.contains(qKey) || qKey.contains(ik)
+                    || item.toLowerCase(Locale.ROOT)
+                    .contains(hint.toLowerCase(Locale.ROOT))) {
+                return item;
+            }
+        }
+        return null;
+    }
+
     /** Phrase orale listant les cases non cochées. */
     public static synchronized String speakPendingList(Context ctx) {
         List<String> items = listPendingItems(ctx);

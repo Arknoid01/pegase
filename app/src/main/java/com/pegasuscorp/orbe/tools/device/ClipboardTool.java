@@ -29,10 +29,7 @@ public final class ClipboardTool implements Tool {
     @Override
     public String description() {
         return "clipboard(action:\"get\"|\"set\", text?:str) — "
-                + "get=lit le presse-papiers ; set=y colle un texte. "
-                + "Exemple lire : {\"tool\":\"clipboard\",\"params\":{\"action\":\"get\"}}. "
-                + "Exemple coller : {\"tool\":\"clipboard\",\"params\":{\"action\":\"set\","
-                + "\"text\":\"Bonjour\"}}.";
+                + "get=lire presse-papiers ; set=écrire (text requis).";
     }
 
     @Override

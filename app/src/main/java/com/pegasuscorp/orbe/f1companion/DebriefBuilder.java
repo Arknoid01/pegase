@@ -15,12 +15,14 @@ public final class DebriefBuilder {
         if (snap == null) return;
         List<String> facts = new ArrayList<>();
         if (!snap.results.isEmpty()) {
-            WeekendSnapshot.ResultRow w = snap.results.get(0);
+            WeekendSnapshot.ResultRow w = snap.winner();
+            if (w == null) w = snap.results.get(0);
             String winner = label(w);
             facts.add(winner + " remporte la course"
                     + (w.team.isEmpty() ? "" : " pour " + w.team) + ".");
-            if (snap.results.size() >= 3) {
-                facts.add("Podium : " + snap.podiumLine() + ".");
+            String podium = snap.podiumLine();
+            if (!podium.isEmpty()) {
+                facts.add("Podium : " + podium + ".");
             }
         }
         for (String delta : snap.positionDeltas()) {

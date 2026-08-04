@@ -181,6 +181,40 @@ public final class ProjectObjectStore {
         return out;
     }
 
+    /**
+     * Tag projet best-effort pour une note : libellé contenu dans le texte.
+     * Sous le seuil (libellé trop court / pas de match) → chaîne vide.
+     */
+    public synchronized String bestEffortTagFor(String noteText) {
+        if (TextUtils.isEmpty(noteText)) return "";
+        String fold = foldLabel(noteText);
+        String best = "";
+        int bestLen = 0;
+        for (JSONObject o : listCustom()) {
+            String label = o.optString("label", "").trim();
+            if (label.length() < 3) continue;
+            String fl = foldLabel(label);
+            if (fl.length() < 3) continue;
+            if (fold.contains(fl) && fl.length() > bestLen) {
+                best = label;
+                bestLen = fl.length();
+            }
+        }
+        // Orion : mots-clés explicites seulement
+        if (best.isEmpty() && (fold.contains("orion") || fold.contains("runpod")
+                || fold.contains("run pod"))) {
+            return "Orion / RunPod";
+        }
+        return best;
+    }
+
+    private static String foldLabel(String s) {
+        if (s == null) return "";
+        String n = java.text.Normalizer.normalize(s.toLowerCase(Locale.ROOT),
+                java.text.Normalizer.Form.NFD);
+        return n.replaceAll("\\p{M}", "").replaceAll("\\s+", " ").trim();
+    }
+
     public synchronized String promptBlock() {
         StringBuilder sb = new StringBuilder();
         JSONObject orion = getOrion();

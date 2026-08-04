@@ -69,4 +69,73 @@ public class WeekendSnapshotTest {
         s.results.add(r);
         assertTrue(s.positionDeltas().get(0).contains("+3"));
     }
+
+    /**
+     * Régression Hongrie 2026 : OpenF1 met {@code position:0} sur les DNF.
+     * Un tri croissant naïf place les abandons avant P1 → podium = 3 derniers.
+     */
+    @Test
+    public void podium_fromFrozenJson_ignoresLeadingDnfPositionZero() throws Exception {
+        String frozen = ""
+                + "{"
+                + "  \"event\": \"Grand Prix de Hungary\","
+                + "  \"session_key\": 11342,"
+                + "  \"results\": ["
+                + "    {\"position\":0,\"driver\":\"Oscar PIASTRI\",\"team\":\"McLaren\","
+                + "     \"driver_number\":81,\"dnf\":true,\"dns\":false,\"dsq\":false,\"points\":0,\"laps\":55},"
+                + "    {\"position\":0,\"driver\":\"Sergio PEREZ\",\"team\":\"Cadillac\","
+                + "     \"driver_number\":11,\"dnf\":true,\"dns\":false,\"dsq\":false,\"points\":0,\"laps\":48},"
+                + "    {\"position\":0,\"driver\":\"Valtteri BOTTAS\",\"team\":\"Cadillac\","
+                + "     \"driver_number\":77,\"dnf\":true,\"dns\":false,\"dsq\":false,\"points\":0,\"laps\":13},"
+                + "    {\"position\":1,\"driver\":\"Lando NORRIS\",\"team\":\"McLaren\","
+                + "     \"driver_number\":1,\"dnf\":false,\"dns\":false,\"dsq\":false,\"points\":25,\"laps\":70},"
+                + "    {\"position\":2,\"driver\":\"Max VERSTAPPEN\",\"team\":\"Red Bull Racing\","
+                + "     \"driver_number\":3,\"dnf\":false,\"dns\":false,\"dsq\":false,\"points\":18,\"laps\":70},"
+                + "    {\"position\":3,\"driver\":\"Kimi ANTONELLI\",\"team\":\"Mercedes\","
+                + "     \"driver_number\":12,\"dnf\":false,\"dns\":false,\"dsq\":false,\"points\":15,\"laps\":70},"
+                + "    {\"position\":4,\"driver\":\"Charles LECLERC\",\"team\":\"Ferrari\","
+                + "     \"driver_number\":16,\"dnf\":false,\"dns\":false,\"dsq\":false,\"points\":12,\"laps\":70}"
+                + "  ]"
+                + "}";
+        WeekendSnapshot snap = WeekendSnapshot.fromJson(new JSONObject(frozen));
+
+        assertEquals("Lando NORRIS", snap.winner().driver);
+        assertEquals("Lando NORRIS, Max VERSTAPPEN, Kimi ANTONELLI", snap.podiumLine());
+        assertEquals(1, snap.results.get(0).position);
+        assertEquals("Lando NORRIS", snap.results.get(0).driver);
+        assertTrue(snap.results.get(snap.results.size() - 1).dnf
+                || snap.results.get(snap.results.size() - 1).position == 0);
+
+        DebriefBuilder.enrichKeyFacts(snap);
+        assertTrue(snap.keyFacts.get(0).contains("Lando NORRIS"));
+        assertFalse(snap.keyFacts.get(0).contains("PIASTRI"));
+        assertTrue(snap.podiumLine().contains("NORRIS"));
+        assertFalse(snap.podiumLine().contains("PIASTRI"));
+        assertFalse(snap.podiumLine().contains("PEREZ"));
+        assertFalse(snap.podiumLine().contains("BOTTAS"));
+    }
+
+    @Test
+    public void sortResults_putsClassifiedBeforeDnf() {
+        WeekendSnapshot s = new WeekendSnapshot();
+        WeekendSnapshot.ResultRow dnf = new WeekendSnapshot.ResultRow();
+        dnf.position = 0;
+        dnf.dnf = true;
+        dnf.driver = "DNF Guy";
+        WeekendSnapshot.ResultRow p1 = new WeekendSnapshot.ResultRow();
+        p1.position = 1;
+        p1.driver = "Winner";
+        WeekendSnapshot.ResultRow p2 = new WeekendSnapshot.ResultRow();
+        p2.position = 2;
+        p2.driver = "Second";
+        // Ordre API : DNF puis classés
+        s.results.add(dnf);
+        s.results.add(p2);
+        s.results.add(p1);
+        s.sortResults();
+        assertEquals("Winner", s.results.get(0).driver);
+        assertEquals("Second", s.results.get(1).driver);
+        assertEquals("DNF Guy", s.results.get(2).driver);
+        assertEquals("Winner, Second", s.podiumLine());
+    }
 }

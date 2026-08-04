@@ -234,7 +234,7 @@ public class MemorySettingsActivity extends AppCompatActivity {
 
         TextView graphMeta = new TextView(this);
         graphMeta.setText(scene.nodes.size() + " étoiles · " + scene.edges.size() + " synapses"
-                + " · cyan entités · ambre souvenirs");
+                + " · secteurs type · liens au focus");
         graphMeta.setTextColor(Color.parseColor("#35D0DD"));
         graphMeta.setTextSize(11);
         graphMeta.setPadding(0, dp(6), 0, dp(8));

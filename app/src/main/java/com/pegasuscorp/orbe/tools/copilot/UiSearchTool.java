@@ -28,7 +28,7 @@ public final class UiSearchTool implements Tool {
 
   @Override
   public ToolTag tag() {
-    return ToolTag.WEB_SEARCH;
+    return ToolTag.UI;
   }
 
   @Override

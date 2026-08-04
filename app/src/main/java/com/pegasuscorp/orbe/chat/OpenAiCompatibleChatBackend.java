@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.text.TextUtils;
 
 import com.pegasuscorp.orbe.contextstore.AttachedContextInjector;
+import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.llm.PegasePrompt;
 import com.pegasuscorp.orbe.memory.ConversationHistorySelector;
 import com.pegasuscorp.orbe.memory.MemoryPromptBuilder;
@@ -148,7 +149,8 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             } catch (LlmRateLimitException e) {
                 attempt++;
                 if (attempt > maxRateLimitRetries) throw e;
-                long waitMs = Math.min(e.retryAfterMs > 0 ? e.retryAfterMs : 6000L, 15_000L);
+                // Backoff court (p95) — un seul retry avant fallback provider.
+                long waitMs = Math.min(e.retryAfterMs > 0 ? e.retryAfterMs : 3_000L, 5_000L);
                 Thread.sleep(waitMs);
             }
         }
@@ -193,7 +195,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             } catch (LlmRateLimitException e) {
                 attempt++;
                 if (attempt > maxRateLimitRetries) throw e;
-                long waitMs = Math.min(e.retryAfterMs > 0 ? e.retryAfterMs : 6000L, 15_000L);
+                long waitMs = Math.min(e.retryAfterMs > 0 ? e.retryAfterMs : 3_000L, 5_000L);
                 Thread.sleep(waitMs);
             }
         }
@@ -240,21 +242,26 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             ChatSendOptions options) throws Exception {
         boolean nativeTools = options.nativeTools && provider.nativeFc
                 && CloudModelStore.isToolCapableModel(currentModelId());
-        JSONArray messages = new JSONArray();
-        messages.put(message("system",
-                MemoryPromptBuilder.buildFullSystem(appContext, userMessage, nativeTools, false,
-                        options.channel)));
+        PromptBudget.Level level = resolveBudgetLevel(options);
+        String system = MemoryPromptBuilder.buildFullSystem(appContext, userMessage, nativeTools,
+                false, options.channel, level);
         List<Turn> promptHistory = ConversationHistorySelector.selectForPrompt(
-                appContext, history, userMessage);
+                appContext, history, userMessage, PromptBudget.historyRecentLimit(level));
+        String userWrapped = AttachedContextInjector.wrapUserMessage(appContext, userMessage,
+                PromptBudget.attachedMaxChars(level));
+
+        JSONArray messages = new JSONArray();
+        messages.put(message("system", system));
+        int historyChars = 0;
         for (Turn turn : promptHistory) {
+            if (turn.text != null) historyChars += turn.text.length();
             if (turn.system) {
                 messages.put(message("system", turn.text));
             } else {
                 messages.put(message(turn.fromUser ? "user" : "assistant", turn.text));
             }
         }
-        messages.put(message("user",
-                AttachedContextInjector.wrapUserMessage(appContext, userMessage)));
+        messages.put(message("user", userWrapped));
 
         JSONObject root = new JSONObject();
         root.put("model", currentModelId());
@@ -262,24 +269,50 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         root.put("temperature", 0.92);
         root.put("max_tokens", options.replyMaxTokens());
         if (stream) root.put("stream", true);
+        int toolsChars = 0;
         if (nativeTools) {
             JSONArray tools = OpenAiToolSchemaBuilder.build(toolRegistry, options.allowedTools);
             root.put("tools", tools);
             root.put("tool_choice", "auto");
             root.put("parallel_tool_calls", false);
+            toolsChars = tools.toString().length();
         }
         applyQwenReasoningFormat(root, currentModelId());
-        return root.toString();
+        String body = root.toString();
+
+        // Si encore trop gros pour Groq : remonter d'un niveau et reconstruire une fois.
+        if (LlmProvider.ID_GROQ.equals(provider.id)
+                && level == PromptBudget.Level.TIGHT
+                && PromptBudget.exceedsGroqBudget(body.length())) {
+            return buildBody(history, userMessage, stream,
+                    options.withPromptBudgetLevel(PromptBudget.Level.EMERGENCY));
+        }
+
+        Trace.promptBudget(provider.id, currentModelId(), level.name(),
+                system.length(), historyChars, userWrapped.length(), toolsChars, body.length(),
+                options != null ? options.allowedTools : null);
+        return body;
+    }
+
+    private PromptBudget.Level resolveBudgetLevel(ChatSendOptions options) {
+        if (options != null && options.promptBudgetLevel != null
+                && options.promptBudgetLevel != PromptBudget.Level.NORMAL) {
+            return options.promptBudgetLevel;
+        }
+        return PromptBudget.levelForProvider(provider.id);
     }
 
     private String buildAgenticBody(AgenticChain chain, ChatSendOptions options, boolean stream)
             throws Exception {
+        PromptBudget.Level level = resolveBudgetLevel(options);
         JSONArray messages = new JSONArray();
-        messages.put(message("system", MemoryPromptBuilder.buildFullSystem(
+        String system = MemoryPromptBuilder.buildFullSystem(
                 appContext, chain.userMessage, options.allowMoreTools, !options.allowMoreTools,
-                options.channel)));
+                options.channel, level);
+        messages.put(message("system", system));
         List<Turn> promptHistory = ConversationHistorySelector.selectForPrompt(
-                appContext, chain.history, chain.userMessage);
+                appContext, chain.history, chain.userMessage,
+                PromptBudget.historyRecentLimit(level));
         for (Turn turn : promptHistory) {
             if (turn.system) {
                 messages.put(message("system", turn.text));

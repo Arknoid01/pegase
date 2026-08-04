@@ -28,6 +28,7 @@ import com.pegasuscorp.orbe.notepad.NotepadStore;
 import com.pegasuscorp.orbe.ui.PegaseSheets;
 
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -51,6 +52,7 @@ public class NotepadFragment extends Fragment {
     private PegaseInterfaceHost host;
     private LinearLayout notepadListHost;
     private String lastNotepadSignature = "";
+    private boolean showingHistory = false;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshTick = new Runnable() {
         @Override
@@ -113,7 +115,7 @@ public class NotepadFragment extends Fragment {
         list.addView(spacer, matchWrap());
 
         NotepadStore store = NotepadStore.getInstance(ctx);
-        List<NotepadStore.Item> items = store.getActiveItems();
+        List<NotepadStore.Item> items = store.getNearActive();
         lastNotepadSignature = notepadSignature(items);
         populateNotepadItems(list, store, items);
 
@@ -151,8 +153,10 @@ public class NotepadFragment extends Fragment {
     private void refreshNotepadIfNeeded() {
         if (notepadListHost == null || getContext() == null) return;
         NotepadStore store = NotepadStore.getInstance(requireContext());
-        List<NotepadStore.Item> items = store.getActiveItems();
-        String signature = notepadSignature(items);
+        List<NotepadStore.Item> items = showingHistory
+                ? store.getHistoryItems()
+                : store.getNearActive();
+        String signature = notepadSignature(items) + (showingHistory ? "|H" : "|N");
         if (signature.equals(lastNotepadSignature)) return;
         lastNotepadSignature = signature;
         populateNotepadItems(notepadListHost, store, items);
@@ -164,7 +168,8 @@ public class NotepadFragment extends Fragment {
             sb.append(item.id).append('|')
                     .append(item.text).append('|')
                     .append(item.dueDate).append('|')
-                    .append(item.priority).append('|')
+                    .append(item.reminderAt).append('|')
+                    .append(item.projetTag).append('|')
                     .append(item.done).append(';');
         }
         return sb.toString();
@@ -178,13 +183,14 @@ public class NotepadFragment extends Fragment {
         }
         if (items.isEmpty()) {
             TextView empty = new TextView(ctx);
-            empty.setText("Liste vide.\nDis « ajoute à ma liste… » ou appuie sur +.");
+            empty.setText(showingHistory
+                    ? "Pas d'historique."
+                    : "Liste vide.\nDis « ajoute à ma liste… » ou appuie sur +.");
             empty.setTextColor(Color.parseColor(C_MUTED));
             empty.setTextSize(14);
             list.addView(empty, matchWrap());
             return;
         }
-        items.sort((a, b) -> Integer.compare(b.priority, a.priority));
         for (NotepadStore.Item item : items) {
             list.addView(makeNotepadCard(store, item), matchWrap());
         }
@@ -215,8 +221,10 @@ public class NotepadFragment extends Fragment {
     }
 
     private void showNotepadMenu() {
+        String historyLabel = showingHistory ? "Vue proche" : "Voir tout (historique)";
         showBottomSheet(requireContext(), "Bloc-notes", new String[]{
                 "Actualiser",
+                historyLabel,
                 "Tout effacer",
                 "Voir demain"
         }, which -> {
@@ -224,6 +232,10 @@ public class NotepadFragment extends Fragment {
                 lastNotepadSignature = "";
                 refreshNotepadIfNeeded();
             } else if (which == 1) {
+                showingHistory = !showingHistory;
+                lastNotepadSignature = "";
+                refreshNotepadIfNeeded();
+            } else if (which == 2) {
                 new AlertDialog.Builder(requireContext())
                         .setTitle("Tout effacer ?")
                         .setMessage("Supprime tous les éléments actifs.")
@@ -234,7 +246,7 @@ public class NotepadFragment extends Fragment {
                         })
                         .setNegativeButton("Annuler", null)
                         .show();
-            } else if (which == 2) {
+            } else if (which == 3) {
                 showNotepadDayFilter(NotepadDateHelper.tomorrow(), "demain");
             }
         });
@@ -251,10 +263,6 @@ public class NotepadFragment extends Fragment {
             for (int i = 0; i < items.size(); i++) {
                 NotepadStore.Item item = items.get(i);
                 if (i > 0) msg.append("\n");
-                if (item.priority > 0) {
-                    msg.append("(").append(NotepadDateHelper.priorityLabel(item.priority))
-                            .append(") ");
-                }
                 msg.append("• ").append(item.text);
             }
         }
@@ -268,6 +276,12 @@ public class NotepadFragment extends Fragment {
     private View makeNotepadCard(NotepadStore store, NotepadStore.Item item) {
         Context ctx = requireContext();
         LinearLayout card = cardContainer(ctx);
+        boolean hasReminder = item.hasUpcomingReminder();
+        if (hasReminder) {
+            // Distinction légère rappel vs note simple
+            card.setPadding(dp(ctx, 10), dp(ctx, 8), dp(ctx, 10), dp(ctx, 8));
+            card.setBackgroundColor(Color.parseColor("#1A2A3A"));
+        }
 
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -275,8 +289,8 @@ public class NotepadFragment extends Fragment {
         card.addView(row, matchWrap());
 
         TextView bullet = new TextView(ctx);
-        bullet.setText("○  ");
-        bullet.setTextColor(Color.parseColor(C_CYAN));
+        bullet.setText(hasReminder ? "⏱  " : (item.done ? "✓  " : "○  "));
+        bullet.setTextColor(Color.parseColor(hasReminder ? "#F0C060" : C_CYAN));
         bullet.setTextSize(16);
         row.addView(bullet);
 
@@ -287,7 +301,7 @@ public class NotepadFragment extends Fragment {
 
         TextView text = new TextView(ctx);
         text.setText(item.text);
-        text.setTextColor(Color.WHITE);
+        text.setTextColor(item.done ? Color.parseColor(C_MUTED) : Color.WHITE);
         text.setTextSize(14);
         body.addView(text, matchWrap());
 
@@ -295,14 +309,18 @@ public class NotepadFragment extends Fragment {
         if (item.dueDate != null && !item.dueDate.isEmpty()) {
             meta.append(NotepadDateHelper.formatDateLabel(item.dueDate));
         }
-        if (item.priority > 0) {
-            if (meta.length() > 0) meta.append(" · ");
-            meta.append(NotepadDateHelper.priorityLabel(item.priority));
-        }
-        if (item.reminderAt > System.currentTimeMillis()) {
+        if (hasReminder) {
             if (meta.length() > 0) meta.append(" · ");
             meta.append("rappel ").append(new SimpleDateFormat("dd/MM HH:mm", Locale.FRENCH)
                     .format(new Date(item.reminderAt)));
+        }
+        if (item.projetTag != null && !item.projetTag.isEmpty()) {
+            if (meta.length() > 0) meta.append(" · ");
+            meta.append(item.projetTag);
+        }
+        if (item.done) {
+            if (meta.length() > 0) meta.append(" · ");
+            meta.append("fait");
         }
         if (meta.length() > 0) {
             TextView metaTv = new TextView(ctx);
@@ -329,16 +347,78 @@ public class NotepadFragment extends Fragment {
             }
         };
 
-        card.setOnClickListener(v -> markDone.run());
+        card.setOnClickListener(v -> {
+            if (!item.done) markDone.run();
+        });
         attachSwipeLeft(ctx, card, delete);
         card.setOnLongClickListener(v -> {
-            showBottomSheet(ctx, item.text, new String[]{"Cocher fait", "Supprimer"}, which -> {
-                if (which == 0) markDone.run();
-                else if (which == 1) delete.run();
+            showBottomSheet(ctx, item.text, new String[]{
+                    "Modifier échéance / rappel",
+                    "Cocher fait",
+                    "Supprimer"
+            }, which -> {
+                if (which == 0) showEditSchedule(store, item);
+                else if (which == 1) markDone.run();
+                else if (which == 2) delete.run();
             });
             return true;
         });
 
         return card;
+    }
+
+    private void showEditSchedule(NotepadStore store, NotepadStore.Item item) {
+        Context ctx = requireContext();
+        EditText field = new EditText(ctx);
+        field.setHint("ex. demain 9h, dans 1 heure, 18h30…");
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(Color.parseColor(C_MUTED));
+        field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_TEXT);
+        StringBuilder initial = new StringBuilder();
+        if (item.dueDate != null && !item.dueDate.isEmpty()) {
+            initial.append(NotepadDateHelper.formatDateLabel(item.dueDate));
+        }
+        if (item.hasUpcomingReminder()) {
+            if (initial.length() > 0) initial.append(" ");
+            Calendar cal = Calendar.getInstance();
+            cal.setTimeInMillis(item.reminderAt);
+            initial.append("à ").append(cal.get(Calendar.HOUR_OF_DAY)).append("h");
+            int min = cal.get(Calendar.MINUTE);
+            if (min > 0) {
+                if (min < 10) initial.append("0");
+                initial.append(min);
+            }
+        }
+        if (initial.length() > 0) field.setText(initial.toString());
+        new AlertDialog.Builder(ctx)
+                .setTitle("Échéance / rappel")
+                .setView(padded(ctx, field))
+                .setPositiveButton("OK", (d, w) -> {
+                    String raw = field.getText() != null
+                            ? field.getText().toString().trim() : "";
+                    String fold = raw.toLowerCase(Locale.ROOT)
+                            .replace('\'', ' ').replace('’', ' ');
+                    NotepadDateHelper.ReminderResolution res =
+                            NotepadDateHelper.resolveReminder(raw, fold, "", 0, true);
+                    if (store.updateSchedule(item.id, res.dueDate, res.reminderAt)) {
+                        Toast.makeText(ctx,
+                                res.spokenWhen.isEmpty()
+                                        ? "Mis à jour"
+                                        : "Rappel " + res.spokenWhen,
+                                Toast.LENGTH_SHORT).show();
+                        lastNotepadSignature = "";
+                        refreshNotepadIfNeeded();
+                    }
+                })
+                .setNeutralButton("Sans rappel", (d, w) -> {
+                    if (store.updateSchedule(item.id, item.dueDate, 0)) {
+                        Toast.makeText(ctx, "Rappel retiré", Toast.LENGTH_SHORT).show();
+                        lastNotepadSignature = "";
+                        refreshNotepadIfNeeded();
+                    }
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
     }
 }

@@ -28,27 +28,36 @@ public final class LocalSessionExtractor {
             "decide de", "on garde", "je prends"
     };
 
-    private static final String[] PENDING_MARKERS = {
-            "plus tard", "demain", "rappelle", "à faire", "a faire", "pas encore",
-            "on verra", "il faudra", "prochaine fois", "la prochaine fois", "quand tu pourras",
-            "il reste à", "il reste a", "on en reparle", "à suivre", "a suivre"
-    };
+    // PENDING_MARKERS retiré : isDurablePending (radicaux) est la source de vérité.
 
     private LocalSessionExtractor() {}
 
     public static void enrich(SessionSummary summary, List<ChatBackend.Turn> turns) {
         if (summary == null || turns == null || turns.isEmpty()) return;
         Set<String> seen = new HashSet<>();
+        // Pré-remplir seen avec l'existant (évite doublons après résumé LLM)
+        for (String p : summary.pendingTopics) {
+            if (p != null) seen.add(p.toLowerCase(Locale.ROOT));
+        }
+        for (String d : summary.decisions) {
+            if (d != null) seen.add(d.toLowerCase(Locale.ROOT));
+        }
+        for (String f : summary.importantFacts) {
+            if (f != null) seen.add(f.toLowerCase(Locale.ROOT));
+        }
         for (ChatBackend.Turn turn : turns) {
             if (turn == null || !turn.fromUser || turn.text == null) continue;
             String text = turn.text.trim();
             if (text.length() < 8) continue;
             String lower = text.toLowerCase(Locale.ROOT);
-            if (containsAny(lower, DECISION_MARKERS)) {
-                addUnique(summary.decisions, clip(text), seen);
-            } else if (containsAny(lower, PENDING_MARKERS)) {
+            // Pending d'abord via radicaux (pas une liste de phrases figées)
+            if (EphemeralMemoryFilter.isDurablePending(text)) {
                 addUnique(summary.pendingTopics, clip(text), seen);
-            } else if (containsAny(lower, FACT_MARKERS)) {
+            } else if (containsAny(lower, DECISION_MARKERS)
+                    && EphemeralMemoryFilter.isDurableSessionItem(text)) {
+                addUnique(summary.decisions, clip(text), seen);
+            } else if (containsAny(lower, FACT_MARKERS)
+                    && EphemeralMemoryFilter.isDurableSessionItem(text)) {
                 addUnique(summary.importantFacts, clip(text), seen);
             }
         }

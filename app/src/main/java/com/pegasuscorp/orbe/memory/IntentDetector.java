@@ -167,6 +167,88 @@ public final class IntentDetector {
                 && (fold.contains("matin") || fold.contains("ma routine"));
     }
 
+    /**
+     * Actions UI copilote / a11y — hors DEVICE daily.
+     * « micro » seul ne suffit pas (trop large) ; phrases Cursor / icône ciblées oui.
+     * « ouvre Cursor » reste open_app (pas d'icône/bouton/écran).
+     */
+    public static boolean looksLikeUi(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        if (fold.contains("ui_action") || fold.contains("ui_explain")
+                || fold.contains("ui_search") || fold.contains("copilot_action")) {
+            return true;
+        }
+        if (fold.contains("capture d ecran") || fold.contains("capture ecran")
+                || fold.contains("screenshot")) {
+            return true;
+        }
+        if (fold.contains("clique") || fold.contains("click") || fold.contains("appuie sur")
+                || fold.contains("tape sur") || fold.contains("fais defiler")
+                || fold.contains("scroll") || fold.contains("sur l ecran")
+                || fold.contains("sur ecran") || fold.contains("a l ecran")
+                || fold.contains("element visible")) {
+            return true;
+        }
+        // « ouvre X, … tape Z » (saisie) sans « tape sur » — évite short-circuit open_app
+        boolean openVerb = fold.contains("ouvre") || fold.contains("lance ")
+                || fold.contains("ouvrir");
+        boolean typeOrClick = fold.contains(" tape ") || fold.contains("tape ")
+                || fold.startsWith("tape ") || fold.contains("saisis")
+                || fold.contains("saisie ") || fold.contains("ecris ")
+                || fold.contains("écris ") || fold.contains("ecrire ")
+                || fold.contains("type ") || fold.contains("clique")
+                || fold.contains("click");
+        if (openVerb && typeOrClick) return true;
+        // « ouvre/appuie/tape … icône|bouton » (pas « ouvre Cursor » seul)
+        boolean uiTarget = fold.contains("icone") || fold.contains("icon ")
+                || fold.contains("bouton") || fold.contains("tuile");
+        boolean uiVerb = fold.contains("ouvre") || fold.contains("appuie")
+                || fold.contains("clique") || fold.contains("click")
+                || fold.contains("tape") || fold.contains("active")
+                || fold.contains("presse");
+        if (uiTarget && uiVerb) return true;
+        if (fold.contains("ecran") && (fold.contains("explique") || fold.contains("lis ")
+                || fold.contains("montre") || fold.contains("qu est ce")
+                || fold.contains("c est quoi"))) {
+            return true;
+        }
+        return fold.contains("micro cursor") || fold.contains("microphone cursor")
+                || fold.contains("saisie vocale") || fold.contains("de micro")
+                || fold.contains("icone micro") || fold.contains("bouton micro")
+                || (fold.contains("micro") && (fold.contains("clique") || fold.contains("click")
+                || fold.contains("active") || fold.contains("lance") || fold.contains("appuie")));
+    }
+
+    /** Compagnon F1 / GP — hors SEARCH générique. */
+    public static boolean looksLikeF1(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        if (fold.contains("f1") || fold.contains("formule 1") || fold.contains("formula 1")
+                || fold.contains("openf1") || fold.contains("grand prix")) {
+            return true;
+        }
+        // « gp » sans GPS (navigation)
+        if (fold.contains("gps")) return false;
+        return fold.contains(" gp") || fold.startsWith("gp ") || fold.contains("gp ")
+                || fold.equals("gp") || fold.endsWith(" gp");
+    }
+
+    /** Rythmes de vie locaux — hors BRIEF. */
+    public static boolean looksLikeLifePattern(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        return fold.contains("rythme") || fold.contains("life_pattern")
+                || fold.contains("rythmes de vie") || fold.contains("life pattern");
+    }
+
+    /** Fiches projet locales — hors BRIEF / Orion project. */
+    public static boolean looksLikeProjectObject(String fold) {
+        if (fold == null || fold.isEmpty()) return false;
+        if (looksLikeOrionProject(fold)) return false;
+        return fold.contains("fiche projet") || fold.contains("fiches projet")
+                || fold.contains("project_object") || fold.contains("note le projet")
+                || (fold.contains("projet") && (fold.contains("statut")
+                || fold.contains("fiche")));
+    }
+
     /** Fichiers téléphone : chercher / lister / déplacer / supprimer / ouvrir. */
     public static boolean looksLikeFiles(String fold) {
         if (fold == null || fold.isEmpty()) return false;

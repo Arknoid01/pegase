@@ -23,6 +23,11 @@ import java.util.TimeZone;
 public final class ContextBuilder {
 
     private static final int MAX_ENTITIES = 2;
+    /** Soft/hard pour clip souvenir (frontière de phrase). */
+    static final int MEMORY_SOFT_MAX = 160;
+    static final int MEMORY_HARD_MAX = 320;
+    /** Plafond écran copilote (chars extrait) — le reste du bloc est fixe. */
+    private static final int DEFAULT_SCREEN_CHARS = 2_000;
 
     private ContextBuilder() {}
 
@@ -39,6 +44,11 @@ public final class ContextBuilder {
         return buildSnapshot(context, userMessage, intent, channel).promptText;
     }
 
+    public static String build(Context context, String userMessage, ContextIntent intent,
+            Channel channel, int screenMaxChars) {
+        return buildSnapshot(context, userMessage, intent, channel, screenMaxChars).promptText;
+    }
+
     public static ContextSnapshot buildSnapshot(Context context, String userMessage) {
         return buildSnapshot(context, userMessage, ContextAnalyzer.analyze(context, userMessage));
     }
@@ -50,6 +60,11 @@ public final class ContextBuilder {
 
     public static ContextSnapshot buildSnapshot(Context context, String userMessage,
             ContextIntent intent, Channel channel) {
+        return buildSnapshot(context, userMessage, intent, channel, DEFAULT_SCREEN_CHARS);
+    }
+
+    public static ContextSnapshot buildSnapshot(Context context, String userMessage,
+            ContextIntent intent, Channel channel, int screenMaxChars) {
         if (context == null) return ContextSnapshot.empty();
         if (intent == null) intent = ContextAnalyzer.analyze(context, userMessage);
 
@@ -64,62 +79,95 @@ public final class ContextBuilder {
         String sessionTopic = "";
         String screenLabel = "";
 
-        StringBuilder sb = new StringBuilder();
-        appendDeviceClock(sb);
-
-        EnumSet<ProfileSection> sections = intent.profileSections;
-        if (sections != null && !sections.isEmpty()) {
-            profile.appendSelectiveSections(sb, sections);
-            for (ProfileSection s : sections) {
-                profileOut.add(labelForProfileSection(s));
-            }
+        String clock = buildDeviceClock();
+        String profileBlock = buildProfileBlock(profile, intent, profileOut);
+        String interaction = buildInteractionBlock(context);
+        String atlas = buildAtlasBlock(entities, atlasOut);
+        String namedPtr = buildNamedContextsPointer(context, contextsOut);
+        String session = "";
+        if (!skipSession(intent)) {
+            sessionTopic = "";
+            String[] sessionParts = buildSessionBlock(repo, intent);
+            session = sessionParts[0];
+            sessionTopic = sessionParts[1];
+        }
+        String memories = "";
+        if (!skipMemories(intent, channel)) {
+            memories = buildMemoriesBlock(context, repo, userMessage, entities, intent,
+                    memoriesOut);
+        }
+        String screen = "";
+        if (channel == Channel.COPILOT) {
+            int cap = screenMaxChars > 0 ? screenMaxChars : DEFAULT_SCREEN_CHARS;
+            String[] screenParts = buildCopilotScreen(context, cap);
+            screen = screenParts[0];
+            screenLabel = screenParts[1];
         }
 
-        InteractionStateStore.getInstance(context).appendPromptSection(sb);
+        // Budget chars : contextBudget historique ≈ échelle tokens → ×6 chars, plancher 1200.
+        int charBudget = Math.max(1_200, intent.contextBudget * 6);
+        String assembled = assembleWithinBudget(charBudget,
+                clock, atlas, memories, session, namedPtr, profileBlock, interaction, screen);
 
-        appendAtlas(sb, entities, atlasOut);
-        appendLoadedNamedContexts(sb, context, contextsOut);
-        sessionTopic = appendSessionContext(sb, repo, intent);
-        appendMemories(sb, context, repo, userMessage, entities, intent, memoriesOut);
-        screenLabel = appendCopilotScreenContext(sb, context, channel);
-
-        return new ContextSnapshot(sb.toString(), intent.intent,
+        return new ContextSnapshot(assembled, intent.intent,
                 memoriesOut, atlasOut, profileOut, contextsOut, sessionTopic, screenLabel);
     }
 
-    private static String appendCopilotScreenContext(StringBuilder sb, Context context,
-            Channel channel) {
-        if (channel != Channel.COPILOT || context == null) return "";
-        CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(context);
-        if (snap == null) return "";
-        String block = CopilotScreenContext.buildPromptBlock(snap);
-        if (!block.isEmpty()) sb.append(block);
-        return snap.packageName;
+    /**
+     * Ordre de conservation : horloge → atlas → souvenirs → session → pointeur contextes
+     * → profil → interaction → écran.
+     */
+    static String assembleWithinBudget(int charBudget, String clock, String atlas,
+            String memories, String session, String namedPtr, String profile,
+            String interaction, String screen) {
+        String[] blocks = {
+                nullToEmpty(clock),
+                nullToEmpty(atlas),
+                nullToEmpty(memories),
+                nullToEmpty(session),
+                nullToEmpty(namedPtr),
+                nullToEmpty(profile),
+                nullToEmpty(interaction),
+                nullToEmpty(screen)
+        };
+        StringBuilder sb = new StringBuilder();
+        for (String block : blocks) {
+            if (block.isEmpty()) continue;
+            if (sb.length() + block.length() <= charBudget) {
+                sb.append(block);
+                continue;
+            }
+            int remain = charBudget - sb.length();
+            if (remain < 40) break;
+            sb.append(TextClipper.clipAtSentence(block, Math.min(80, remain / 2), remain));
+            break;
+        }
+        return sb.toString();
     }
 
     public static ContextIntent analyzeIntent(Context context, String userMessage) {
         return ContextAnalyzer.analyze(context, userMessage);
     }
 
-    private static void appendLoadedNamedContexts(StringBuilder sb, Context context,
-            List<String> contextsOut) {
-        ContextualFileStore store = ContextualFileStore.getInstance(context);
-        // Pointeur court seulement — le corps du .md est collé au message user
-        // (AttachedContextInjector) pour ne pas le noyer derrière le pavé d'outils.
-        String pointer = store.buildPromptPointer();
-        if (pointer != null && !pointer.isEmpty()) {
-            sb.append(pointer);
+    private static boolean skipMemories(ContextIntent intent, Channel channel) {
+        if ("fresh_data".equals(intent.intent) || "music".equals(intent.intent)) {
+            return true;
         }
-        List<String> names = store.getLoadedDisplayNames();
-        if (names != null) {
-            for (String n : names) {
-                if (n != null && !n.trim().isEmpty()) contextsOut.add(n.trim());
-            }
+        // Clic UI / device : l'écran copilote suffit.
+        if ("device".equals(intent.intent) && channel == Channel.COPILOT) {
+            return true;
         }
+        return false;
     }
 
-    /** Date/heure locale — évite que le LLM devine « ce soir » / « aujourd'hui ». */
-    private static void appendDeviceClock(StringBuilder sb) {
+    private static boolean skipSession(ContextIntent intent) {
+        return "fresh_data".equals(intent.intent)
+                || "music".equals(intent.intent)
+                || "device".equals(intent.intent);
+    }
+
+    private static String buildDeviceClock() {
+        StringBuilder sb = new StringBuilder();
         Date now = new Date();
         SimpleDateFormat full = new SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.FRENCH);
         SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
@@ -130,13 +178,52 @@ public final class ContextBuilder {
         sb.append("Date ISO : ").append(iso.format(now)).append(".\n");
         sb.append("Pour « ce soir », « aujourd'hui », « demain », les matchs ou actus du jour, ")
                 .append("utilise cette date — ne devine pas une autre date dans les requêtes search.\n");
+        return sb.toString();
     }
 
-    private static void appendAtlas(StringBuilder sb, EntityResolver.Resolution entities,
+    private static String buildProfileBlock(UserProfileStore profile, ContextIntent intent,
+            List<String> profileOut) {
+        EnumSet<ProfileSection> sections = intent.profileSections;
+        if (sections == null || sections.isEmpty()) {
+            sections = EnumSet.of(ProfileSection.ESSENTIAL);
+        }
+        // NOTES uniquement pour intent memory.
+        if (!"memory".equals(intent.intent)) {
+            sections = EnumSet.copyOf(sections);
+            sections.remove(ProfileSection.NOTES);
+        }
+        StringBuilder sb = new StringBuilder();
+        profile.appendSelectiveSections(sb, sections);
+        for (ProfileSection s : sections) {
+            profileOut.add(labelForProfileSection(s));
+        }
+        return sb.toString();
+    }
+
+    private static String buildInteractionBlock(Context context) {
+        StringBuilder sb = new StringBuilder();
+        InteractionStateStore.getInstance(context).appendPromptSection(sb);
+        return sb.toString();
+    }
+
+    private static String buildNamedContextsPointer(Context context, List<String> contextsOut) {
+        ContextualFileStore store = ContextualFileStore.getInstance(context);
+        String pointer = store.buildPromptPointer();
+        List<String> names = store.getLoadedDisplayNames();
+        if (names != null) {
+            for (String n : names) {
+                if (n != null && !n.trim().isEmpty()) contextsOut.add(n.trim());
+            }
+        }
+        return pointer != null ? pointer : "";
+    }
+
+    private static String buildAtlasBlock(EntityResolver.Resolution entities,
             List<String> atlasOut) {
         List<EntityResolver.EntityMatch> inject = entities.forInjection(MAX_ENTITIES);
-        if (inject.isEmpty() && entities.ambiguous.isEmpty()) return;
+        if (inject.isEmpty() && entities.ambiguous.isEmpty()) return "";
 
+        StringBuilder sb = new StringBuilder();
         sb.append("\n--- Atlas (entités concernées) ---\n");
         for (EntityResolver.EntityMatch match : inject) {
             String block = match.entity.toPromptBlock();
@@ -152,26 +239,25 @@ public final class ContextBuilder {
             }
             sb.append(". Demande confirmation si nécessaire, ne devine pas.\n");
         }
+        return sb.toString();
     }
 
-    private static String appendSessionContext(StringBuilder sb, MemoryRepository repo,
-            ContextIntent intent) {
-        if ("fresh_data".equals(intent.intent)
-                || "music".equals(intent.intent)
-                || "device".equals(intent.intent)) {
-            return "";
-        }
+    /** @return [block, topic] */
+    private static String[] buildSessionBlock(MemoryRepository repo, ContextIntent intent) {
         SessionSummary latest = repo.getLatestSessionSummary();
-        if (latest == null || latest.summary == null || latest.summary.isEmpty()) return "";
+        if (latest == null || latest.summary == null || latest.summary.isEmpty()) {
+            return new String[]{"", ""};
+        }
+        StringBuilder sb = new StringBuilder();
         sb.append("\n--- Contexte récent ---\n");
         String topic = latest.topic != null ? latest.topic.trim() : "";
         if (!topic.isEmpty()) sb.append("Sujet : ").append(topic).append(". ");
-        String summary = latest.summary;
-        if (summary.length() > 220) summary = summary.substring(0, 217) + "…";
+        String summary = TextClipper.clipAtSentence(latest.summary, 120, 220);
         sb.append(summary).append("\n");
         appendSessionDecisions(sb, latest);
         appendSessionPending(sb, latest);
-        return !topic.isEmpty() ? topic : clip(summary, 80);
+        String topicOut = !topic.isEmpty() ? topic : clip(summary, 80);
+        return new String[]{sb.toString(), topicOut};
     }
 
     private static void appendSessionDecisions(StringBuilder sb, SessionSummary latest) {
@@ -196,17 +282,18 @@ public final class ContextBuilder {
         sb.append("\n");
     }
 
-    private static void appendMemories(StringBuilder sb, Context context, MemoryRepository repo,
+    private static String buildMemoriesBlock(Context context, MemoryRepository repo,
             String userMessage, EntityResolver.Resolution entities, ContextIntent intent,
             List<String> memoriesOut) {
-        if ("fresh_data".equals(intent.intent) || "music".equals(intent.intent)) {
-            return;
+        float minScore = MemoryRepository.SEMANTIC_MIN_SCORE + 0.05f;
+        if ("general".equals(intent.intent)) {
+            minScore = MemoryRepository.SEMANTIC_MIN_SCORE + 0.08f;
         }
-
-        float minScore = "general".equals(intent.intent)
-                ? MemoryRepository.SEMANTIC_MIN_SCORE
-                : MemoryRepository.SEMANTIC_MIN_SCORE + 0.05f;
-        int max = "project".equals(intent.intent) || "person".equals(intent.intent) ? 3 : 2;
+        int max = 1;
+        if ("project".equals(intent.intent) || "person".equals(intent.intent)
+                || "memory".equals(intent.intent)) {
+            max = 2;
+        }
 
         List<String> entityTerms = EntityResolver.termsForScoring(entities);
         String placeTerm = LocationSituationReader.currentPlaceSearchTerm(context);
@@ -217,14 +304,33 @@ public final class ContextBuilder {
         List<String> seedEntityIds = MemoryLinker.seedEntityIds(entities, 3);
         List<MemoryEntry> memories = repo.getRelevantMemoriesSemantic(
                 userMessage, entityTerms, seedEntityIds, max, minScore);
-        if (memories.isEmpty()) return;
+        if (memories.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
         sb.append("\n--- Souvenirs pertinents ---\n");
         for (MemoryEntry m : memories) {
-            sb.append("- [").append(m.category).append("] ").append(m.content).append("\n");
-            if (m.content != null && !m.content.trim().isEmpty()) {
-                memoriesOut.add(clip(m.content.trim(), 100));
-            }
+            String content = TextClipper.clipAtSentence(
+                    m.content != null ? m.content : "", MEMORY_SOFT_MAX, MEMORY_HARD_MAX);
+            if (content.isEmpty()) continue;
+            sb.append("- [").append(m.category).append("] ").append(content).append("\n");
+            memoriesOut.add(clip(content, 100));
         }
+        return sb.toString();
+    }
+
+    /** @return [block, packageLabel] */
+    private static String[] buildCopilotScreen(Context context, int maxTextChars) {
+        CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(context);
+        if (snap == null) return new String[]{"", ""};
+        String text = snap.text;
+        if (text.length() > maxTextChars) {
+            text = TextClipper.clipAtSentence(text, Math.max(80, maxTextChars / 2), maxTextChars);
+        }
+        CopilotScreenContext.Snapshot clipped =
+                new CopilotScreenContext.Snapshot(snap.packageName, text, snap.ageMs);
+        return new String[]{
+                CopilotScreenContext.buildPromptBlock(clipped),
+                snap.packageName
+        };
     }
 
     static String labelForProfileSection(ProfileSection s) {
@@ -245,5 +351,9 @@ public final class ContextBuilder {
         if (s == null) return "";
         if (s.length() <= max) return s;
         return s.substring(0, max - 1) + "…";
+    }
+
+    private static String nullToEmpty(String s) {
+        return s != null ? s : "";
     }
 }

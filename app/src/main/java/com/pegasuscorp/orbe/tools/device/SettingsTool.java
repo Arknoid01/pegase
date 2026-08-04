@@ -33,8 +33,7 @@ public final class SettingsTool implements Tool {
     @Override
     public String description() {
         return "settings(panel:\"airplane\"|\"hotspot\"|\"brightness\"|\"sound\"|\"display\"|\"wireless\") — "
-                + "Ouvre le panneau Réglages Android correspondant. "
-                + "Exemple : {\"tool\":\"settings\",\"params\":{\"panel\":\"airplane\"}}.";
+                + "Ouvre le panneau Réglages Android.";
     }
 
     @Override

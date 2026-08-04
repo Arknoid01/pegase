@@ -146,8 +146,8 @@ public final class F1MemoryStore {
         F1FanMemory mem = load(ctx);
         String winner = "";
         String winnerTeam = "";
-        if (!snap.results.isEmpty()) {
-            WeekendSnapshot.ResultRow w = snap.results.get(0);
+        WeekendSnapshot.ResultRow w = snap.winner();
+        if (w != null) {
             winner = w.driver != null ? w.driver : "";
             winnerTeam = w.team != null ? w.team : "";
         }

@@ -39,9 +39,8 @@ public final class NewsTool implements Tool {
 
     @Override
     public String description() {
-        return "news(query:str, count:int) — Actualités du jour en français. "
-                + "Utilise pour \"quoi de neuf\", \"actus du jour\", \"que s'est-il passé\", "
-                + "news sur un sujet précis. query = sujet (optionnel), count = nb articles (défaut 3).";
+        return "news(query?:str, count?:int) — Actualités FR. "
+                + "query=sujet optionnel ; count=nb articles (défaut 3).";
     }
 
     @Override
