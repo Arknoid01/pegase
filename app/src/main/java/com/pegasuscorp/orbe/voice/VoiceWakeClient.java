@@ -31,6 +31,7 @@ public final class VoiceWakeClient {
     private boolean wantListen;
     private boolean keepScoWhilePaused;
     private boolean gentle = true;
+    private float owwThreshold = PegaseWakeStore.DEFAULT_OWW_THRESHOLD;
     private WakeHealthStatus cachedHealth = WakeHealthStatus.OFF;
     private Runnable pendingAfterBind;
 
@@ -60,6 +61,7 @@ public final class VoiceWakeClient {
                     remote.registerCallback(callback);
                     remote.registerHealthCallback(healthCallback);
                     remote.setGentleMode(gentle);
+                    remote.setOwwThreshold(owwThreshold);
                     cachedHealth = WakeHealthStatus.fromCode(remote.getWakeHealthCode());
                     main.post(() -> WakeHealthUi.apply(cachedHealth));
                     if (wantListen) {
@@ -115,12 +117,37 @@ public final class VoiceWakeClient {
     }
 
     /**
+     * Seuil OWW → prefs launcher (UI) + process {@code :voice} (moteur vivant).
+     * Hot-reload via {@link OpenWakeWordEngine#setThreshold} sans redémarrer le wake.
+     */
+    public void setOwwThreshold(Context ctx, float threshold) {
+        ensureApp(ctx);
+        PegaseWakeStore.setOwwThreshold(ctx, threshold);
+        owwThreshold = PegaseWakeStore.getOwwThreshold(ctx);
+        IVoiceWakeService r;
+        synchronized (lock) {
+            r = remote;
+        }
+        if (r != null) {
+            try {
+                r.setOwwThreshold(owwThreshold);
+            } catch (RemoteException e) {
+                Log.w(TAG, "setOwwThreshold", e);
+                remoteDied();
+            }
+        } else {
+            ensureBound(ctx, null);
+        }
+    }
+
+    /**
      * Si wake activé côté prefs launcher : démarre écoute (bind paresseux).
      * Sinon stop + pas de start FGS inutile.
      */
     public void sync(Context ctx) {
         ensureApp(ctx);
         PegaseWakeStore.applyStartupSafety(ctx);
+        owwThreshold = PegaseWakeStore.getOwwThreshold(ctx);
         setGentleMode(ctx, PegaseWakeStore.isGentleMode(ctx));
         if (PegaseWakeStore.isEnabled(ctx) && PegaseWakeController.shouldListen()) {
             startListening(ctx);
@@ -130,6 +157,16 @@ public final class VoiceWakeClient {
                 cachedHealth = WakeHealthStatus.OFF;
                 main.post(() -> WakeHealthUi.apply(WakeHealthStatus.OFF));
             }
+        }
+        // Pousser le seuil même si déjà à l'écoute (hot-reload).
+        IVoiceWakeService r;
+        synchronized (lock) {
+            r = remote;
+        }
+        if (r != null) {
+            try {
+                r.setOwwThreshold(owwThreshold);
+            } catch (RemoteException ignored) {}
         }
         refreshWakeHealth();
     }
@@ -184,6 +221,7 @@ public final class VoiceWakeClient {
             if (r == null) return;
             try {
                 r.setGentleMode(gentle);
+                r.setOwwThreshold(owwThreshold);
                 r.startWakeListening();
             } catch (RemoteException e) {
                 Log.w(TAG, "startListening", e);
@@ -209,8 +247,9 @@ public final class VoiceWakeClient {
     }
 
     /**
-     * Pause conversation / handoff STT : arrête le wake sans couper le SCO Bluetooth.
-     * Évite le silence micro juste après « Pégase » sur casque.
+     * Pause conversation / handoff STT : arrête le wake (AudioRecord KWS).
+     * Le nom conserve « KeepSco » pour l'AIDL ; le SCO conversationnel est
+     * tenu par le launcher ({@link VoiceManager}), pas par {@code :voice}.
      */
     public void pauseKeepSco(Context ctx) {
         ensureApp(ctx);
@@ -279,7 +318,10 @@ public final class VoiceWakeClient {
 
     private void ensureApp(Context ctx) {
         if (ctx == null) return;
-        if (app == null) app = ctx.getApplicationContext();
+        if (app == null) {
+            app = ctx.getApplicationContext();
+            owwThreshold = PegaseWakeStore.getOwwThreshold(app);
+        }
     }
 
     private void ensureBound(Context ctx, Runnable after) {

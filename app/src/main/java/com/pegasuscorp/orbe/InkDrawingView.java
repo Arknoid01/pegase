@@ -35,7 +35,14 @@ public class InkDrawingView extends View {
         void onDrawingFinished(Ink ink);
     }
 
+    /** Début / fin de trait — pour reporter le hitch micro hors du geste HOME. */
+    public interface StrokeActivityListener {
+        void onStrokeActivityChanged(boolean active);
+    }
+
     private DrawingCallback callback;
+    private StrokeActivityListener strokeActivityListener;
+    private boolean strokeActive;
 
     public InkDrawingView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -59,6 +66,23 @@ public class InkDrawingView extends View {
 
     public void setCallback(DrawingCallback callback) {
         this.callback = callback;
+    }
+
+    public void setStrokeActivityListener(StrokeActivityListener listener) {
+        this.strokeActivityListener = listener;
+    }
+
+    /** Trait en cours (doigt au contact). */
+    public boolean isStrokeActive() {
+        return strokeActive;
+    }
+
+    private void setStrokeActive(boolean active) {
+        if (strokeActive == active) return;
+        strokeActive = active;
+        if (strokeActivityListener != null) {
+            strokeActivityListener.onStrokeActivityChanged(active);
+        }
     }
 
     public void setStrokeColor(int color) {
@@ -88,6 +112,7 @@ public class InkDrawingView extends View {
                 path.moveTo(x, y);
                 strokeBuilder = Ink.Stroke.builder();
                 strokeBuilder.addPoint(Ink.Point.create(x, y, t));
+                setStrokeActive(true);
                 getParent().requestDisallowInterceptTouchEvent(true);
                 break;
             case MotionEvent.ACTION_MOVE:
@@ -115,6 +140,7 @@ public class InkDrawingView extends View {
                     }
                     strokeBuilder = null;
                 }
+                setStrokeActive(false);
                 break;
             case MotionEvent.ACTION_CANCEL:
                 cancelStroke();
@@ -134,6 +160,7 @@ public class InkDrawingView extends View {
         path.reset();
         inkBuilder = Ink.builder();
         strokeBuilder = null;
+        setStrokeActive(false);
         invalidate();
     }
 }

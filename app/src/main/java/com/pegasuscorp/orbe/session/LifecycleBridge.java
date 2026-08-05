@@ -37,6 +37,11 @@ public final class LifecycleBridge {
     private static final long HOME_WAKE_DELAY_MS = 1_600L;
     private static final long HOME_WARMUP_DELAY_LOW_MS = 1_800L;
     private static final long HOME_WAKE_DELAY_LOW_MS = 4_000L;
+    /**
+     * Après un geste HOME (lettre / tiroir) : attendre le calme avant d'ouvrir le micro
+     * pour ne pas couper le dessin ou le scroll du drawer.
+     */
+    private static final long HOME_GESTURE_IDLE_MS = 2_400L;
 
     public interface Host {
         androidx.appcompat.app.AppCompatActivity activity();
@@ -60,6 +65,11 @@ public final class LifecycleBridge {
         void onMicGrantedEnterChat();
 
         void onMicGrantedStartListening();
+
+        /** Trait en cours ou tiroir apps ouvert — reporter le hitch micro. */
+        default boolean isHomeGestureBusy() {
+            return false;
+        }
     }
 
     private final Host host;
@@ -184,6 +194,12 @@ public final class LifecycleBridge {
         if (a.isFinishing() || a.isDestroyed()) return;
         boolean lowMem = lowMemAtSchedule || MemoryPressure.isLow(a);
 
+        // Geste HOME en cours : ne pas rouvrir le micro / prefetch pendant la lettre.
+        if (host.isHomeGestureBusy()) {
+            noteHomeInteraction();
+            return;
+        }
+
         VoiceInputHandler voice = host.voiceInput();
         if (voice != null) {
             voice.resumeChatListeningIfNeeded();
@@ -210,6 +226,11 @@ public final class LifecycleBridge {
         deferredWake = null;
         androidx.appcompat.app.AppCompatActivity a = host.activity();
         if (a.isFinishing() || a.isDestroyed()) return;
+        // Encore en train de dessiner / drawer ouvert → reporter encore.
+        if (host.isHomeGestureBusy()) {
+            scheduleWakeAfterGestureIdle(lowMemAtSchedule);
+            return;
+        }
         // STT Google sous low-mem au retour HOME = hitch + RAM — reporter via sync léger seul.
         if (lowMemAtSchedule || MemoryPressure.isLow(a)) {
             PegaseWakeService.sync(a);
@@ -227,15 +248,42 @@ public final class LifecycleBridge {
         }
     }
 
+    /**
+     * Appelé dès qu'un geste HOME commence (trait encre, ouverture tiroir).
+     * Annule le démarrage micro imminent et le reporte après calme.
+     */
+    public void noteHomeInteraction() {
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        if (a.isFinishing() || a.isDestroyed()) return;
+        boolean lowMem = MemoryPressure.isLow(a);
+        cancelDeferredWakeOnly();
+        scheduleWakeAfterGestureIdle(lowMem);
+        // Warmup micro chat : même report si encore pending.
+        if (deferredHomeWarmup != null) {
+            mainHandler.removeCallbacks(deferredHomeWarmup);
+            deferredHomeWarmup = () -> runDeferredHomeWarmup(lowMem);
+            mainHandler.postDelayed(deferredHomeWarmup, HOME_GESTURE_IDLE_MS);
+        }
+    }
+
+    private void scheduleWakeAfterGestureIdle(boolean lowMem) {
+        deferredWake = () -> runDeferredWake(lowMem);
+        mainHandler.postDelayed(deferredWake, HOME_GESTURE_IDLE_MS);
+    }
+
+    private void cancelDeferredWakeOnly() {
+        if (deferredWake != null) {
+            mainHandler.removeCallbacks(deferredWake);
+            deferredWake = null;
+        }
+    }
+
     private void cancelDeferredHomeWarmup() {
         if (deferredHomeWarmup != null) {
             mainHandler.removeCallbacks(deferredHomeWarmup);
             deferredHomeWarmup = null;
         }
-        if (deferredWake != null) {
-            mainHandler.removeCallbacks(deferredWake);
-            deferredWake = null;
-        }
+        cancelDeferredWakeOnly();
     }
 
     public void onPause() {
@@ -288,10 +336,8 @@ public final class LifecycleBridge {
             if (vm != null) vm.stopListening();
         } else if (ChatSessionRegistry.isActive()
                 || PegaseWakeController.isVoiceChatActive()) {
-            if (vm != null) {
-                vm.cancelScheduledListening();
-                vm.stopListening();
-            }
+            // Écoute continue : open_app / autre app au premier plan ne doit pas
+            // tuer le STT ni annuler la reprise planifiée après TTS.
         } else {
             if (voice != null) voice.finalizeChatSession(false);
             scheduleLlmIdleUnload();

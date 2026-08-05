@@ -174,7 +174,8 @@ public final class IntentDetector {
      */
     public static boolean looksLikeUi(String fold) {
         if (fold == null || fold.isEmpty()) return false;
-        if (fold.contains("ui_action") || fold.contains("ui_explain")
+        if (fold.contains("ui_action") || fold.contains("ui_loop")
+                || fold.contains("ui_explain")
                 || fold.contains("ui_search") || fold.contains("copilot_action")) {
             return true;
         }
@@ -199,6 +200,12 @@ public final class IntentDetector {
                 || fold.contains("type ") || fold.contains("clique")
                 || fold.contains("click");
         if (openVerb && typeOrClick) return true;
+        // « ouvre WhatsApp et envoie / SMS / appelle » — pas open_app seul
+        boolean messageOrCall = fold.contains("envoie") || fold.contains("envoyer")
+                || fold.contains(" sms") || fold.startsWith("sms")
+                || fold.contains("message") || fold.contains("appelle")
+                || fold.contains("appeler") || fold.contains("appel ");
+        if (openVerb && messageOrCall) return true;
         // « ouvre/appuie/tape … icône|bouton » (pas « ouvre Cursor » seul)
         boolean uiTarget = fold.contains("icone") || fold.contains("icon ")
                 || fold.contains("bouton") || fold.contains("tuile");

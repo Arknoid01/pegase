@@ -33,8 +33,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Prépare la route micro pour KWS + STT — téléphone ou Bluetooth SCO / communication device.
- * Instance partagée : le wake word et {@link VoiceManager} doivent partager le même SCO.
+ * Prépare la route micro — téléphone ou Bluetooth SCO / communication device.
+ * <p>
+ * Une instance par process. Le SCO conversationnel appartient au launcher
+ * ({@link VoiceManager}) ; le process {@code :voice} force le micro téléphone
+ * pour le wake et ne tient plus de hold SCO.
  */
 public final class KwsAudioRouteManager {
 
@@ -42,8 +45,6 @@ public final class KwsAudioRouteManager {
     private static final long SCO_WAIT_MS = 6_000L;
     private static final long ROUTE_NOTIFY_DEBOUNCE_MS = 300L;
     private static final long SCO_RETRY_PAUSE_MS = 800L;
-    /** Pause avant une 2ᵉ acquisition wake (évite throttle OS après refus SCO en rafale). */
-    public static final long WAKE_SCO_RETRY_DELAY_MS = 4_500L;
 
     private static final Object LOCK = new Object();
     private static KwsAudioRouteManager shared;
@@ -65,14 +66,9 @@ public final class KwsAudioRouteManager {
     private final AudioManager audioManager;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    /** Sérialise prepare/release — VoiceManager (async) et KWS (thread capture) partagent le SCO. */
+    /** Sérialise prepare/release — VoiceManager (async) et callbacks route partagent le SCO. */
     private final Object scoLock = new Object();
     private final AtomicInteger scoHoldCount = new AtomicInteger(0);
-    /**
-     * Hold dédié à {@link VoiceService} (écoute wake) : le SCO reste up entre deux
-     * tentatives de détection et n'est libéré qu'à l'arrêt de l'écoute / destroy.
-     */
-    private boolean wakeServiceHold = false;
 
     private volatile RouteChangeListener routeChangeListener;
     private volatile RouteKind activeKind = RouteKind.UNKNOWN;
@@ -244,105 +240,9 @@ public final class KwsAudioRouteManager {
         ensureBluetoothScoActiveAsync(onReady);
     }
 
-    /**
-     * Hold SCO pour toute la durée d'écoute wake ({@link VoiceService}).
-     * Idempotent : n'acquiert le ref-count qu'une fois ; réarme le lien si besoin.
-     */
-    public void ensureWakeServiceScoHoldAsync(java.util.function.Consumer<Boolean> onReady) {
-        io.execute(() -> {
-            boolean ok;
-            boolean firstAcquire;
-            try {
-                synchronized (scoLock) {
-                    firstAcquire = !wakeServiceHold;
-                    if (wakeServiceHold) {
-                        ok = rearmWakeServiceScoLocked();
-                    } else {
-                        // ensureBluetoothScoActive synchronise aussi sur scoLock —
-                        // on inligne l'acquisition pour éviter un double-lock.
-                        phoneForced = false;
-                        refreshRouteKind();
-                        logRoute("ensureWakeServiceScoHold");
-                        scoHoldCount.incrementAndGet();
-                        if (activeKind != RouteKind.BLUETOOTH_SCO) {
-                            wakeServiceHold = true;
-                            ok = true;
-                        } else {
-                            ok = establishScoWithFallbacksLocked();
-                            if (ok) {
-                                wakeServiceHold = true;
-                            } else {
-                                scoHoldCount.decrementAndGet();
-                                abandonScoAudioFocus();
-                                Log.w(TAG, "ensureWakeServiceScoHold failed");
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "ensureWakeServiceScoHoldAsync", e);
-                ok = false;
-                firstAcquire = false;
-            }
-            final boolean result = ok;
-            final boolean acquired = firstAcquire;
-            try {
-                org.json.JSONObject f = new org.json.JSONObject();
-                f.put("ok", result);
-                f.put("first_acquire", acquired);
-                f.put("want_bt", wantsBluetoothMic());
-                f.put("sco_prepared", scoPrepared);
-                f.put("holds", scoHoldCount.get());
-                f.put("route", describeRoute());
-                f.put("wake_service_hold", wakeServiceHold);
-                f.put("music_active", audioManager.isMusicActive());
-                f.put("a2dp_out", hasBluetoothAudioOutput());
-                f.put("hfp_audio", isHeadsetAudioConnected());
-                f.put("sco_available_offcall", isScoLikelyAvailable());
-                f.put("am_sco_on", audioManager.isBluetoothScoOn());
-                f.put("hfp_devices", countHfpDevices());
-                // Toujours journalisé : en cas de succès aussi, savoir *quelle* méthode
-                // a établi le lien est la seule façon de relier la qualité audio obtenue
-                // au chemin emprunté.
-                f.put("phases", scoPhaseLog.toString());
-                f.put("sco_states", scoStateLog.toString());
-                if (!result) {
-                    f.put("fail_reason", lastScoFailReason == null ? "" : lastScoFailReason);
-                }
-                com.pegasuscorp.orbe.diag.PegaseDiagLog.kws(app, "sco_service_start", f);
-            } catch (Exception ignored) {}
-            Log.i(TAG, "sco_service_start ok=" + result
-                    + " first=" + acquired
-                    + " prepared=" + scoPrepared
-                    + " fail=" + lastScoFailReason
-                    + " " + describeRoute());
-            if (onReady != null) main.post(() -> onReady.accept(result));
-        });
-    }
-
-    /** Libère le hold VoiceService (si acquis). No-op sinon. */
     /** Dernière raison d'échec SCO (diag / fallback). */
     public String lastScoFailReason() {
         return lastScoFailReason == null ? "" : lastScoFailReason;
-    }
-
-    public void releaseWakeServiceScoHold() {
-        boolean shouldRelease;
-        synchronized (scoLock) {
-            shouldRelease = wakeServiceHold;
-            wakeServiceHold = false;
-        }
-        if (shouldRelease) {
-            Log.i(TAG, "releaseWakeServiceScoHold");
-            releaseBluetoothSco();
-        }
-    }
-
-    /** true si le hold VoiceService est encore actif (handoff wake→STT). */
-    public boolean hasWakeServiceScoHold() {
-        synchronized (scoLock) {
-            return wakeServiceHold;
-        }
     }
 
     /** Libère un hold ; SCO réellement coupé quand le compteur tombe à 0. */
@@ -501,20 +401,6 @@ public final class KwsAudioRouteManager {
         }
     }
 
-    /** Réarme SCO sans toucher au ref-count (hold wake déjà pris). */
-    private boolean rearmWakeServiceScoLocked() {
-        phoneForced = false;
-        refreshRouteKind();
-        if (activeKind != RouteKind.BLUETOOTH_SCO) {
-            return true;
-        }
-        if (scoPrepared && hasLiveBluetoothScoInput()) {
-            return true;
-        }
-        Log.i(TAG, "rearmWakeServiceSco — lien SCO absent, rétablissement");
-        return establishScoWithFallbacksLocked();
-    }
-
     private void releaseCaptureInternal() {
         if (!scoPrepared && audioManager.getMode() == AudioManager.MODE_NORMAL) {
             abandonScoAudioFocus();
@@ -549,7 +435,6 @@ public final class KwsAudioRouteManager {
             pendingRouteNotify = null;
         }
         synchronized (scoLock) {
-            wakeServiceHold = false;
             scoHoldCount.set(0);
             releaseCaptureInternal();
             phoneForced = false;

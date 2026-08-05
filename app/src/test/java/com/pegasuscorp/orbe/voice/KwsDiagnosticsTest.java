@@ -18,12 +18,14 @@ public class KwsDiagnosticsTest {
 
     @Test
     public void computeRmsDb_fullScaleIsNearZeroDb() {
+        // Pleine échelle = ±32 767. À ±16 000 le RMS vaut la moitié, soit -6,2 dB :
+        // la borne « > -6 » était arithmétiquement inatteignable.
         short[] loud = new short[100];
         for (int i = 0; i < loud.length; i++) {
-            loud[i] = (short) (i % 2 == 0 ? 16_000 : -16_000);
+            loud[i] = (short) (i % 2 == 0 ? 32_767 : -32_767);
         }
         float db = KwsDiagnostics.computeRmsDb(loud, loud.length);
-        assertTrue(db > -6f);
+        assertTrue("pleine échelle attendue proche de 0 dB, obtenu " + db, db > -1f);
         assertTrue(db <= 0f);
     }
 

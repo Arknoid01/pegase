@@ -9,8 +9,8 @@ public interface ToolCallback {
     void onSuccess(ToolResult result);
 
     /**
-     * Outil exécuté ET il a ouvert une autre app.
-     * Pégase dit la confirmation mais suspend la conversation.
+     * Outil exécuté ET il a ouvert une autre app (premier plan changé).
+     * En session vocale, la conversation continue : confirmation TTS puis reprise micro.
      */
     default void onSuccessAndExit(ToolResult result) {
         onSuccess(result);

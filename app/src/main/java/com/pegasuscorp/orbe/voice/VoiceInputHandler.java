@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
+import android.speech.SpeechRecognizer;
+import android.util.Log;
 import android.widget.Toast;
 
 import com.pegasuscorp.orbe.ApiSettingsActivity;
@@ -22,6 +24,8 @@ import com.pegasuscorp.orbe.diag.CorrectionsEditor;
 import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.llm.LlmEngineManager;
 import com.pegasuscorp.orbe.llm.ModelStore;
+import com.pegasuscorp.orbe.copilot.CopilotHintsEditor;
+import com.pegasuscorp.orbe.memory.MemoryEditResult;
 import com.pegasuscorp.orbe.memory.MemoryEditor;
 import com.pegasuscorp.orbe.notepad.NotepadEditor;
 import com.pegasuscorp.orbe.session.PegaseSession;
@@ -100,6 +104,12 @@ public final class VoiceInputHandler {
     private boolean lockedChatMode = false;
     private boolean speakerVerifiedSession = false;
     private boolean pendingEnterChatAfterMic = false;
+    private static final String TAG = "VoiceInputHandler";
+    /** Reprises d'écoute consécutives avant d'abandonner la session. */
+    private static final int MAX_LISTEN_FAILURES = 2;
+    /** Délai croissant entre deux reprises (× le rang de l'échec). */
+    private static final long LISTEN_RETRY_BASE_MS = 600L;
+    private int listenFailureStreak;
     private int chatRequestId = 0;
     private Runnable resumeChatListeningRunnable;
 
@@ -163,12 +173,45 @@ public final class VoiceInputHandler {
         }
     }
 
-    private void onVoiceListenFailed() {
+    /**
+     * Écoute terminée sans transcription pendant une session vocale.
+     *
+     * <p>Ce handler était vide : sur {@code ERROR_CLIENT} / {@code ERROR_NO_MATCH}, la
+     * session restait active, {@code voiceChatActive} bloquait le mot d'éveil, et le
+     * micro ne repartait jamais — Pégase paraissait sourd jusqu'à intervention manuelle
+     * (observé en série dans les traces {@code stt_error 5/7}).
+     *
+     * <p>On redonne donc sa chance à l'utilisateur, un nombre <b>borné</b> de fois et
+     * avec un délai croissant — pas une boucle de retry. Budget épuisé : on termine la
+     * session proprement, ce qui rend la main au mot d'éveil plutôt que de laisser un
+     * micro mort dans une session vivante.
+     */
+    private void onVoiceListenFailed(int error) {
         // Bureau gère ses propres retries via ChatVoiceBridge.
+        if (ChatVoiceBridge.isBureauActive()) return;
+        if (conversation == null || !conversation.isActive()) return;
+
+        boolean recoverable = error == SpeechRecognizer.ERROR_NO_MATCH
+                || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                || error == SpeechRecognizer.ERROR_CLIENT;
+        if (recoverable && listenFailureStreak < MAX_LISTEN_FAILURES) {
+            listenFailureStreak++;
+            long delay = LISTEN_RETRY_BASE_MS * listenFailureStreak;
+            mainHandler.postDelayed(this::resumeChatListeningIfNeeded, delay);
+            return;
+        }
+        Log.i(TAG, "écoute abandonnée (error=" + error
+                + " streak=" + listenFailureStreak + ") — fin de session");
+        listenFailureStreak = 0;
+        finalizeChatSession(true);
     }
 
     /** Entrée micro unique (launcher ou interface). */
     public void handleVoiceTranscript(String transcript) {
+        // Une transcription reçue : les échecs précédents ne comptent plus. Sans ce
+        // reset, deux « rien compris » espacés dans une longue conversation finiraient
+        // par la clore alors que le micro fonctionne.
+        listenFailureStreak = 0;
         if (conversation != null && conversation.isActive()) {
             handleChatInput(transcript);
             return;
@@ -475,6 +518,14 @@ public final class VoiceInputHandler {
                 return;
             }
             tryContextEdit(transcript);
+            return;
+        }
+        if (CopilotHintsEditor.looksLikeHintsEdit(transcript)) {
+            if (!toolsAllowed()) {
+                speakUnlockRequired();
+                return;
+            }
+            tryCopilotHintsEdit(transcript);
             return;
         }
         if (MemoryEditor.looksLikeMemoryEdit(transcript)) {
@@ -1030,6 +1081,25 @@ public final class VoiceInputHandler {
                 || t.contains("montre la conversation");
     }
 
+    private void tryCopilotHintsEdit(String transcript) {
+        PegaseWakeController.setAssistantThinking(false);
+        MemoryEditResult result = CopilotHintsEditor.process(activity, transcript);
+        callback.runOnUiThread(() -> {
+            if (result.fallbackToChat) {
+                sendChatMessage(transcript);
+                return;
+            }
+            if (result.success && result.toastMessage != null) {
+                callback.showToast("✓ Hint : " + result.toastMessage, Toast.LENGTH_LONG);
+            }
+            if (result.spokenReply != null && !result.spokenReply.isEmpty()) {
+                output.speak(result.spokenReply, this::scheduleListeningResume);
+            } else {
+                scheduleListeningResume();
+            }
+        });
+    }
+
     private void tryMemoryEdit(String transcript) {
         PegaseWakeController.setAssistantThinking(true);
         memoryEditor.process(transcript, result -> callback.runOnUiThread(() -> {
@@ -1229,8 +1299,12 @@ public final class VoiceInputHandler {
     }
 
     private void handleVoiceToolExit(ToolResult result) {
+        // open_app / autre app au premier plan : confirmation puis reprise micro
+        // (écoute continue tant que voiceChatActive — pas de nouveau wake).
         if (result != null && result.text != null && !result.text.trim().isEmpty()) {
-            output.speak(result.text, null);
+            output.speak(result.text, this::scheduleListeningResume);
+        } else {
+            scheduleListeningResume();
         }
     }
 

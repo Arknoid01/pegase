@@ -56,10 +56,17 @@ public class ConversationHistorySanitizerTest {
                 new ChatBackend.Turn(true, "Ça va ?"),
                 new ChatBackend.Turn(false, "Oui."));
         List<ChatBackend.Turn> out = ConversationHistorySanitizer.normalize(in);
+        // « Salut » partait avec sa réponse en erreur : la question restait sinon sans
+        // réponse, et la fusion des tours utilisateur consécutifs la faisait disparaître
+        // sans laisser de trace. Une note unique remplace l'échange perdu.
         assertEquals(3, out.size());
-        assertEquals("Salut", out.get(0).text);
+        assertEquals(ChatSpokenErrors.LOST_EXCHANGE_NOTE, out.get(0).text);
+        assertFalse(out.get(0).fromUser);
         assertEquals("Ça va ?", out.get(1).text);
-        assertEquals("Oui", out.get(2).text);
+        // La ponctuation finale est conservée : elle n'est retirée que lorsqu'une
+        // tournure bannie a réellement été coupée, sinon toute question perdait son
+        // point d'interrogation — et son intonation au TTS.
+        assertEquals("Oui.", out.get(2).text);
     }
 
     @Test

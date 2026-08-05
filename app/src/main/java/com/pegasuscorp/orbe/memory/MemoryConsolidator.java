@@ -4,7 +4,6 @@ import android.content.Context;
 import android.util.Log;
 
 import com.pegasuscorp.orbe.rag.EmbeddingEngine;
-import com.pegasuscorp.orbe.rag.VectorStore;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -12,20 +11,20 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Consolidation légère : promotion des éléments de session vers la mémoire permanente,
- * avec déduplication textuelle et sémantique.
+ * Consolidation : promotion session → permanente via juge Mem0-style
+ * (ADD / UPDATE / DELETE soft / NOOP), avec repli dédup cosine si LLM down.
  */
 public final class MemoryConsolidator {
 
     private static final String TAG = "MemoryConsolidator";
-    /** Au-dessus de ce cosine, un fait est considéré comme doublon d'un souvenir existant. */
+    /** Au-dessus de ce cosine, un fait est considéré comme doublon (fallback sans LLM). */
     static final float SEMANTIC_DEDUP_THRESHOLD = 0.85f;
 
     private MemoryConsolidator() {}
 
     /**
      * Promouvoit les faits, décisions et sujets en attente d'un résumé de session
-     * en souvenirs permanents s'ils ne dupliquent pas un souvenir existant.
+     * en souvenirs permanents (juge sémantique + LLM).
      */
     public static void promoteSessionFacts(Context context, SessionSummary summary) {
         promoteSession(context, summary);
@@ -33,11 +32,8 @@ public final class MemoryConsolidator {
 
     public static void promoteSession(Context context, SessionSummary summary) {
         if (context == null || summary == null) return;
-        // Faits / décisions : défense secondaire (bruit UI / intention de clic).
         promoteItems(context, summary.importantFacts, "session", 0.72, false);
         promoteItems(context, summary.decisions, "decision", 0.68, false);
-        // Pending : liste blanche uniquement (rappel humain reporté) — jamais
-        // d'intention de clic / négociation UI / « veut cliquer sur … ».
         promoteItems(context, summary.pendingTopics, "pending", 0.65, true);
     }
 
@@ -59,8 +55,16 @@ public final class MemoryConsolidator {
                 Log.d(TAG, "Élément ignoré (éphémère): " + trimmed);
                 continue;
             }
+            try {
+                if (MemoryUpdateJudge.judgeAndApply(
+                        context, repo, trimmed, category, importance, today)) {
+                    continue;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Juge mémoire échoué, fallback dédup", e);
+            }
             if (isDuplicate(repo, context, trimmed)) {
-                Log.d(TAG, "Élément ignoré (doublon): " + trimmed);
+                Log.d(TAG, "Élément ignoré (doublon fallback): " + trimmed);
                 continue;
             }
             repo.addPermanentMemory(new MemoryEntry(category, trimmed, importance, today));
@@ -71,7 +75,7 @@ public final class MemoryConsolidator {
     static boolean isDuplicate(MemoryRepository repo, Context context, String fact) {
         List<MemoryEntry> existing = repo.getAllPermanentMemories();
         for (MemoryEntry e : existing) {
-            if (e.content == null) continue;
+            if (e == null || e.content == null || e.isInvalid()) continue;
             if (EphemeralMemoryFilter.samePendingIntent(e.content, fact)) return true;
             String lower = fact.toLowerCase(Locale.ROOT);
             String ec = e.content.toLowerCase(Locale.ROOT);
@@ -86,7 +90,9 @@ public final class MemoryConsolidator {
         try {
             float[] factVec = EmbeddingEngine.get(context).embed(fact);
             for (MemoryEntry e : existing) {
-                if (e.content == null || e.content.isEmpty()) continue;
+                if (e == null || e.content == null || e.content.isEmpty() || e.isInvalid()) {
+                    continue;
+                }
                 float[] memVec = EmbeddingEngine.get(context).embed(e.content);
                 float sim = cosine(factVec, memVec);
                 if (sim >= SEMANTIC_DEDUP_THRESHOLD) return true;

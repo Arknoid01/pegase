@@ -18,6 +18,8 @@ public final class A11yUiMatcher {
     public static final class Criteria {
         public String text = "";
         public String viewId = "";
+        /** Matching texte plus strict (hints par app). */
+        public boolean strictText = false;
 
         public static Criteria fromText(String text) {
             Criteria c = new Criteria();
@@ -29,6 +31,11 @@ public final class A11yUiMatcher {
             Criteria c = new Criteria();
             c.viewId = viewId != null ? viewId.trim() : "";
             return c;
+        }
+
+        public Criteria withStrictText(boolean strict) {
+            this.strictText = strict;
+            return this;
         }
 
         public boolean isEmpty() {
@@ -132,6 +139,7 @@ public final class A11yUiMatcher {
     private static boolean isStrongMatch(AccessibilityNodeInfo node, Criteria criteria) {
         if (node == null) return false;
         if (nodeMatches(node, criteria)) return true;
+        if (criteria != null && criteria.strictText) return false;
         // findByText sans match fuzzy strict : seulement si le libellé contient vraiment la cible.
         String label = normalizeForMatch(combinedLabel(node));
         String needle = normalizeForMatch(criteria.text);
@@ -225,9 +233,29 @@ public final class A11yUiMatcher {
             return hayContainsNeedle(hay, criteria.viewId);
         }
         if (textOnly) {
+            if (criteria.strictText) {
+                return hayStrictText(hay, criteria.text);
+            }
             return hayContainsNeedle(hay, criteria.text);
         }
+        if (criteria.strictText) {
+            return hayStrictText(hay, criteria.text)
+                    && hayContainsNeedle(hay, criteria.viewId);
+        }
         return hayContainsNeedle(hay, criteria.text) && hayContainsNeedle(hay, criteria.viewId);
+    }
+
+    /** Exact / préfixe sur le libellé normalisé — évite les gros conteneurs WhatsApp. */
+    static boolean hayStrictText(String hayNormalized, String needleRaw) {
+        if (TextUtils.isEmpty(needleRaw)) return false;
+        String needle = normalizeForMatch(needleRaw);
+        if (needle.isEmpty() || hayNormalized == null || hayNormalized.isEmpty()) return false;
+        if (hayNormalized.equals(needle)) return true;
+        if (hayNormalized.startsWith(needle + " ")) return true;
+        // Premier token du libellé = cible (ex. « Marie hier 20:00 »).
+        int sp = hayNormalized.indexOf(' ');
+        String first = sp < 0 ? hayNormalized : hayNormalized.substring(0, sp);
+        return first.equals(needle);
     }
 
     /**

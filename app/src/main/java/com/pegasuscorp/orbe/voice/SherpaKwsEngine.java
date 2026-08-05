@@ -681,7 +681,7 @@ public final class SherpaKwsEngine {
 
     private boolean openMic() {
         synchronized (captureLock) {
-            // SCO tenu par VoiceService (ensureWakeServiceScoHold) — pas de prepare/release ici.
+            // Route fixée par VoiceService (forcePhoneBuiltin) — pas de prepare/release SCO ici.
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : android.media.MediaRecorder.AudioSource.MIC;

@@ -13,10 +13,15 @@ public final class PegaseWakeStore {
     private static final String KEY_GENTLE = "gentle_mode";
     private static final String KEY_LEGACY_CLEANUP = "local_wake_removed_v4";
     private static final String KEY_OWW_THRESHOLD = "oww_threshold";
+    /** Une fois : anciens seuils v1 (≥0.80) ramenés au défaut hard-neg. */
+    private static final String KEY_OWW_THR_MIG_V2 = "oww_thr_mig_v2";
     /** Adresse MAC du casque visé — vide = n'importe quel HFP connecté. */
     private static final String KEY_HFP_MAC = "hfp_mac";
-    /** Seuil OWW — modèle v2 hard-neg ; 0.5 = défaut openWakeWord. */
-    public static final float DEFAULT_OWW_THRESHOLD = 0.50f;
+    /**
+     * Seuil OWW — modèle v2 hard-neg.
+     * 0.50 = défaut upstream openWakeWord (sensible) ; 0.65 = départ Pégase (moins de FP).
+     */
+    public static final float DEFAULT_OWW_THRESHOLD = 0.65f;
 
     private PegaseWakeStore() {}
 
@@ -58,21 +63,36 @@ public final class PegaseWakeStore {
 
     public static float getOwwThreshold(Context context) {
         SharedPreferences p = prefs(context);
+        migrateLegacyHighThresholdOnce(p);
         if (!p.contains(KEY_OWW_THRESHOLD)) {
             return DEFAULT_OWW_THRESHOLD;
         }
         float t = p.getFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD);
-        // Anciens seuils v1 (0.86–0.88) trop hauts pour le modèle hard-neg.
-        if (t >= 0.80f) {
-            t = DEFAULT_OWW_THRESHOLD;
-            p.edit().putFloat(KEY_OWW_THRESHOLD, t).apply();
-        }
-        return t;
+        return Math.max(0.40f, Math.min(0.95f, t));
     }
 
     public static void setOwwThreshold(Context context, float threshold) {
         float t = Math.max(0.40f, Math.min(0.95f, threshold));
-        prefs(context).edit().putFloat(KEY_OWW_THRESHOLD, t).apply();
+        prefs(context).edit()
+                .putFloat(KEY_OWW_THRESHOLD, t)
+                .putBoolean(KEY_OWW_THR_MIG_V2, true)
+                .apply();
+    }
+
+    /**
+     * Une seule fois : si une pref v1 (0.86–0.92) est encore là, la ramener au défaut
+     * hard-neg. Ensuite l'utilisateur peut choisir librement (y compris ≥0.80).
+     */
+    private static void migrateLegacyHighThresholdOnce(SharedPreferences p) {
+        if (p.getBoolean(KEY_OWW_THR_MIG_V2, false)) return;
+        SharedPreferences.Editor ed = p.edit().putBoolean(KEY_OWW_THR_MIG_V2, true);
+        if (p.contains(KEY_OWW_THRESHOLD)) {
+            float t = p.getFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD);
+            if (t >= 0.80f) {
+                ed.putFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD);
+            }
+        }
+        ed.apply();
     }
 
     /**

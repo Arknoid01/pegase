@@ -16,6 +16,8 @@ interface IVoiceWakeService {
      */
     void pauseWakeListeningKeepSco();
     void setGentleMode(boolean gentle);
+    /** Seuil openWakeWord — poussé depuis le launcher (:voice a ses propres prefs). */
+    void setOwwThreshold(float threshold);
     void registerCallback(IWakeWordCallback callback);
     void unregisterCallback(IWakeWordCallback callback);
     void registerHealthCallback(IWakeHealthCallback callback);

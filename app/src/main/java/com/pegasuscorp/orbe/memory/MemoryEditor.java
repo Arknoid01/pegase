@@ -48,6 +48,10 @@ public final class MemoryEditor {
 
     public static boolean looksLikeMemoryEdit(String text) {
         if (text == null || text.trim().isEmpty()) return false;
+        // Hints copilote par app — pas une mémoire personnelle.
+        if (com.pegasuscorp.orbe.copilot.CopilotHintsEditor.looksLikeHintsEdit(text)) {
+            return false;
+        }
         String t = text.toLowerCase(Locale.ROOT);
         return RETIENS.matcher(text).find()
                 || OUBLIE.matcher(text).find()
@@ -80,8 +84,12 @@ public final class MemoryEditor {
         if (m.find()) {
             String fact = m.group(1).trim();
             if (fact.isEmpty()) return null;
-            memory.addPermanentMemory(new MemoryEntry(
-                    "user", fact, 0.85, today()));
+            boolean ok = MemoryUpdateJudge.judgeAndApply(
+                    appContext, memory, fact, "user", 0.85, today());
+            if (!ok) {
+                memory.addPermanentMemory(new MemoryEntry(
+                        "user", fact, 0.85, today()));
+            }
             String shortFact = truncate(fact, 50);
             return MemoryEditResult.applied(
                     "Mémoire : " + shortFact,
@@ -92,10 +100,10 @@ public final class MemoryEditor {
         if (m.find()) {
             String query = m.group(1).trim();
             if (query.isEmpty()) return null;
-            int removed = memory.removePermanentContaining(query);
-            if (removed > 0) {
+            int n = memory.invalidatePermanentContaining(query, "demande utilisateur");
+            if (n > 0) {
                 return MemoryEditResult.applied(
-                        removed + " souvenir(s) supprimé(s)",
+                        n + " souvenir(s) archivé(s)",
                         "D'accord, j'ai oublié ça.");
             }
             return MemoryEditResult.failed(
@@ -172,13 +180,17 @@ public final class MemoryEditor {
                 String content = plan.optString("content", "").trim();
                 if (content.isEmpty()) return MemoryEditResult.notMemoryEdit();
                 String category = plan.optString("category", "user");
-                memory.addPermanentMemory(new MemoryEntry(category, content, 0.85, today()));
+                boolean ok = MemoryUpdateJudge.judgeAndApply(
+                        appContext, memory, content, category, 0.85, today());
+                if (!ok) {
+                    memory.addPermanentMemory(new MemoryEntry(category, content, 0.85, today()));
+                }
                 return MemoryEditResult.applied(summary, spoken);
             }
             case "remove_permanent": {
                 String search = plan.optString("search", "").trim();
                 if (search.isEmpty()) return MemoryEditResult.failed("Je n'ai pas compris quoi supprimer.");
-                int n = memory.removePermanentContaining(search);
+                int n = memory.invalidatePermanentContaining(search, "demande utilisateur");
                 if (n == 0) return MemoryEditResult.failed("Je n'ai rien trouvé à supprimer.");
                 return MemoryEditResult.applied(summary, spoken);
             }
@@ -217,6 +229,7 @@ public final class MemoryEditor {
         if (!all.isEmpty()) {
             sb.append("Souvenirs permanents :\n");
             for (MemoryEntry e : all) {
+                if (e == null || e.isInvalid()) continue;
                 sb.append("- [").append(e.category).append("] ").append(e.content).append("\n");
             }
         }

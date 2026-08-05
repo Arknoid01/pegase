@@ -44,6 +44,12 @@ public final class ChatVoiceBridge {
         if (host != null && host.get() == activity) {
             host = null;
         }
+        // Session vocale / wake in-place : garder le SpeechRecognizer partagé
+        // (open_app peut détruire MainActivity sans finaliser la conversation).
+        if (PegaseWakeController.isVoiceChatActive()
+                || PegaseWakeController.isInPlaceVoiceActive()) {
+            return;
+        }
         VoiceManager voice = sharedVoice;
         if (voice != null) {
             voice.detachHost(activity);

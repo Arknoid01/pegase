@@ -28,7 +28,10 @@ public class ProjectObjectStoreTest {
         ProjectObjectStore.resetInstanceForTests();
         IntentionPrefs.clearAll(ctx);
         IntentionPrefs.setEnabled(ctx, true);
-        IntentionPrefs.setQuietHours(ctx, 22, 7);
+        // Fenêtre calme hors de l'heure courante : figée à 22h-7h, ce test échouait
+        // dès que la suite tournait le soir, alors qu'il ne porte pas sur les horaires.
+        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        IntentionPrefs.setQuietHours(ctx, (hour + 2) % 24, (hour + 3) % 24);
     }
 
     @Test

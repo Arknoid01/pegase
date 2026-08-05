@@ -68,7 +68,8 @@ public class DailyToolsSchemaSizeTest {
         // Étape 2 : UI / F1 / life / project hors schema general
         for (Tool t : dailyTools) {
             assertFalse("ui_* hors daily: " + t.id(),
-                    "ui_action".equals(t.id()) || "ui_explain".equals(t.id())
+                    "ui_action".equals(t.id()) || "ui_loop".equals(t.id())
+                            || "ui_explain".equals(t.id())
                             || "ui_search".equals(t.id()) || "copilot_action".equals(t.id())
                             || "screen_capture".equals(t.id()));
             assertFalse("f1 hors daily", "f1".equals(t.id()));

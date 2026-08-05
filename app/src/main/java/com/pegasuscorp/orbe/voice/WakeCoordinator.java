@@ -300,6 +300,14 @@ public final class WakeCoordinator {
         boolean alreadyActive;
         AudioRouteObserver.AudioSource source;
         synchronized (this) {
+            // Le wake ne fige plus de route utile (il écoute le micro téléphone) : c'est
+            // l'état du casque *à cet instant* qui décide où part la conversation. Le
+            // casque a pu être connecté ou retiré depuis le démarrage de l'écoute.
+            // Exception : si le SCO s'est déjà révélé inétablissable pour cette session,
+            // le verrou tient — inutile de relancer une danse condamnée.
+            if (!scoUnavailableForSession) {
+                sessionSource = routeObserver.currentSource();
+            }
             source = sessionSource;
             alreadyActive = false;
             prepareRoute = false;
@@ -444,36 +452,42 @@ public final class WakeCoordinator {
 
     static BackendSelector defaultBackendSelector(Context app) {
         return source -> {
+            // Le wake écoute toujours le micro du téléphone : la route n'entre plus dans
+            // le choix. La règle « sur HFP, Sherpa prioritaire car OWW custom est sourd »
+            // n'a plus d'objet — le modèle perso a justement été enregistré sur ce micro.
             boolean preferOww = WakeOwwStore.preferCustomWake(app) && WakeOwwStore.isModelReady(app);
             boolean sherpaReady = KwsModelStore.isModelReady(app);
-            // Sur HFP, OWW custom souvent sourd → Sherpa prioritaire (même règle VoiceService).
-            if (preferOww && source == AudioRouteObserver.AudioSource.BLUETOOTH_HFP && sherpaReady) {
-                preferOww = false;
-            }
             if (preferOww) return WakeBackend.OWW;
             if (sherpaReady) return WakeBackend.SHERPA;
             return WakeBackend.NONE;
         };
     }
 
+    /**
+     * Le coordinator ne touche plus au SCO — <b>une seule vérité, côté launcher</b>.
+     *
+     * <p>Il l'acquérait depuis le process {@code :voice} pour une capture qu'il ne
+     * possède pas : le {@code SpeechRecognizer} vit dans le launcher, qui établit déjà
+     * le lien lui-même. Les traces le montraient en clair — {@code stt_prepare_done}
+     * puis {@code stt_open_done} arrivent <i>avant</i> {@code coord_stt_started}. Deux
+     * ref-counts indépendants dans deux processus sur le même lien physique, d'où les
+     * holds divergents et les fins de session fantômes.
+     *
+     * <p>Depuis que le mot d'éveil écoute le micro du téléphone, {@code :voice} n'a plus
+     * aucun usage du Bluetooth : cette passerelle devient inerte. L'interface reste, elle
+     * sert aux tests et documente le point d'extension.
+     */
     static ScoGateway defaultScoGateway(Context app) {
         return new ScoGateway() {
             @Override
             public void prepareAsync(AudioRouteObserver.AudioSource source,
                                      Consumer<Boolean> onReady) {
-                if (source != AudioRouteObserver.AudioSource.BLUETOOTH_HFP) {
-                    if (onReady != null) onReady.accept(true);
-                    return;
-                }
-                KwsAudioRouteManager.getInstance(app)
-                        .ensureBluetoothScoActiveAsync(ok -> {
-                            if (onReady != null) onReady.accept(ok != null && ok);
-                        });
+                if (onReady != null) onReady.accept(true);
             }
 
             @Override
             public void release() {
-                KwsAudioRouteManager.getInstance(app).releaseBluetoothSco();
+                // Rien à relâcher : le launcher relâche ce qu'il a acquis.
             }
         };
     }

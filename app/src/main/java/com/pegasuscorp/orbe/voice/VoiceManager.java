@@ -30,6 +30,15 @@ public class VoiceManager {
         void onListeningChanged(boolean listening);
     }
 
+    /**
+     * Écoute terminée sans transcription. Le code {@code SpeechRecognizer.ERROR_*}
+     * permet à l'appelant de distinguer un échec récupérable (rien entendu, client
+     * interrompu) d'une panne réelle — sans lui, aucune reprise n'est décidable.
+     */
+    public interface OnListenFailed {
+        void onListenFailed(int error);
+    }
+
     private final Context appContext;
     private final OnResult onResult;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -40,7 +49,7 @@ public class VoiceManager {
     private Runnable pendingListenRunnable;
     private Runnable pendingSpeakDelayRunnable;
 
-    private Runnable onListenFailed;
+    private OnListenFailed onListenFailed;
     private OnListeningStateListener listeningStateListener;
     private volatile boolean pushToTalkMode;
     /** SCO Bluetooth partagé avec le wake word — requis pour que le micro casque marche en STT. */
@@ -112,7 +121,7 @@ public class VoiceManager {
                     recognizer.cancel();
                 } catch (RuntimeException ignored) {}
                 setListeningActive(false);
-                notifyListenFailed();
+                notifyListenFailed(SpeechRecognizer.ERROR_CLIENT);
             }
         }
     }
@@ -122,22 +131,20 @@ public class VoiceManager {
         stopListening();
     }
 
-    /** True seulement si HFP est connecté ET le SCO est déjà actif (handoff wake→STT). */
+    /**
+     * True si un casque HFP est connecté — la conversation établira le SCO elle-même.
+     *
+     * <p>On exigeait auparavant que le SCO soit <i>déjà</i> allumé, parce que le wake le
+     * tenait ouvert et qu'une tentative à froid coûtait ~15 s avant d'échouer. Ces 15 s
+     * venaient du chemin {@code startVoiceRecognition()}, remplacé depuis par un SCO
+     * ordinaire : l'établissement est mesuré entre 17 et 80 ms. Et le wake écoutant
+     * désormais le micro du téléphone, il n'y a plus aucun lien à hériter — sans cet
+     * assouplissement la conversation retomberait toujours sur le micro intégré.
+     */
     public boolean wantsBluetoothMic() {
-        if (audioSourceObserver == null
-                || audioSourceObserver.currentSource()
-                != AudioRouteObserver.AudioSource.BLUETOOTH_HFP) {
-            return false;
-        }
-        // Profil HFP seul → ~15 s de SCO mort puis error 7 (A063 / A2DP-looking).
-        // Ne tenter BT que si le wake (ou un hold) a déjà le SCO allumé.
-        try {
-            android.media.AudioManager am = (android.media.AudioManager)
-                    appContext.getSystemService(Context.AUDIO_SERVICE);
-            return am != null && am.isBluetoothScoOn();
-        } catch (Exception ignored) {
-            return false;
-        }
+        return audioSourceObserver != null
+                && audioSourceObserver.currentSource()
+                == AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
     }
 
     private Intent buildListenIntent(boolean ptt) {
@@ -156,8 +163,10 @@ public class VoiceManager {
                     .putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLISECONDS",
                             ptt ? 300 : 600);
         } else {
-            i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1500)
-                    .putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 1200)
+            // Téléphone : fenêtres un peu plus larges pour une hésitation courte
+            // (silence de réflexion) sans aligner sur le fallback wake 6–8 s.
+            i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 2800)
+                    .putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLISECONDS", 2200)
                     .putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLISECONDS", 800);
         }
         return i;
@@ -259,6 +268,11 @@ public class VoiceManager {
         scoHeldForStt = wantBt && ok;
         Intent i = buildListenIntent(ptt);
         try {
+            // Bip avant startListening : sous SCO le ToneGenerator VOICE_CALL
+            // est plus fiable avant que le recognizer monopolise le micro.
+            if (!ptt) {
+                WakeStateSoundCue.playListeningOn(appContext);
+            }
             android.util.Log.i("VoiceManager", "startListening route="
                     + audioRoute.describeRoute()
                     + " scoHeld=" + scoHeldForStt);
@@ -459,7 +473,7 @@ public class VoiceManager {
         speechOutput.probePiperAsync();
     }
 
-    public void setOnListenFailed(Runnable callback) {
+    public void setOnListenFailed(OnListenFailed callback) {
         onListenFailed = callback;
     }
 
@@ -522,8 +536,9 @@ public class VoiceManager {
         }
     }
 
-    private void notifyListenFailed() {
-        if (onListenFailed != null) main.post(onListenFailed);
+    private void notifyListenFailed(int error) {
+        final OnListenFailed cb = onListenFailed;
+        if (cb != null) main.post(() -> cb.onListenFailed(error));
     }
 
     private class SimpleListener implements RecognitionListener {
@@ -541,7 +556,8 @@ public class VoiceManager {
                     return;
                 }
             }
-            notifyListenFailed();
+            // Résultats vides : équivalent d'un « rien compris ».
+            notifyListenFailed(SpeechRecognizer.ERROR_NO_MATCH);
         }
 
         private String pickBestTranscript(ArrayList<String> hypotheses) {
@@ -577,7 +593,7 @@ public class VoiceManager {
                     && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                 Toast.makeText(appContext, speechErrorLabel(error), Toast.LENGTH_SHORT).show();
             }
-            notifyListenFailed();
+            notifyListenFailed(error);
         }
 
         @Override public void onReadyForSpeech(Bundle params) {

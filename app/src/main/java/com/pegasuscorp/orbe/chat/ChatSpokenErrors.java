@@ -19,6 +19,21 @@ public final class ChatSpokenErrors {
     public static final String HISTORY_SAFE_TRANSIENT_ERROR =
             "Je n'ai pas pu répondre pour le moment. Réessaie.";
 
+    /**
+     * Remplace un échange perdu dans l'historique nettoyé : la question de
+     * l'utilisateur <b>et</b> la réponse en erreur sont retirées, et cette trace
+     * unique prend leur place.
+     *
+     * <p>Sans elle, retirer le seul tour assistant laissait deux questions
+     * consécutives, que le nettoyage fusionnait — la première disparaissait
+     * silencieusement. Le texte est volontairement neutre et factuel : il est relu
+     * par le LLM au tour suivant, et ne doit ni nommer un provider ni ressembler à
+     * une réponse. Il ne doit pas non plus être détecté comme poison, sinon il
+     * serait effacé au passage suivant.
+     */
+    public static final String LOST_EXCHANGE_NOTE =
+            "Un échange précédent n'a pas abouti et a été retiré de l'historique.";
+
     /** Tous les providers de la chaîne ont échoué. */
     public static final String ALL_MODELS_FAILED_USER_MESSAGE =
             "Tous les providers (Groq, Cerebras, OpenRouter) ont échoué. "

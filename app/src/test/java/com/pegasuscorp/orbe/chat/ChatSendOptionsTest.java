@@ -56,11 +56,12 @@ public class ChatSendOptionsTest {
     }
 
     @Test
-    public void quelTemps_freshData_300tokens() {
+    public void quelTemps_freshData_700tokens() {
         ContextIntent intent = ContextAnalyzer.analyze(
                 RuntimeEnvironment.getApplication(), "Quel temps ?");
         assertEquals("fresh_data", intent.intent);
-        assertEquals(300, ChatSendOptions.forText(intent.allowedTools)
+        // 700 et non 300 : météo / actus doivent tenir une vraie synthèse orale.
+        assertEquals(700, ChatSendOptions.forText(intent.allowedTools)
                 .withIntent(intent)
                 .replyMaxTokens());
     }

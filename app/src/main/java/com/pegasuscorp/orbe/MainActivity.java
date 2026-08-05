@@ -219,6 +219,9 @@ public class MainActivity extends AppCompatActivity
         inkManager = DigitalInkManager.getInstance();
         attachInkStatusListener();
         inkZone.setCallback(this::recognizeAndOpenDrawer);
+        inkZone.setStrokeActivityListener(active -> {
+            if (lifecycle != null) lifecycle.noteHomeInteraction();
+        });
         chargingMonitor = new ChargingMonitor(this, chargingThread::setCharging);
 
         pegaseSession = PegaseSession.get(this);
@@ -428,6 +431,13 @@ public class MainActivity extends AppCompatActivity
         if (voiceManager != null) voiceManager.startListening();
     }
 
+    @Override
+    public boolean isHomeGestureBusy() {
+        boolean stroke = inkZone != null && inkZone.isStrokeActive();
+        boolean drawer = drawerPanel != null && drawerPanel.isOpen();
+        return stroke || drawer;
+    }
+
     private void recognizeAndOpenDrawer(Ink ink) {
         inkManager.recognize(ink, new DigitalInkManager.RecognitionListener() {
             @Override
@@ -510,6 +520,7 @@ public class MainActivity extends AppCompatActivity
         GestureHintsStore.markDiscovered(this, GestureHintsStore.HINT_APPS);
         if (orbUi != null) orbUi.hideGestureHintNow();
         prepareHomeTransition();
+        if (lifecycle != null) lifecycle.noteHomeInteraction();
         if (letter != null) drawerPanel.show(letter);
         else drawerPanel.show();
     }

@@ -6,6 +6,7 @@ import com.pegasuscorp.orbe.tools.device.CallTool;
 import com.pegasuscorp.orbe.tools.copilot.CopilotActionTool;
 import com.pegasuscorp.orbe.tools.copilot.UiActionTool;
 import com.pegasuscorp.orbe.tools.copilot.UiExplainTool;
+import com.pegasuscorp.orbe.tools.copilot.UiLoopTool;
 import com.pegasuscorp.orbe.tools.copilot.UiSearchTool;
 import com.pegasuscorp.orbe.tools.device.ClipboardTool;
 import com.pegasuscorp.orbe.tools.device.ConnectivityTool;
@@ -106,6 +107,7 @@ public class ToolRegistry {
             new ClipboardTool(),
             new CopilotActionTool(),
             new UiActionTool(),
+            new UiLoopTool(),
             new UiExplainTool(),
             new UiSearchTool(),
             new ContactsTool(),
@@ -124,6 +126,64 @@ public class ToolRegistry {
             if (t.id().equals(id)) return t;
         }
         return null;
+    }
+
+    /**
+     * Suggestions pour outil halluciné — ids proches (contient / préfixe), max 3.
+     * N'exécute rien.
+     */
+    public List<String> suggestSimilarIds(String unknownId) {
+        List<String> out = new ArrayList<>();
+        if (unknownId == null || unknownId.trim().isEmpty()) return out;
+        String needle = unknownId.trim().toLowerCase(java.util.Locale.ROOT)
+                .replace('-', '_').replace(' ', '_');
+        List<Tool> all = listTools(EnumSet.allOf(ToolTag.class));
+        for (Tool t : all) {
+            String id = t.id().toLowerCase(java.util.Locale.ROOT);
+            if (id.equals(needle)) continue;
+            if (id.contains(needle) || needle.contains(id)
+                    || levenshteinAtMost(id, needle, 3)) {
+                out.add(t.id());
+                if (out.size() >= 3) break;
+            }
+        }
+        return out;
+    }
+
+    public static String unknownToolMessage(String toolId, List<String> suggestions) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Outil inconnu : ").append(toolId != null ? toolId : "");
+        if (suggestions != null && !suggestions.isEmpty()) {
+            sb.append(" — veux-tu dire ");
+            for (int i = 0; i < suggestions.size(); i++) {
+                if (i > 0) sb.append(i == suggestions.size() - 1 ? " ou " : ", ");
+                sb.append(suggestions.get(i));
+            }
+            sb.append(" ?");
+        }
+        return sb.toString();
+    }
+
+    private static boolean levenshteinAtMost(String a, String b, int max) {
+        if (a == null || b == null) return false;
+        if (Math.abs(a.length() - b.length()) > max) return false;
+        int[] prev = new int[b.length() + 1];
+        int[] cur = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) prev[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            cur[0] = i;
+            int rowMin = cur[0];
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                cur[j] = Math.min(Math.min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+                if (cur[j] < rowMin) rowMin = cur[j];
+            }
+            if (rowMin > max) return false;
+            int[] tmp = prev;
+            prev = cur;
+            cur = tmp;
+        }
+        return prev[b.length()] <= max;
     }
 
     /** Outils filtrés par tag — schémas OpenAI et function calling. */
@@ -305,11 +365,15 @@ public class ToolRegistry {
             sb.append("  UI copilote→ click seul : {\"tool\":\"ui_action\",\"params\":"
                     + "{\"action\":\"click\",\"target\":\"Astronomie et espace\"}} "
                     + "(libellé visible, jamais viewId) ; type/scroll/back. "
-                    + "Phrase multi (ouvre+clique+tape) : UNE ui_action avec "
+                    + "Phrase multi stable (ouvre+clique+tape) : UNE ui_action avec "
                     + "steps:[{action:\"open\",name:\"Chrome\"},"
                     + "{action:\"click\",target:\"barre d'adresse\"},"
                     + "{action:\"type\",value:\"Wikipedia\"}] — name=libellé app "
                     + "(pas package com.xxx), pas N appels, pas open_app seul. "
+                    + "Parcours long / imprévu (cookie, libellé changeant, app inconnue) : "
+                    + "{\"tool\":\"ui_loop\",\"params\":{\"goal\":\"cherche Wikipedia "
+                    + "astronomie dans Chrome\"}} — replanifie à chaque geste "
+                    + "(aussi en repli auto si ui_action.steps échoue). "
                     + "ui_explain / ui_search sur élément visible\n");
             sb.append("  Cursor micro→ {\"tool\":\"copilot_action\",\"params\":"
                     + "{\"action\":\"cursor_mic\"}} ou ui_action click target micro "

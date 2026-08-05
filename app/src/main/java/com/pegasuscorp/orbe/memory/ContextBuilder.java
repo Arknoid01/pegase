@@ -4,6 +4,8 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.conversation.InteractionStateStore;
+import com.pegasuscorp.orbe.copilot.CopilotAppHints;
+import com.pegasuscorp.orbe.copilot.CopilotAppHintsStore;
 import com.pegasuscorp.orbe.copilot.CopilotScreenContext;
 import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 import com.pegasuscorp.orbe.session.Channel;
@@ -327,8 +329,9 @@ public final class ContextBuilder {
         }
         CopilotScreenContext.Snapshot clipped =
                 new CopilotScreenContext.Snapshot(snap.packageName, text, snap.ageMs);
+        CopilotAppHints hints = CopilotAppHintsStore.get(context, snap.packageName);
         return new String[]{
-                CopilotScreenContext.buildPromptBlock(clipped),
+                CopilotScreenContext.buildPromptBlock(clipped, hints),
                 snap.packageName
         };
     }

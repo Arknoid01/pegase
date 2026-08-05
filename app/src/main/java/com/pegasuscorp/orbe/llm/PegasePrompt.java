@@ -187,8 +187,19 @@ public final class PegasePrompt {
                 + "web_search ouvre seulement le navigateur ; search répond à voix haute après recoupement.\n";
     }
 
+    /**
+     * Emojis et symboles décoratifs à retirer avant TTS / archivage.
+     *
+     * <p>La version précédente déclarait des plages de <b>demi-codets</b>
+     * ({@code \uD83C-\uDBFF}, {@code \uDC00-\uDFFF}) pour viser les plans astraux. Java
+     * ne traite pas des surrogates isolés dans une classe de caractères, et la classe
+     * mordait bien plus large : « gpt-oss-120b » était archivé « gptoss120b », les
+     * tirets des noms techniques disparaissant de l'historique et des diagnostics.
+     * Les plans supérieurs s'expriment par point de code, avec {@code \x{...}}.
+     */
     private static final Pattern EMOJI = Pattern.compile(
-            "[\\p{So}\\p{Sk}\\uFE0F\\u200D\\u2600-\\u27BF\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+");
+            "(?:[\\p{So}\\p{Sk}\\uFE0F\\u200D\\u2600-\\u27BF]"
+                    + "|[\\x{1F000}-\\x{1FAFF}])+");
 
     private PegasePrompt() {}
 

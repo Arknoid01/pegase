@@ -27,7 +27,11 @@ public class IntentionPolicyTest {
         ctx = RuntimeEnvironment.getApplication();
         IntentionPrefs.clearAll(ctx);
         IntentionPrefs.setEnabled(ctx, true);
-        IntentionPrefs.setQuietHours(ctx, 22, 7);
+        // Fenêtre calme placée hors de l'heure courante. Elle était figée à 22h-7h, si
+        // bien que ces tests — qui ne portent pas sur les heures calmes — échouaient
+        // systématiquement quand la suite tournait le soir ou la nuit.
+        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        IntentionPrefs.setQuietHours(ctx, (hour + 2) % 24, (hour + 3) % 24);
     }
 
     @Test
@@ -50,6 +54,9 @@ public class IntentionPolicyTest {
 
     @Test
     public void quietHours_wrapsMidnight() {
+        // Ce test-ci porte sur la fenêtre elle-même : il la pose explicitement, le setUp
+        // commun l'ayant déplacée hors de l'heure courante pour les autres.
+        IntentionPrefs.setQuietHours(ctx, 22, 7);
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, 23);
         cal.set(Calendar.MINUTE, 0);

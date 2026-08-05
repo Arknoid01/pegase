@@ -38,7 +38,7 @@ public enum ToolTag {
     NAMED_CONTEXT,
     DIAG,
     BRIEF,
-    /** ui_action / ui_explain / ui_search / screen_capture / copilot_action — hors daily general. */
+    /** ui_action / ui_loop / ui_explain / ui_search / screen_capture / copilot_action — hors daily general. */
     UI,
     /** Companion F1 — hors SEARCH générique. */
     F1,

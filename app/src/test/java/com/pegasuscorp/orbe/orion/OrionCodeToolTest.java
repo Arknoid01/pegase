@@ -6,6 +6,7 @@ import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import com.pegasuscorp.orbe.contextstore.ContextSearchIndex;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
 import com.pegasuscorp.orbe.diag.Trace;
+import com.pegasuscorp.orbe.orion.prompt.OrionMode;
 import com.pegasuscorp.orbe.tools.orion.OrionCodeTool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolRegistry;
@@ -139,11 +140,16 @@ public class OrionCodeToolTest {
     public void buildPrompt_injectsLoadedContexts() {
         List<String> loaded = Collections.singletonList(
                 "### Orion (orion-context.md)\nVision copilote");
+        // Mode explicite : les specs .md ne sont injectées qu'en FEATURE (garde-fou
+        // anti-dérive). Le défaut, mode null, vaut PATCH — donc pas d'injection.
         OrionPromptBuilder.BuiltPrompt built = OrionPromptBuilder.assemble(
-                loaded, Collections.emptyList(), "", "écris un parser");
+                loaded, Collections.emptyList(), "", "écris un parser",
+                null, null, null, null, OrionMode.FEATURE);
         assertTrue(built.prompt.contains("=== Documents .md chargés ==="));
         assertTrue(built.prompt.contains("Vision copilote"));
-        assertTrue(built.prompt.contains("=== Demande ==="));
+        // L'en-tête s'est enrichi en « === Demande (à satisfaire maintenant) === » :
+        // on vérifie la section, pas son libellé exact.
+        assertTrue(built.prompt.contains("=== Demande"));
         assertTrue(built.prompt.contains("écris un parser"));
         assertEquals(0, built.contextChunksUsed);
     }

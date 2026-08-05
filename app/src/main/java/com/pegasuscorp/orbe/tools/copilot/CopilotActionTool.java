@@ -70,7 +70,7 @@ public final class CopilotActionTool implements Tool {
         }
         boolean ok = svc.activateYouTubeSubtitles();
         if (ok) {
-            cb.onSuccess(ToolResult.text("J'active les sous-titres YouTube."));
+            cb.onSuccess(ToolResult.text(""));
         } else {
             cb.onError("Je n'ai pas trouvé le bouton sous-titres — ouvre une vidéo "
                     + "et réessaie.");
@@ -93,7 +93,7 @@ public final class CopilotActionTool implements Tool {
         }
         boolean ok = svc.activateCursorMic();
         if (ok) {
-            cb.onSuccess(ToolResult.text("J'active le micro Cursor."));
+            cb.onSuccess(ToolResult.text(""));
         } else {
             cb.onError("Je n'ai pas trouvé le micro Cursor — ouvre cursor.com/agents "
                     + "et réessaie.");

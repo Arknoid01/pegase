@@ -517,10 +517,18 @@ public class ConversationManagerTest {
         backend.deferAgentic = false;
         backend.flushDeferredAgentic();
 
+        // La garde anti-callback-périmé a fait son travail : les deux fail() ci-dessus
+        // n'ont pas été déclenchés. On vérifie donc l'historique par son contenu, et non
+        // par un compte de tours — historySnapshot() renvoie l'historique brut, hint
+        // système de recordToolSuccessHint compris, ce qui rendait le compte fragile.
         List<ChatBackend.Turn> history = conversation.historySnapshot();
-        assertEquals(2, history.size());
-        assertEquals("Pas d'erreur notable aujourd'hui.", history.get(1).text);
-        assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, history.get(1).text);
+        for (ChatBackend.Turn t : history) {
+            assertFalse("erreur périmée entrée en historique : " + t.text,
+                    ChatSpokenErrors.isHistoryPoison(t.text));
+        }
+        ChatBackend.Turn last = history.get(history.size() - 1);
+        assertFalse(last.fromUser);
+        assertEquals("Pas d'erreur notable aujourd'hui.", last.text);
     }
 
     @Test
@@ -538,9 +546,12 @@ public class ConversationManagerTest {
         awaitReply(conversation, "Tu as eut des problèmes ?");
 
         List<ChatBackend.Turn> history = conversation.historySnapshot();
-        assertEquals(4, history.size());
-        assertEquals("Tu as eut des problèmes ?", history.get(2).text);
-        assertEquals("OK", history.get(3).text);
+        // L'échange raté est remplacé par une trace unique, pas conservé : [note,
+        // question, réponse] — même règle que enter_stripsPoisonLoadedFromMemory.
+        assertEquals(3, history.size());
+        assertEquals(ChatSpokenErrors.LOST_EXCHANGE_NOTE, history.get(0).text);
+        assertEquals("Tu as eut des problèmes ?", history.get(1).text);
+        assertEquals("OK", history.get(2).text);
         for (ChatBackend.Turn t : history) {
             assertNotEquals(ChatSpokenErrors.HISTORY_SAFE_TRANSIENT_ERROR, t.text);
         }
@@ -557,8 +568,9 @@ public class ConversationManagerTest {
         conversation.enter();
 
         List<ChatBackend.Turn> history = conversation.historySnapshot();
+        // L'échange « Salut » → erreur est retiré en entier et remplacé par une trace.
         assertEquals(3, history.size());
-        assertEquals("Salut", history.get(0).text);
+        assertEquals(ChatSpokenErrors.LOST_EXCHANGE_NOTE, history.get(0).text);
         assertEquals("Ça va ?", history.get(1).text);
         assertEquals("Oui", history.get(2).text);
     }

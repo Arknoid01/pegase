@@ -153,6 +153,10 @@ public class ContextAnalyzerTest {
         String openTape = SpeechInputNormalizer.fold("Ouvre Chrome et tape Wikipedia")
                 .replace('\'', ' ');
         assertTrue(IntentDetector.looksLikeUi(openTape));
+        String openSms = SpeechInputNormalizer.fold(
+                "Ouvre WhatsApp et envoie un message à papa")
+                .replace('\'', ' ');
+        assertTrue(IntentDetector.looksLikeUi(openSms));
     }
 
     @Test

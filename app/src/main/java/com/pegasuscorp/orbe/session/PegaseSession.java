@@ -670,6 +670,12 @@ public class PegaseSession {
                 ChatSendOptions.legacy(Channel.TEXT).withMaxTokens(350), "copilot_reflection");
     }
 
+    /** Juge mémoire Mem0-style (ADD/UPDATE/DELETE/NOOP) — éphémère, hors historique. */
+    public String completeMemoryUpdateSync(String updatePrompt) throws Exception {
+        return conversation().completeEphemeralSync(updatePrompt, 30,
+                ChatSendOptions.legacy(Channel.TEXT).withMaxTokens(220), "memory_update");
+    }
+
     public Channel getChannel() {
         return effectiveChannel();
     }
@@ -1159,7 +1165,8 @@ public class PegaseSession {
 
         Tool tool = toolRegistry.findById(toolId.trim());
         if (tool == null) {
-            notifyError(obs, "Outil inconnu : " + toolId);
+            notifyError(obs, ToolRegistry.unknownToolMessage(toolId,
+                    toolRegistry.suggestSimilarIds(toolId)));
             return;
         }
 

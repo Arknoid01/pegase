@@ -54,6 +54,11 @@ public final class CopilotScreenContext {
 
     /** Bloc prompt injecté dans le system message. */
     public static String buildPromptBlock(Snapshot snap) {
+        return buildPromptBlock(snap, null);
+    }
+
+    /** @param hints hints a11y optionnels (seed + overrides) pour cette app. */
+    public static String buildPromptBlock(Snapshot snap, CopilotAppHints hints) {
         if (snap == null || snap.text.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append("\n--- Écran actif (copilote, local) ---\n");
@@ -62,19 +67,27 @@ public final class CopilotScreenContext {
         }
         sb.append("Extrait (il y a ").append(Math.max(1L, snap.ageMs / 1000L))
                 .append(" s) :\n");
-        sb.append(snap.text).append("\n");
+        sb.append(ScreenPiiRedactor.redact(snap.text)).append("\n");
         sb.append("Ce texte vient de l'accessibilité/OCR local — pas d'image envoyée.\n");
+        if (hints != null && !hints.isEmpty()) {
+            sb.append(hints.toPromptSection());
+        }
         sb.append("Pour cliquer / expliquer / chercher : appelle ui_action, ui_explain ou ")
                 .append("ui_search avec target = un libellé visible ci-dessus ")
                 .append("(ex. Astronomie et espace). Le matching est local sur l'appareil. ")
-                .append("Si plusieurs gestes (ouvre puis clique puis tape) : ")
+                .append("Si plusieurs gestes stables (ouvre puis clique puis tape) : ")
                 .append("une seule ui_action avec params.steps=[{action,target?,value?},…] ")
                 .append("— pas plusieurs appels, pas open_app seul. ")
+                .append("Si parcours long / imprévu (cookie, clavier, libellé absent) : ")
+                .append("ui_loop avec goal en français (replanifie après chaque geste). ")
                 .append("INTERDIT de demander view_id, identifiant de vue, resource name ")
                 .append("ou tout id technique — même après un outil. ")
                 .append("Si hésitation, réessaie avec un autre libellé — ")
                 .append("n'interroge pas l'utilisateur, agis. ")
-                .append("Après un ui_* réussi, confirme brièvement le résultat, sans question.\n");
+                .append("Après un ui_action / click / type / scroll / back réussi : ")
+                .append("ne dis RIEN (pas de « c'est fait », pas de récap) — ")
+                .append("l'écran a déjà changé. Réponds seulement si l'utilisateur ")
+                .append("a posé une question, ou après ui_explain / ui_search.\n");
         return sb.toString();
     }
 

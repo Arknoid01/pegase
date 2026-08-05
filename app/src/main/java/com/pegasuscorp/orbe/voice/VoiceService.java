@@ -80,26 +80,18 @@ public class VoiceService extends Service {
     private String lastNotifFingerprint;
     private boolean foregroundStarted;
     private WakeHealthStatus lastHealth = WakeHealthStatus.OFF;
-    /** Garde réentrance async SCO wake (pas une source de vérité d'état). */
-    private boolean wakeScoAcquireInFlight;
     /** STT duty-cycle (fallback rare) — distinct du KWS local. */
     private boolean sttRecognizerActive;
     private WakeCoordinator.WakeState lastCoordinatorState = WakeCoordinator.WakeState.IDLE;
-    /** Sécurité : ne pas garder le SCO indéfiniment après pause conversation. */
-    private static final long KEEP_SCO_TIMEOUT_MS = 120_000L;
-    private final Runnable releaseKeptScoRunnable = () -> {
-        if (!wantsListening()) {
-            Log.i(TAG, "keep-SCO timeout — release");
-            releaseWakeServiceScoHold();
-        }
-    };
+    // Plus de hold SCO côté :voice : le mot d'éveil écoute le micro du téléphone et
+    // la conversation gère son propre lien depuis le launcher. Le garde-fou « keep-SCO »
+    // et son timeout de 120 s n'ont donc plus d'objet.
 
     private final IVoiceWakeService.Stub binder = new IVoiceWakeService.Stub() {
         @Override
         public void startWakeListening() {
             sttBackoffStep = 0;
             kwsRestartStreak = 0;
-            main.removeCallbacks(releaseKeptScoRunnable);
             if (wakeCoordinator != null && wakeCoordinator.start()) {
                 ensureSessionEngines();
             }
@@ -111,42 +103,28 @@ public class VoiceService extends Service {
 
         @Override
         public void stopWakeListening() {
-            // Pendant tout le handoff (wake détecté → STT ouvert → phrase finie) le hold
-            // SCO porte la route casque : le lâcher ici fait retomber le STT sur le micro
-            // téléphone (holds 1→0, phoneForced).
-            WakeCoordinator.WakeState st = wakeCoordinator != null
-                    ? wakeCoordinator.getState().state : WakeCoordinator.WakeState.IDLE;
-            boolean handoffInFlight = st == WakeCoordinator.WakeState.HANDING_OFF
-                    || st == WakeCoordinator.WakeState.STT_ACTIVE;
+            // Le stop reste différé pendant le handoff (cf. WakeCoordinator.stop) pour
+            // ne pas détruire une session STT en cours ; il n'y a en revanche plus de
+            // hold SCO à préserver ici.
             if (wakeCoordinator != null) wakeCoordinator.stop();
-            main.removeCallbacks(releaseKeptScoRunnable);
             stopListening();
-            if (handoffInFlight) {
-                Log.i(TAG, "stopWakeListening pendant " + st + " — hold SCO conservé");
-                main.postDelayed(releaseKeptScoRunnable, KEEP_SCO_TIMEOUT_MS);
-            } else {
-                releaseWakeServiceScoHold();
-            }
             refreshForegroundNotification();
         }
 
         @Override
         public void pauseWakeListeningKeepSco() {
-            // Handoff wake→STT : couper AudioRecord KWS mais garder le lien HFP/SCO
-            // sinon le micro casque tombe avant SpeechRecognizer (error 7 / silence).
+            // Handoff wake→STT : couper l'AudioRecord du KWS. Le nom vient de l'époque
+            // où il fallait aussi préserver un lien SCO ; le wake n'en tient plus (micro
+            // téléphone), le contrat AIDL garde son nom pour ne pas casser les clients.
             // Si encore LISTENING_WAKE (pause avant hit traité), passer en HANDING_OFF
             // pour que wantsListening() soit false et n'auto-relance pas le moteur.
             if (wakeCoordinator != null && wakeCoordinator.wantsListening()) {
                 wakeCoordinator.onWakeDetected();
             }
             stopListening();
-            main.removeCallbacks(releaseKeptScoRunnable);
-            main.postDelayed(releaseKeptScoRunnable, KEEP_SCO_TIMEOUT_MS);
             refreshForegroundNotification();
             try {
                 JSONObject f = new JSONObject();
-                f.put("wake_service_hold", kwsRouteManager != null
-                        && kwsRouteManager.hasWakeServiceScoHold());
                 f.put("route", kwsRouteManager != null
                         ? kwsRouteManager.describeRoute() : "");
                 f.put("coord_state", wakeCoordinator != null
@@ -158,6 +136,17 @@ public class VoiceService extends Service {
         @Override
         public void setGentleMode(boolean gentle) {
             MediaPlaybackGuard.setGentle(gentle);
+        }
+
+        @Override
+        public void setOwwThreshold(float threshold) {
+            PegaseWakeStore.setOwwThreshold(VoiceService.this, threshold);
+            float applied = PegaseWakeStore.getOwwThreshold(VoiceService.this);
+            if (owwEngine != null) {
+                owwEngine.setThreshold(applied);
+            }
+            Log.i(TAG, "setOwwThreshold applied=" + applied
+                    + " engine=" + (owwEngine != null));
         }
 
         @Override
@@ -214,7 +203,6 @@ public class VoiceService extends Service {
                 // Plus de relance KWS tant que STT_ACTIVE (wantsListening=false).
                 main.removeCallbacks(listenRunnable);
                 stopListening();
-                main.removeCallbacks(releaseKeptScoRunnable);
                 wakeCoordinator.requestSttSession(ok -> {
                     try {
                         JSONObject f = new JSONObject();
@@ -271,10 +259,6 @@ public class VoiceService extends Service {
             if (!wakeCoordinator.onAudioSourceChanged(source)) return;
             diag("wake_source_refrozen", kwsRouteManager != null
                     ? kwsRouteManager.describeRoute() : "", null);
-            if (source == AudioRouteObserver.AudioSource.PHONE_BUILTIN) {
-                // Plus de casque : rendre le hold SCO au lieu de le garder pour rien.
-                releaseWakeServiceScoHold();
-            }
             stopKwsPlanned();
             ensureSessionEngines();
             if (wantsListening()) scheduleListen(400);
@@ -301,15 +285,7 @@ public class VoiceService extends Service {
                 if (wantsListening()) scheduleListen(START_LISTEN_DELAY_MS);
             });
         } else {
-            main.post(() -> {
-                if (snap.state == WakeCoordinator.WakeState.IDLE) {
-                    // Fin réelle de session (y compris stop différé appliqué après le STT) :
-                    // rendre le hold SCO tout de suite au lieu d'attendre le timeout.
-                    main.removeCallbacks(releaseKeptScoRunnable);
-                    releaseWakeServiceScoHold();
-                }
-                refreshForegroundNotification();
-            });
+            main.post(this::refreshForegroundNotification);
         }
     }
 
@@ -343,9 +319,7 @@ public class VoiceService extends Service {
             wakeCoordinator.setListener(null);
             wakeCoordinator.stopNow();
         }
-        main.removeCallbacks(releaseKeptScoRunnable);
         stopListening();
-        releaseWakeServiceScoHold();
         releaseListenWakeLock();
         destroyRecognizer();
         if (owwEngine != null) {
@@ -802,81 +776,14 @@ public class VoiceService extends Service {
             return;
         }
         if (isLocalWakeRunning()) return;
-        if (wakeScoAcquireInFlight) return;
-        // Respecter la source figée par WakeCoordinator : pas de danse SCO si session téléphone.
-        boolean sessionPhone = wakeCoordinator != null
-                && wakeCoordinator.getState().source
-                == AudioRouteObserver.AudioSource.PHONE_BUILTIN;
-        if (sessionPhone) {
-            if (kwsRouteManager != null) {
-                kwsRouteManager.forcePhoneBuiltin();
-            }
-            startKwsListenEngine();
-            return;
-        }
-        // SCO une seule fois pour la durée d'écoute wake (pas à chaque openMic / cycle).
+        // Le mot d'éveil écoute toujours par le micro du téléphone, casque connecté ou non.
+        // Le lien HFP est conçu pour l'appel : le tenir ouvert en permanence monopolise
+        // l'A2DP, coûte de la batterie des deux côtés, et livre un flux troué (mesuré :
+        // 39 à 51 % du signal perdu, contre 7 % sur le micro intégré). Aucun assistant ne
+        // procède autrement — la détection embarquée des écouteurs vit dans leur firmware.
+        // Le casque reprend la main pour la conversation, une fois le wake déclenché.
         if (kwsRouteManager != null) {
-            wakeScoAcquireInFlight = true;
-            kwsRouteManager.ensureWakeServiceScoHoldAsync(ok -> {
-                wakeScoAcquireInFlight = false;
-                if (!wantsListening() || !usesLocalWake()) return;
-                if (!ok && kwsRouteManager.wantsBluetoothMic()) {
-                    Log.w(TAG, "SCO wake hold failed — retry in 1.5s");
-                    wakeScoAcquireInFlight = true;
-                    main.postDelayed(() -> {
-                        if (!wantsListening() || !usesLocalWake()) {
-                            wakeScoAcquireInFlight = false;
-                            return;
-                        }
-                        kwsRouteManager.ensureWakeServiceScoHoldAsync(ok2 -> {
-                            wakeScoAcquireInFlight = false;
-                            if (!wantsListening() || !usesLocalWake()) return;
-                            if (!ok2 && kwsRouteManager.wantsBluetoothMic()) {
-                                // HFP absent (A2DP-only / casque sans profil téléphone) :
-                                // bascule téléphone pour ne pas rester sourd.
-                                // Sinon (proxy/SCO flappy) : réessaie sans micro phone.
-                                String fail = kwsRouteManager.lastScoFailReason();
-                                boolean noHfp = fail != null && (fail.contains("no_hfp")
-                                        || fail.contains("a2dp_only"));
-                                if (noHfp) {
-                                    Log.w(TAG, "SCO sans HFP — fallback micro téléphone");
-                                    try {
-                                        JSONObject f = new JSONObject();
-                                        f.put("fail_reason", fail);
-                                        f.put("route", kwsRouteManager.describeRoute());
-                                        PegaseDiagLog.kws(VoiceService.this,
-                                                "sco_phone_fallback_no_hfp", f);
-                                    } catch (Exception ignored) {}
-                                    // Le coordinator arbitre la dégradation : sinon il reste
-                                    // sur BLUETOOTH_HFP et le STT suivant retente un SCO
-                                    // condamné (~15 s de silence puis error 7).
-                                    if (wakeCoordinator != null) {
-                                        wakeCoordinator.notifyScoUnavailable();
-                                    }
-                                    kwsRouteManager.forcePhoneBuiltin();
-                                    // Backend re-sélectionné avec la nouvelle source.
-                                    ensureSessionEngines();
-                                    startKwsListenEngine();
-                                    return;
-                                }
-                                Log.w(TAG, "SCO wake hold retry failed — reschedule, pas de fallback phone");
-                                try {
-                                    JSONObject f = new JSONObject();
-                                    f.put("route", kwsRouteManager.describeRoute());
-                                    PegaseDiagLog.kws(VoiceService.this,
-                                            "sco_bt_no_phone_fallback", f);
-                                } catch (Exception ignored) {}
-                                scheduleListen(12_000);
-                                return;
-                            }
-                            startKwsListenEngine();
-                        });
-                    }, KwsAudioRouteManager.WAKE_SCO_RETRY_DELAY_MS);
-                    return;
-                }
-                startKwsListenEngine();
-            });
-            return;
+            kwsRouteManager.forcePhoneBuiltin();
         }
         startKwsListenEngine();
     }
@@ -906,14 +813,6 @@ public class VoiceService extends Service {
         main.removeCallbacks(kwsHealthRunnable);
         main.postDelayed(kwsHealthRunnable, KWS_HEALTH_FIRST_MS);
         refreshForegroundNotification();
-    }
-
-    /** Coupe le hold SCO wake (stop écoute / destroy) — pas entre deux wakes. */
-    private void releaseWakeServiceScoHold() {
-        wakeScoAcquireInFlight = false;
-        if (kwsRouteManager != null) {
-            kwsRouteManager.releaseWakeServiceScoHold();
-        }
     }
 
     private void startSttListen() {

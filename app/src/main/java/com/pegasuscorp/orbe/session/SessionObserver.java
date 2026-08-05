@@ -20,7 +20,10 @@ public interface SessionObserver {
      */
     default void onToolProgress(String message) {}
 
-    /** Outil qui ouvre une autre app — pas de reprise micro automatique. */
+    /**
+     * Outil qui ouvre une autre app (premier plan changé).
+     * En session vocale : reprendre l'écoute après confirmation — ne pas finaliser.
+     */
     default void onToolExit(ToolResult result) {}
 
     /** Outil LLM refusé (ex. écran verrouillé). */

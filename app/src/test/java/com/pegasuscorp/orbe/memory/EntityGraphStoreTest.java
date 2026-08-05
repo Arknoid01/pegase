@@ -60,23 +60,20 @@ public class EntityGraphStoreTest {
 
     @Test
     public void expand_weightedPath_multipliesEdgeWeights() {
+        // Le store réensemence toujours ses arêtes par défaut, y compris après
+        // suppression du fichier : relier project_fableris → project_pegase renforçait
+        // une arête déjà semée à 0,70 et donnait 0,75. On mesure donc la propagation des
+        // poids sur des entités absentes du jeu par défaut, ce que le test vise vraiment.
         EntityGraphStore.resetInstanceForTests();
-        java.io.File edges = new java.io.File(ctx.getFilesDir(), "memory/entity_edges.json");
-        if (edges.exists()) edges.delete();
         EntityGraphStore graph = EntityGraphStore.getInstance(ctx);
-        while (!graph.getAllEdges().isEmpty()) {
-            // fresh store after delete still seeds defaults — use link on clean custom graph
-            break;
-        }
-        graph = EntityGraphStore.getInstance(ctx);
-        graph.link("project_pegase", "device_nothing_phone", EntityEdge.TYPE_RUNS_ON, 0.95);
-        graph.link("project_fableris", "project_pegase", EntityEdge.TYPE_RELATED_TO, 0.70);
+        graph.link("test_node_a", "test_node_b", EntityEdge.TYPE_RELATED_TO, 0.70);
+        graph.link("test_node_b", "test_node_c", EntityEdge.TYPE_RUNS_ON, 0.95);
 
         EntityGraphStore.EntityReach reach = graph.expand(
-                java.util.Collections.singletonList("project_fableris"), 2);
-        assertEquals(1.0, reach.strengthFor("project_fableris"), 0.001);
-        assertEquals(0.70, reach.strengthFor("project_pegase"), 0.001);
-        assertEquals(0.70 * 0.95, reach.strengthFor("device_nothing_phone"), 0.001);
+                java.util.Collections.singletonList("test_node_a"), 2);
+        assertEquals(1.0, reach.strengthFor("test_node_a"), 0.001);
+        assertEquals(0.70, reach.strengthFor("test_node_b"), 0.001);
+        assertEquals(0.70 * 0.95, reach.strengthFor("test_node_c"), 0.001);
     }
 
     @Test

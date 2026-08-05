@@ -379,10 +379,105 @@ public class MemoryRepository implements MemoryStore {
     }
 
     /**
-     * Souvenirs {@code source=fallback} (120b / Qwen) : stockés mais exclus du contexte LLM.
+     * Souvenirs injectables dans le prompt : pas fallback, pas soft-delete.
      */
     static boolean isInjectable(MemoryEntry entry) {
-        return entry != null && !entry.isFallbackSource();
+        return entry != null && !entry.isFallbackSource() && !entry.isInvalid();
+    }
+
+    /**
+     * Soft-delete Graphiti-lite : hors prompt, vector retiré, entrée conservée.
+     */
+    public void invalidateMemory(MemoryEntry entry, String reason, String supersededByKey) {
+        if (entry == null) return;
+        int index = indexOfMemory(entry);
+        if (index < 0) return;
+        MemoryEntry live = permanentMemories.get(index);
+        live.invalidAtMs = System.currentTimeMillis();
+        live.invalidReason = reason != null ? reason : "";
+        live.supersededByKey = supersededByKey != null ? supersededByKey : "";
+        savePermanent();
+        deleteVectorAsync(live);
+    }
+
+    /**
+     * UPDATE in-place : conserve {@link MemoryEntry#previousContent}, réindexe le vecteur.
+     */
+    public void updateMemoryContent(MemoryEntry entry, String newContent) {
+        if (entry == null || newContent == null) return;
+        String trimmed = newContent.trim();
+        if (trimmed.isEmpty()) return;
+        int index = indexOfMemory(entry);
+        if (index < 0) return;
+        MemoryEntry live = permanentMemories.get(index);
+        if (trimmed.equals(live.content)) return;
+        String oldKey = live.memoryKey();
+        if (live.previousContent == null || live.previousContent.isEmpty()) {
+            live.previousContent = live.content;
+        } else {
+            live.previousContent = live.content;
+        }
+        live.content = trimmed;
+        live.invalidAtMs = 0L;
+        live.invalidReason = "";
+        live.touchRetrieval(System.currentTimeMillis());
+        MemoryLinker.autoLink(appContext, live);
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            if (i == index) continue;
+            MemoryGraph.linkSharedEntities(live, permanentMemories.get(i));
+        }
+        permanentMemories.set(index, live);
+        savePermanent();
+        if (!autoMigrate) {
+            try {
+                vectors().delete(oldKey);
+            } catch (Exception e) {
+                Log.w(TAG, "Delete vector échoué", e);
+            }
+            indexMemoryNow(live);
+        } else {
+            reindexAfterContentChangeAsync(oldKey, live);
+        }
+    }
+
+    int indexOfMemory(MemoryEntry entry) {
+        if (entry == null) return -1;
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            MemoryEntry e = permanentMemories.get(i);
+            if (e == entry) return i;
+        }
+        String key = entry.memoryKey();
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            MemoryEntry e = permanentMemories.get(i);
+            if (e != null && key.equals(e.memoryKey())) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Voisins sémantiques valides pour le juge Mem0-style (hors invalidés).
+     */
+    public List<MemoryEntry> findSimilarMemories(String fact, int topK, float minScore) {
+        if (fact == null || fact.trim().isEmpty() || permanentMemories.isEmpty()) {
+            return Collections.emptyList();
+        }
+        int k = Math.max(1, topK);
+        try {
+            float[] qv = EmbeddingEngine.get(appContext).embed(fact.trim());
+            List<VectorStore.Hit> hits = vectors().search(qv, Math.max(k * 3, 8), minScore);
+            Map<String, MemoryEntry> byKey = indexByKey();
+            List<MemoryEntry> out = new ArrayList<>();
+            for (VectorStore.Hit hit : hits) {
+                MemoryEntry entry = byKey.get(hit.memoryKey);
+                if (entry == null || !isInjectable(entry)) continue;
+                out.add(entry);
+                if (out.size() >= k) break;
+            }
+            return out;
+        } catch (Exception e) {
+            Log.w(TAG, "findSimilarMemories indisponible", e);
+            return Collections.emptyList();
+        }
     }
 
     public List<MemoryEntry> getAllPermanentMemories() {
@@ -424,7 +519,10 @@ public class MemoryRepository implements MemoryStore {
     /** Souvenirs permanents triés par importance (pour affichage Discussion). */
     public List<MemoryEntry> getTopPermanentMemories(int max) {
         if (max <= 0 || permanentMemories.isEmpty()) return Collections.emptyList();
-        List<MemoryEntry> sorted = new ArrayList<>(permanentMemories);
+        List<MemoryEntry> sorted = new ArrayList<>();
+        for (MemoryEntry e : permanentMemories) {
+            if (isInjectable(e)) sorted.add(e);
+        }
         sorted.sort((a, b) -> Double.compare(b.effectiveImportance(), a.effectiveImportance()));
         if (sorted.size() <= max) return sorted;
         return new ArrayList<>(sorted.subList(0, max));
@@ -477,6 +575,27 @@ public class MemoryRepository implements MemoryStore {
         return removed.size();
     }
 
+    /**
+     * Soft-delete : invalide les souvenirs matchant {@code query} (historique conservé).
+     */
+    public int invalidatePermanentContaining(String query, String reason) {
+        if (query == null || query.isEmpty()) return 0;
+        String q = query.toLowerCase(Locale.ROOT);
+        int count = 0;
+        long now = System.currentTimeMillis();
+        String why = reason != null ? reason : "";
+        for (MemoryEntry e : permanentMemories) {
+            if (e == null || e.isInvalid() || e.content == null) continue;
+            if (!e.content.toLowerCase(Locale.ROOT).contains(q)) continue;
+            e.invalidAtMs = now;
+            e.invalidReason = why;
+            deleteVectorAsync(e);
+            count++;
+        }
+        if (count > 0) savePermanent();
+        return count;
+    }
+
     public int replaceInPermanent(String search, String replacement) {
         if (search == null || search.isEmpty()) return 0;
         int count = 0;
@@ -511,6 +630,7 @@ public class MemoryRepository implements MemoryStore {
             VectorStore store = vectors();
             for (MemoryEntry entry : permanentMemories) {
                 if (entry == null || entry.content == null || entry.content.isEmpty()) continue;
+                if (entry.isInvalid()) continue;
                 String key = VectorStore.keyFor(entry.category, entry.content);
                 if (store.hasVector(key)) continue;
                 float[] vector = engine.embed(entry.content);

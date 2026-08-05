@@ -33,6 +33,17 @@ public class MemoryEntry {
     public long lastUsedAtMs;
     /** Importance au moment de la dernière utilisation (référence pour l'oubli). */
     public double importanceAtLastUse;
+    /**
+     * Soft-delete Graphiti-lite : &gt; 0 = souvenir invalide (hors prompt),
+     * contenu conservé pour l'historique.
+     */
+    public long invalidAtMs;
+    /** Pourquoi invalidé (contradiction, mise à jour…). */
+    public String invalidReason;
+    /** Clé du souvenir qui remplace celui-ci (UPDATE/DELETE). */
+    public String supersededByKey;
+    /** Contenu avant le dernier UPDATE (chronologie courte). */
+    public String previousContent;
 
     public MemoryEntry(String category, String content, double importance, String createdAt) {
         this(category, content, importance, createdAt, SOURCE_USER);
@@ -53,6 +64,11 @@ public class MemoryEntry {
 
     public boolean isFallbackSource() {
         return SOURCE_FALLBACK.equals(source);
+    }
+
+    /** Soft-delete : ne plus injecter dans le prompt, garder la trace. */
+    public boolean isInvalid() {
+        return invalidAtMs > 0L;
     }
 
     /** Importance effective après oubli naturel. */
@@ -94,6 +110,16 @@ public class MemoryEntry {
                 .put("lastUsedAt", lastUsedAtMs)
                 .put("importanceAtLastUse", importanceAtLastUse);
         if (frozen) o.put("frozen", true);
+        if (invalidAtMs > 0L) o.put("invalidAt", invalidAtMs);
+        if (invalidReason != null && !invalidReason.isEmpty()) {
+            o.put("invalidReason", invalidReason);
+        }
+        if (supersededByKey != null && !supersededByKey.isEmpty()) {
+            o.put("supersededByKey", supersededByKey);
+        }
+        if (previousContent != null && !previousContent.isEmpty()) {
+            o.put("previousContent", previousContent);
+        }
         if (!entityIds.isEmpty()) {
             o.put("entityIds", toJsonArray(entityIds));
         }
@@ -113,6 +139,10 @@ public class MemoryEntry {
         entry.frozen = o.optBoolean("frozen", MemoryVitality.defaultFrozen(entry.category));
         entry.lastUsedAtMs = o.optLong("lastUsedAt", entry.lastUsedAtMs);
         entry.importanceAtLastUse = o.optDouble("importanceAtLastUse", entry.importance);
+        entry.invalidAtMs = o.optLong("invalidAt", 0L);
+        entry.invalidReason = o.optString("invalidReason", "");
+        entry.supersededByKey = o.optString("supersededByKey", "");
+        entry.previousContent = o.optString("previousContent", "");
         readStringList(o.optJSONArray("entityIds"), entry.entityIds);
         readStringList(o.optJSONArray("relatedMemoryKeys"), entry.relatedMemoryKeys);
         return entry;

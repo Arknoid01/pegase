@@ -155,7 +155,12 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
         };
         IntentFilter filter = new IntentFilter(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            app.registerReceiver(hfpReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            // EXPORTED et non NOT_EXPORTED : ce broadcast vient de la pile Bluetooth,
+            // pas de notre processus. En NOT_EXPORTED on ne le recevait pas, et
+            // hfpProfileConnected restait faux — la détection du casque reposait alors
+            // uniquement sur la présence d'une entrée SCO, qui n'existe que pendant un
+            // lien audio actif. C'est une action protégée : seul le système peut l'émettre.
+            app.registerReceiver(hfpReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             app.registerReceiver(hfpReceiver, filter);
         }
@@ -200,25 +205,27 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
     }
 
     private void applyConnectedDevicesFromProxy(BluetoothHeadset headset) {
-        boolean any = false;
+        boolean any = readHfpConnected(headset);
+        if (hfpProfileConnected == any) return;
+        hfpProfileConnected = any;
+        recomputeFromCallbacks("hfp_proxy_ready");
+    }
+
+    /** Un casque visé est-il connecté en HFP, selon le proxy ? Lecture ponctuelle. */
+    private boolean readHfpConnected(BluetoothHeadset headset) {
+        if (headset == null) return false;
         try {
             List<BluetoothDevice> devices = headset.getConnectedDevices();
-            if (devices != null) {
-                for (BluetoothDevice d : devices) {
-                    if (isTargetDevice(d)) {
-                        any = true;
-                        break;
-                    }
-                }
+            if (devices == null) return false;
+            for (BluetoothDevice d : devices) {
+                if (isTargetDevice(d)) return true;
             }
         } catch (SecurityException se) {
             Log.w(TAG, "getConnectedDevices denied", se);
         } catch (Exception e) {
             Log.w(TAG, "getConnectedDevices", e);
         }
-        if (hfpProfileConnected == any) return;
-        hfpProfileConnected = any;
-        recomputeFromCallbacks("hfp_proxy_ready");
+        return false;
     }
 
     private void recomputeFromCallbacks(String reason) {
@@ -232,6 +239,18 @@ public final class AudioRouteObserver implements WakeCoordinator.AudioSourceRead
         // Pas de faux positif : une entrée TYPE_BLUETOOTH_SCO implique le profil HFP
         // (un casque A2DP-only n'expose aucune entrée micro).
         boolean hfpAvailable = hfpProfileConnected || !scoInputDeviceIds.isEmpty();
+        if (!hfpAvailable) {
+            // L'entrée SCO disparaît dès que le lien audio est relâché — fin de
+            // conversation, par exemple. Ce n'est pas la preuve que le casque est parti :
+            // le profil HFP, lui, reste connecté. Sans cette relecture, la 1ʳᵉ discussion
+            // partait bien dans le casque et toutes les suivantes retombaient sur le
+            // téléphone. Lecture ponctuelle déclenchée par un callback, pas un sondage.
+            if (readHfpConnected(bluetoothHeadset)) {
+                hfpProfileConnected = true;
+                hfpAvailable = true;
+                Log.i(TAG, "entrée SCO disparue mais profil HFP toujours connecté");
+            }
+        }
         AudioSource next = hfpAvailable
                 ? AudioSource.BLUETOOTH_HFP
                 : AudioSource.PHONE_BUILTIN;

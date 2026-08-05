@@ -125,26 +125,33 @@ public final class A11yUiExecutor {
 
     public static void executeClick(Context ctx, PegaseAccessibilityService svc,
             JSONObject params, ToolCallback cb) {
-        A11yUiMatcher.Criteria criteria = parseCriteria(params);
+        A11yUiMatcher.Criteria early = parseCriteria(params);
         // « retour » / « back » = navigation système, pas un bouton à matcher.
-        if (looksLikeBackCommand(criteria.text)) {
+        if (looksLikeBackCommand(early.text)) {
             executeBack(ctx, svc, cb);
             return;
         }
         CopilotUiSupport.notifyActionInProgress(ctx, cb);
-        if (criteria.isEmpty()) {
+        if (early.isEmpty()) {
             cb.onError("Indique la cible à cliquer (texte visible à l'écran).");
             return;
         }
         withForegroundRoot(ctx, svc, root -> {
             String pkg = A11yRootPicker.packageOf(root);
+            CopilotAppHints hints = CopilotAppHintsStore.get(ctx, pkg);
+            A11yUiMatcher.Criteria criteria = parseCriteria(params);
+            if (!TextUtils.isEmpty(criteria.text)) {
+                criteria.text = hints.resolveAlias(criteria.text);
+            }
+            criteria.strictText = hints.strictTextMatch;
             String want = criteria.text != null ? criteria.text : "";
             // Cursor web : « micro » ≠ libellé a11y « Démarrer la saisie vocale ».
             A11yUiMatcher.Criteria effective = criteria;
             if (CursorMicAction.looksLikeMicRequest(want)) {
                 String micLabel = CursorMicAction.resolveMicLabel(root);
                 if (micLabel != null) {
-                    effective = A11yUiMatcher.Criteria.fromText(micLabel);
+                    effective = A11yUiMatcher.Criteria.fromText(micLabel)
+                            .withStrictText(hints.strictTextMatch);
                     want = micLabel;
                 }
             }
@@ -161,7 +168,8 @@ public final class A11yUiExecutor {
                             CharSequence t = field.getContentDescription();
                             if (t == null || t.length() == 0) t = field.getText();
                             if (t != null && t.length() > 0) {
-                                effective = A11yUiMatcher.Criteria.fromText(t.toString());
+                                effective = A11yUiMatcher.Criteria.fromText(t.toString())
+                                        .withStrictText(hints.strictTextMatch);
                             } else {
                                 effective = A11yUiMatcher.Criteria.fromText("url_bar");
                             }
@@ -183,10 +191,11 @@ public final class A11yUiExecutor {
             final A11yUiMatcher.Target target = resolved;
             final A11yUiMatcher.Criteria clickCriteria = effective;
             final String labelHint = want;
+            final CopilotAppHints clickHints = hints;
             highlightTarget(ctx, target);
             A11yClickPolicy.Level level = A11yClickPolicy.evaluate(target);
             if (level == A11yClickPolicy.Level.NEVER) {
-                performClick(ctx, root, clickCriteria, target, cb);
+                performClick(ctx, root, clickCriteria, target, clickHints, cb);
                 return;
             }
             String question = A11yClickPolicy.buildConfirmQuestion(target, level);
@@ -198,7 +207,8 @@ public final class A11yUiExecutor {
                         Trace.copilotUi("confirm_ok", "user_yes", "", pkg, label);
                         CopilotUiSupport.notifyActionInProgress(ctx, cb);
                         withForegroundRoot(ctx, svc,
-                                r -> performClick(ctx, r, clickCriteria, target, cb), cb);
+                                r -> performClick(ctx, r, clickCriteria, target,
+                                        clickHints, cb), cb);
                     },
                     () -> {
                         Trace.copilotUi("confirm_cancel", "user_no", "", pkg, label);
@@ -218,7 +228,13 @@ public final class A11yUiExecutor {
         A11yUiMatcher.Criteria criteria = parseCriteria(params);
         withForegroundRoot(ctx, svc, root -> {
             String pkg = A11yRootPicker.packageOf(root);
+            CopilotAppHints hints = CopilotAppHintsStore.get(ctx, pkg);
             String want = criteria.text != null ? criteria.text : "";
+            if (!TextUtils.isEmpty(want)) {
+                want = hints.resolveAlias(want);
+                criteria.text = want;
+            }
+            criteria.strictText = hints.strictTextMatch;
             AccessibilityNodeInfo node = criteria.isEmpty()
                     ? A11yUiMatcher.findEditableRoot(root)
                     : A11yUiMatcher.findNode(root, criteria);
@@ -280,7 +296,8 @@ public final class A11yUiExecutor {
     }
 
     private static void performClick(Context ctx, AccessibilityNodeInfo root,
-            A11yUiMatcher.Criteria criteria, A11yUiMatcher.Target preview, ToolCallback cb) {
+            A11yUiMatcher.Criteria criteria, A11yUiMatcher.Target preview,
+            CopilotAppHints hints, ToolCallback cb) {
         AccessibilityNodeInfo node = A11yUiMatcher.findNode(root, criteria);
         if (node == null) {
             ElementHighlightService.hide(ctx);
@@ -294,21 +311,46 @@ public final class A11yUiExecutor {
         try {
             android.graphics.Rect live = new android.graphics.Rect();
             node.getBoundsInScreen(live);
+            if (preview != null && !A11yClickRematch.stillMatches(preview, node, live)) {
+                ElementHighlightService.hide(ctx);
+                String pkg = A11yRootPicker.packageOf(root);
+                String want = criteria != null && criteria.text != null ? criteria.text : "";
+                Trace.copilotUi("matcher_miss", "rematch_drift",
+                        "Cible déplacée ou libellé changé avant clic", pkg, want);
+                cb.onError("L'élément a changé à l'écran — réessaie.");
+                return;
+            }
             // Retirer le surlignage avant le geste (même NOT_TOUCHABLE, certains OEM
             // absorbent encore le dispatchGesture).
             ElementHighlightService.hide(ctx);
 
-            // Gesture d'abord : ACTION_CLICK renvoie souvent true sans effet
-            // (Compose / Reddit / WebView / Play Store).
-            boolean ok = tapBounds(headerBand(live));
-            String via = ok ? "gesture" : "";
-            if (!ok) {
+            CopilotAppHints h = hints != null ? hints : CopilotAppHints.empty("");
+            boolean ok;
+            String via;
+            if (h.preferA11yFirst && !h.distrustA11yClickSuccess) {
                 ok = A11yUiMatcher.performClick(node);
-                if (ok) via = "a11y";
-            }
-            if (!ok && preview != null) {
-                ok = tapTarget(preview);
-                if (ok) via = "gesture-preview";
+                via = ok ? "a11y" : "";
+                if (!ok) {
+                    ok = tapBounds(headerBand(live));
+                    if (ok) via = "gesture";
+                }
+                if (!ok && preview != null) {
+                    ok = tapTarget(preview);
+                    if (ok) via = "gesture-preview";
+                }
+            } else {
+                // Gesture d'abord : ACTION_CLICK renvoie souvent true sans effet
+                // (Compose / Reddit / WebView / Play Store).
+                ok = tapBounds(headerBand(live));
+                via = ok ? "gesture" : "";
+                if (!ok && !h.distrustA11yClickSuccess) {
+                    ok = A11yUiMatcher.performClick(node);
+                    if (ok) via = "a11y";
+                }
+                if (!ok && preview != null) {
+                    ok = tapTarget(preview);
+                    if (ok) via = "gesture-preview";
+                }
             }
             if (ok) {
                 String label = preview != null && !TextUtils.isEmpty(preview.text)
@@ -325,7 +367,9 @@ public final class A11yUiExecutor {
                         + " clickable=" + node.isClickable()
                         + " web=" + looksLikeWebContent(node)
                         + " pkg=" + (pkg != null ? pkg : "")
-                        + " label=" + label);
+                        + " label=" + label
+                        + " hintsStrict=" + h.strictTextMatch
+                        + " distrustA11y=" + h.distrustA11yClickSuccess);
                 // Succès visible à l'écran — silence vocal (bulle / historique optionnel via "").
                 cb.onSuccess(ToolResult.text(""));
             } else {
@@ -440,7 +484,7 @@ public final class A11yUiExecutor {
                         spoken = null;
                     } else {
                         err = null;
-                        spoken = "J'ouvre " + launched.label + ".";
+                        spoken = "";
                         if (launched.packageName != null && !launched.packageName.isEmpty()) {
                             err = waitForeground(svc, launched.packageName, FOREGROUND_TIMEOUT_MS);
                         }

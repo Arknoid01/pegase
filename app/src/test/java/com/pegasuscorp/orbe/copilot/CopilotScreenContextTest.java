@@ -73,6 +73,10 @@ public class CopilotScreenContextTest {
         assertTrue(block.contains(PKG));
         assertTrue(block.contains("Contenu écran"));
         assertTrue(block.contains("matching est local"));
-        assertFalse(block.toLowerCase().contains("identifiant"));
+        // Le bloc doit *interdire* de réclamer un id technique. Il contient donc le mot
+        // « identifiant » — c'était l'inverse qui était vérifié avant que l'interdiction
+        // ne soit formulée explicitement dans le prompt.
+        assertTrue(block.contains("INTERDIT de demander view_id"));
+        assertTrue(block.toLowerCase().contains("identifiant de vue"));
     }
 }

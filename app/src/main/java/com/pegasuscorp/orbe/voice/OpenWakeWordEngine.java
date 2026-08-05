@@ -25,9 +25,9 @@ import ai.onnxruntime.OrtSession;
 /**
  * Wake openWakeWord — pipeline 3 étages (mel → embedding → classifieur).
  * <p>
- * Capture audio via {@link KwsAudioRouteManager} (même chemin que Sherpa / STT) :
- * SCO tenu par {@code VoiceService} ({@code ensureWakeServiceScoHold}),
- * preferred device à l'open mic, restart sur changement de route.
+ * Capture via {@link KwsAudioRouteManager} en micro téléphone
+ * ({@code forcePhoneBuiltin} côté {@code VoiceService}). Le SCO conversationnel
+ * appartient au launcher ({@link VoiceManager}).
  * <p>
  * Anti-FP : seuil haut, N hits consécutifs, warmup au démarrage, gate énergie.
  */
@@ -52,7 +52,7 @@ public final class OpenWakeWordEngine {
     private static final int EMBEDDING_DIM = 96;
     private static final int CLASSIFIER_INPUT_EMBEDDINGS = 16;
     /** Modèle v2 (hard-neg) : détection front montant classique. */
-    private static final float DEFAULT_THRESHOLD = 0.50f;
+    private static final float DEFAULT_THRESHOLD = PegaseWakeStore.DEFAULT_OWW_THRESHOLD;
     private static final long REFRACTORY_MS = 4_000L;
     private static final long GLOBAL_REFRACTORY_MS = 8_000L;
     private static volatile long sLastFireElapsedMs;
@@ -395,7 +395,7 @@ public final class OpenWakeWordEngine {
 
     private boolean openMic() {
         synchronized (captureLock) {
-            // SCO tenu par VoiceService (ensureWakeServiceScoHold) — pas de prepare/release ici.
+            // Route fixée par VoiceService (forcePhoneBuiltin) — pas de prepare/release SCO ici.
             int source = routeManager != null
                     ? routeManager.getAudioSource()
                     : MediaRecorder.AudioSource.MIC;

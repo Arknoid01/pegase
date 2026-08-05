@@ -399,23 +399,21 @@ public class PersonalizationPanel extends FrameLayout {
                         + "Seuil actuel : "
                         + String.format(java.util.Locale.US, "%.2f",
                         com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context))
-                        + " (plus haut = moins de faux positifs)."));
+                        + " (défaut 0,65 — plus haut = moins de faux positifs)."));
         TextView owwStatus = new TextView(context);
         owwStatus.setTextColor(Color.parseColor("#88FFFFFF"));
         owwStatus.setTextSize(12);
         owwStatus.setText(com.pegasuscorp.orbe.voice.WakeOwwStore.statusLabel(context));
         body.addView(owwStatus, wrapLp());
-        addActionRow("Seuil OWW plus strict (0,92)", () -> {
-            com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.92f);
-            android.widget.Toast.makeText(context, "Seuil wake → 0,92",
+        addActionRow("Seuil OWW un peu plus strict (0,70)", () -> {
+            VoiceWakeClient.get().setOwwThreshold(context, 0.70f);
+            android.widget.Toast.makeText(context, "Seuil wake → 0,70",
                     android.widget.Toast.LENGTH_SHORT).show();
-            VoiceWakeClient.get().sync(context);
         });
-        addActionRow("Seuil OWW normal (0,88)", () -> {
-            com.pegasuscorp.orbe.voice.PegaseWakeStore.setOwwThreshold(context, 0.88f);
-            android.widget.Toast.makeText(context, "Seuil wake → 0,88",
+        addActionRow("Seuil OWW recommandé (0,65)", () -> {
+            VoiceWakeClient.get().setOwwThreshold(context, 0.65f);
+            android.widget.Toast.makeText(context, "Seuil wake → 0,65",
                     android.widget.Toast.LENGTH_SHORT).show();
-            VoiceWakeClient.get().sync(context);
         });
         addActionRow("Enregistrer mon wake word", () ->
                 getContext().startActivity(

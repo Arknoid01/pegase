@@ -137,7 +137,9 @@ public final class ToolDispatcher {
         Tool tool = registry.findById(toolId);
         if (tool == null) {
             final String id = toolId;
-            post(cb, () -> cb.onError("Outil inconnu : " + id));
+            final String msg = ToolRegistry.unknownToolMessage(id,
+                    registry.suggestSimilarIds(id));
+            post(cb, () -> cb.onError(msg));
             return;
         }
 

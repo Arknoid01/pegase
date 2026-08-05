@@ -228,7 +228,7 @@ public final class CopilotController {
             String reflectionPlan = "";
             try {
                 CopilotScreenContext.Snapshot snap = CopilotScreenContext.readFresh(ctx);
-                String prompt = CopilotReflectionPlanner.buildReflectionPrompt(snap, trimmed);
+                String prompt = CopilotReflectionPlanner.buildReflectionPrompt(ctx, snap, trimmed);
                 reflectionPlan = PegaseSession.get(ctx).completeCopilotReflectionSync(prompt);
             } catch (Exception e) {
                 android.util.Log.w("CopilotReflection", "reflection skipped", e);
@@ -436,7 +436,8 @@ public final class CopilotController {
                 main.post(() -> {
                     if (gen != attachGeneration) return;
                     clearBubbleStatus(true);
-                    if (bubbleSink != null && result != null && result.text != null) {
+                    if (bubbleSink != null && result != null
+                            && !TextUtils.isEmpty(result.text)) {
                         bubbleSink.onAssistantMessage(result.text);
                     }
                     setSending(false);
@@ -518,11 +519,8 @@ public final class CopilotController {
         }
         String target = CopilotUiAskGuard.inferUiTarget(lastUserText);
         if (TextUtils.isEmpty(target)) {
-            // Pas de cible à inférer : ne pas afficher la demande technique.
+            // Pas de cible à inférer : ne pas afficher la demande technique ni un faux « fait ».
             clearBubbleStatus(true);
-            if (bubbleSink != null) {
-                bubbleSink.onAssistantMessage("C'est fait.");
-            }
             setSending(false);
             return true;
         }

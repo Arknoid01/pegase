@@ -132,6 +132,9 @@ public final class VoiceIntentRouter {
         if (NotepadEditor.looksLikeNotepadEdit(text)) {
             return RoutedIntent.llmOnly(text);
         }
+        if (com.pegasuscorp.orbe.copilot.CopilotHintsEditor.looksLikeHintsEdit(text)) {
+            return RoutedIntent.llmOnly(text);
+        }
         if (CorrectionsEditor.looksLikeCorrectionsCommand(text)) {
             return RoutedIntent.llmOnly(text);
         }

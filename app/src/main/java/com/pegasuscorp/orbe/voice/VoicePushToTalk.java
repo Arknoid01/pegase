@@ -63,7 +63,8 @@ public final class VoicePushToTalk {
             if (c != null) c.onListeningChanged(listening);
             PegaseWakeController.setMicListening(listening);
         });
-        voice.setOnListenFailed(() -> {
+        voice.setOnListenFailed(error -> {
+            // PTT : l'utilisateur relâche puis reparle lui-même, pas de reprise auto.
             Callback c = callback;
             if (c != null) c.onEmpty();
         });

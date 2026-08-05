@@ -72,12 +72,20 @@ public final class PersonalityGuide {
     public static String stripBannedPhrases(String text) {
         if (text == null || text.trim().isEmpty()) return "";
         String out = text;
+        boolean removed = false;
         for (String banned : bannedPhrases()) {
+            String before = out;
             out = removeIgnoreCase(out, banned);
+            if (!out.equals(before)) removed = true;
         }
         out = out.replaceAll("\\s+", " ").trim();
-        out = out.replaceAll("^[,.;:!?]+", "").trim();
-        out = out.replaceAll("[,.;:!?]+$", "").trim();
+        if (removed) {
+            // Ponctuation orpheline laissée par la coupe — à nettoyer seulement dans ce
+            // cas. Appliqué systématiquement, « Salut ! » perdait son exclamation et
+            // toute question son point d'interrogation, donc son intonation au TTS.
+            out = out.replaceAll("^[,.;:!?]+", "").trim();
+            out = out.replaceAll("[,.;:!?]+$", "").trim();
+        }
         return out;
     }
 

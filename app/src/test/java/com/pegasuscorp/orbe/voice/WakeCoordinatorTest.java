@@ -351,6 +351,42 @@ public class WakeCoordinatorTest {
         assertEquals(1, sco.releaseCalls.get());
     }
 
+    /**
+     * Le wake écoute le micro du téléphone : la route figée à {@code start()} ne dit rien
+     * du casque. La conversation doit donc lire l'état au moment du handoff — casque
+     * branché entre le démarrage de l'écoute et le « Hey Pégase ».
+     */
+    @Test
+    public void requestSttSession_headsetConnectedAfterStart_usesHeadset() {
+        routes.source = AudioRouteObserver.AudioSource.PHONE_BUILTIN;
+        coord = newCoordinator();
+        coord.start();
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, coord.getState().source);
+
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, sco.lastPrepareSource.get());
+        assertEquals(AudioRouteObserver.AudioSource.BLUETOOTH_HFP, coord.getState().source);
+    }
+
+    /** Cas symétrique : casque retiré pendant l'écoute → la conversation reste au téléphone. */
+    @Test
+    public void requestSttSession_headsetRemovedAfterStart_usesPhone() {
+        routes.source = AudioRouteObserver.AudioSource.BLUETOOTH_HFP;
+        coord = newCoordinator();
+        coord.start();
+
+        routes.source = AudioRouteObserver.AudioSource.PHONE_BUILTIN;
+        coord.onWakeDetected();
+        coord.requestSttSession(ok -> {});
+
+        assertEquals(AudioRouteObserver.AudioSource.PHONE_BUILTIN, sco.lastPrepareSource.get());
+        assertTrue(coord.releaseSttSession());
+        assertEquals(0, sco.releaseCalls.get());
+    }
+
     @Test
     public void requestSttSession_phone_skipsScoRelease() {
         coord.start();

@@ -39,6 +39,8 @@ public class MemoryConsolidatorTest {
 
     @AfterClass
     public static void unloadEngine() {
+        MemoryUpdateJudge.setEnabledForTests(true);
+        MemoryUpdateJudge.setOverrideForTests(null);
         MemoryRepository.resetInstanceForTests();
         MemoryRepository.setAutoMigrateForTests(true);
         EmbeddingEngine.resetForTests();
@@ -50,6 +52,8 @@ public class MemoryConsolidatorTest {
         MemoryRepository.setAutoMigrateForTests(false);
         MemoryRepository.resetInstanceForTests();
         EmbeddingEngine.installForTests(sharedEngine);
+        MemoryUpdateJudge.setEnabledForTests(false);
+        MemoryUpdateJudge.setOverrideForTests(null);
 
         ctx = RuntimeEnvironment.getApplication();
         File memDir = new File(ctx.getFilesDir(), "memory");
@@ -108,7 +112,9 @@ public class MemoryConsolidatorTest {
     public void promoteSession_promotesDecisionsAndPending() {
         SessionSummary summary = new SessionSummary();
         summary.decisions.add("On part sur Kotlin pour le module mémoire");
-        summary.pendingTopics.add("Vérifier les tests Robolectric demain");
+        // La liste blanche des pendings exige un radical d'intention (rappel, pense,
+        // oublie…) : « vérifier » seul est trop large et serait rejeté.
+        summary.pendingTopics.add("Pense à vérifier les tests Robolectric demain");
 
         MemoryConsolidator.promoteSession(ctx, summary);
 
