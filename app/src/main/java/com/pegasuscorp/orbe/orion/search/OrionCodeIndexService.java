@@ -32,20 +32,29 @@ public final class OrionCodeIndexService {
     }
 
     public void scheduleIndexActiveProject(Context ctx) {
-        if (ctx == null) return;
+        if (ctx == null || isUnitTest()) return;
         Context app = ctx.getApplicationContext();
         bg.execute(() -> indexActiveProject(app));
     }
 
+    /**
+     * Sous Robolectric, l'indexation ONNX en arrière-plan survit aux tests et
+     * SIGSEGV à l'extinction de la JVM (teardown ORT pendant un embed).
+     * Aucun test unitaire ne dépend de cette indexation planifiée.
+     */
+    private static boolean isUnitTest() {
+        return "robolectric".equals(android.os.Build.FINGERPRINT);
+    }
+
     public void scheduleReindexFile(Context ctx, String projectName,
             String filename, String content) {
-        if (ctx == null || !OrionCodeIndexer.isJavaFile(filename)) return;
+        if (ctx == null || isUnitTest() || !OrionCodeIndexer.isJavaFile(filename)) return;
         Context app = ctx.getApplicationContext();
         bg.execute(() -> reindexFile(app, projectName, filename, content));
     }
 
     public void schedulePurgeFile(Context ctx, String projectName, String filename) {
-        if (ctx == null || !OrionCodeIndexer.isJavaFile(filename)) return;
+        if (ctx == null || isUnitTest() || !OrionCodeIndexer.isJavaFile(filename)) return;
         Context app = ctx.getApplicationContext();
         bg.execute(() -> purgeFile(app, projectName, filename));
     }
