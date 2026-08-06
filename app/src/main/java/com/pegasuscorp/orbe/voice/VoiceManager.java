@@ -547,8 +547,11 @@ public class VoiceManager {
             setListeningActive(false);
             pushToTalkMode = false;
             releaseSttScoAfterListen();
-            ArrayList<String> list =
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            // Le binder SpeechRecognizer peut livrer null après cancel/destroy
+            // (fin de session pendant écoute) — NPE fatal sinon.
+            ArrayList<String> list = results != null
+                    ? results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    : null;
             if (list != null && !list.isEmpty()) {
                 String transcript = pickBestTranscript(list);
                 if (!transcript.isEmpty()) {
@@ -575,7 +578,9 @@ public class VoiceManager {
                     best = trimmed;
                 }
             }
-            return best != null ? best : hypotheses.get(0).trim();
+            if (best != null) return best;
+            String first = hypotheses.get(0);
+            return first != null ? first.trim() : "";
         }
 
         @Override public void onError(int error) {

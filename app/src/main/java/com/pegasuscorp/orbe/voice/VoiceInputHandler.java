@@ -1416,8 +1416,15 @@ public final class VoiceInputHandler {
         if (conversation == null || !conversation.isActive()) return;
         VoiceSessionContext.get().clear();
         lockedChatMode = false;
+        // Invalide les callbacks LLM / outils encore en vol : sans ça, une réponse
+        // tardive relançait TTS + reprise micro après la fin de session.
+        chatRequestId++;
+        // Lire le flag AVANT setVoiceChatActive(false) — qui l'efface aussi :
+        // sinon le bloc finish/hide in-place ne s'exécutait jamais (orbe et
+        // activity fantômes, recognizer attaché à une Activity morte).
+        boolean wasInPlace = PegaseWakeController.isInPlaceVoiceActive();
         PegaseWakeController.setVoiceChatActive(false);
-        if (PegaseWakeController.isInPlaceVoiceActive()) {
+        if (wasInPlace) {
             PegaseWakeController.setInPlaceVoiceActive(false);
             FloatingOrbService.hide(activity);
             if (activity instanceof InPlaceVoiceActivity) {
