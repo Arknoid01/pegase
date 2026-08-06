@@ -41,22 +41,28 @@ public final class UiSearchTool implements Tool {
   public void execute(Context ctx, JSONObject params, ToolCallback cb) {
     if (CopilotUiSupport.requireService(ctx, cb) == null) return;
     String query = params.optString("query", "").trim();
-    if (query.isEmpty()) {
-      String requested = A11yUiExecutor.parseCriteria(params).text;
+    String requested = A11yUiExecutor.parseCriteria(params).text;
+    if (!TextUtils.isEmpty(requested)) {
+      // target fourni = mot désigné à l'écran : il prime sur query (souvent une
+      // paraphrase libre du LLM), et on surligne la cible même si query est rempli.
       A11yUiMatcher.Target target = UiExplainHelper.resolveTarget(ctx, params);
-      if (target == null || TextUtils.isEmpty(target.text)) {
-        cb.onError("Indique le mot à chercher (target ou query).");
-        return;
-      }
-      A11yUiExecutor.highlightTarget(ctx, target);
-      // Le nœud a11y matché est souvent le paragraphe entier contenant le mot
-      // (pas de nœud par mot) — chercher le mot demandé, pas tout le bloc.
-      if (!TextUtils.isEmpty(requested)
-          && target.text.length() > requested.length() + 24) {
+      if (target != null) {
+        A11yUiExecutor.highlightTarget(ctx, target);
+        // Le nœud a11y matché est souvent le paragraphe entier contenant le mot
+        // (pas de nœud par mot) — chercher le mot demandé, pas tout le bloc.
+        if (!TextUtils.isEmpty(target.text)
+            && target.text.length() <= requested.length() + 24) {
+          query = target.text;
+        } else {
+          query = requested;
+        }
+      } else if (query.isEmpty()) {
         query = requested;
-      } else {
-        query = target.text;
       }
+    }
+    if (query.isEmpty()) {
+      cb.onError("Indique le mot à chercher (target ou query).");
+      return;
     }
     CopilotUiSupport.notifyActionInProgress(ctx, cb);
     try {

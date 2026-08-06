@@ -52,6 +52,14 @@ public class UiExplainHelperTest {
     }
 
     @Test
+    public void scoreFields_exactShortLabel_beatsParagraphContaining() {
+        A11yUiMatcher.Criteria c = A11yUiMatcher.Criteria.fromText("hasard");
+        int exact = A11yUiMatcher.scoreFields("Hasard", "", true, c);
+        int paragraph = A11yUiMatcher.scoreFields(PARAGRAPH, "", false, c);
+        assertTrue("exact=" + exact + " paragraph=" + paragraph, exact > paragraph);
+    }
+
+    @Test
     public void localAnswer_wordNotInParagraph_returnsFullText() {
         A11yUiMatcher.Target target = new A11yUiMatcher.Target(
                 PARAGRAPH, "", "android.widget.TextView", false, 0, 0, 400, 200);

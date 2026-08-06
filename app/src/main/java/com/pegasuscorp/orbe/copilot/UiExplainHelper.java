@@ -134,13 +134,24 @@ public final class UiExplainHelper {
 
     private static A11yUiMatcher.Target findInSnapshot(Context ctx, A11yUiMatcher.Criteria criteria) {
         if (ctx == null || criteria == null || criteria.isEmpty()) return null;
+        // Meilleur score, pas premier match : l'ordre BFS du snapshot place les
+        // conteneurs / gros blocs avant le libellé exact.
+        A11ySnapshot.Node best = null;
+        int bestScore = Integer.MIN_VALUE;
         for (A11ySnapshot.Node node : A11ySnapshot.loadNodes(ctx)) {
-            if (A11yUiMatcher.matchesFields(node.text, node.viewId, node.className, criteria)) {
-                return new A11yUiMatcher.Target(
-                        node.text, node.viewId, node.className, node.clickable,
-                        node.left, node.top, node.right, node.bottom);
+            if (!A11yUiMatcher.matchesFields(node.text, node.viewId, node.className, criteria)) {
+                continue;
+            }
+            int score = A11yUiMatcher.scoreFields(
+                    node.text, node.viewId, node.clickable, criteria);
+            if (score > bestScore) {
+                bestScore = score;
+                best = node;
             }
         }
-        return null;
+        if (best == null) return null;
+        return new A11yUiMatcher.Target(
+                best.text, best.viewId, best.className, best.clickable,
+                best.left, best.top, best.right, best.bottom);
     }
 }
