@@ -35,19 +35,22 @@ public final class UiActionTool implements Tool {
 
     @Override
     public String description() {
-        return "ui_action — Contrôle l'écran de l'app autorisée. "
-                + "Action unique : action:\"click\"|\"type\"|\"scroll\"|\"back\", "
-                + "target:str (libellé visible, JAMAIS viewId), value:str, "
-                + "direction:\"up\"|\"down\". "
+        // Format signature ui_action(…) obligatoire : OpenAiToolSchemaBuilder en
+        // extrait les propriétés du schéma natif (sinon schéma vide → params
+        // improvisés par le modèle). Pas de mention d'id technique après le tiret.
+        return "ui_action(action:\"click\"|\"type\"|\"scroll\"|\"back\", target:str, "
+                + "value:str, direction:\"up\"|\"down\", steps:list) "
+                + "— Contrôle l'écran de l'app autorisée. "
+                + "target = libellé visible à l'écran, jamais d'identifiant technique. "
                 + "Multi-étapes (préféré si ouvre+clique+tape) : "
-                + "steps:[{action,target?,value?,direction?,name?},…] "
+                + "steps=[{action,target?,value?,direction?,name?},…] "
                 + "max " + A11yUiExecutor.MAX_SEQUENCE_STEPS + " — ex. "
                 + "[{action:\"open\",name:\"Brave\"},"
                 + "{action:\"click\",target:\"barre d'adresse\"},"
                 + "{action:\"type\",value:\"Wikipedia\"}]. "
                 + "Pour open : name libellé (Brave), PAS package espacé "
                 + "(évite com. android. chrome). "
-                + "action:\"back\" pour retour navigateur / système (mot « retour »). "
+                + "action \"back\" pour retour navigateur / système (mot « retour »). "
                 + "Une seule ui_action avec steps, pas N appels. "
                 + "Si steps échoue (libellé faux, cookie…) → repli auto ui_loop. "
                 + "click peut demander confirmation.";
