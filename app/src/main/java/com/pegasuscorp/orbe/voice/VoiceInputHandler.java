@@ -194,7 +194,13 @@ public final class VoiceInputHandler {
         boolean recoverable = error == SpeechRecognizer.ERROR_NO_MATCH
                 || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 || error == SpeechRecognizer.ERROR_CLIENT;
-        if (recoverable && listenFailureStreak < MAX_LISTEN_FAILURES) {
+        // Écran verrouillé : ERROR_CLIENT / NO_MATCH en série sont fréquents
+        // (keyguard, surface, route audio) — deux échecs clôturaient la session
+        // avant que l'utilisateur ait pu parler (calcul / minuteur lock morts).
+        int maxFailures = LockSessionPolicy.isDeviceLocked(activity)
+                ? MAX_LISTEN_FAILURES * 2
+                : MAX_LISTEN_FAILURES;
+        if (recoverable && listenFailureStreak < maxFailures) {
             listenFailureStreak++;
             long delay = LISTEN_RETRY_BASE_MS * listenFailureStreak;
             mainHandler.postDelayed(this::resumeChatListeningIfNeeded, delay);
@@ -1416,8 +1422,15 @@ public final class VoiceInputHandler {
         if (conversation == null || !conversation.isActive()) return;
         VoiceSessionContext.get().clear();
         lockedChatMode = false;
+        // Invalide les callbacks LLM / outils encore en vol : sans ça, une réponse
+        // tardive relançait TTS + reprise micro après la fin de session.
+        chatRequestId++;
+        // Lire le flag AVANT setVoiceChatActive(false) — qui l'efface aussi :
+        // sinon le bloc finish/hide in-place ne s'exécutait jamais (orbe et
+        // activity fantômes, recognizer attaché à une Activity morte).
+        boolean wasInPlace = PegaseWakeController.isInPlaceVoiceActive();
         PegaseWakeController.setVoiceChatActive(false);
-        if (PegaseWakeController.isInPlaceVoiceActive()) {
+        if (wasInPlace) {
             PegaseWakeController.setInPlaceVoiceActive(false);
             FloatingOrbService.hide(activity);
             if (activity instanceof InPlaceVoiceActivity) {

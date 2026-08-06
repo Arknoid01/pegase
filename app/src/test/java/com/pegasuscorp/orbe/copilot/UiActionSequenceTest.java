@@ -64,8 +64,11 @@ public class UiActionSequenceTest {
         String d = new UiActionTool().description();
         assertTrue(d.contains("steps"));
         assertTrue(d.contains("open") || d.contains("ouvre"));
-        assertTrue(d.contains("JAMAIS") || d.toLowerCase().contains("jamais"));
-        assertTrue(d.toLowerCase().contains("viewid") || d.contains("viewId"));
+        // « jamais d'identifiant technique » — le mot viewId est banni de la
+        // description (OpenAiToolSchemaBuilderTest.uiAction_schemaHasTarget_notViewId).
+        assertTrue(d.toLowerCase().contains("jamais"));
+        assertTrue(d.toLowerCase().contains("identifiant technique"));
+        assertFalse(d.toLowerCase().contains("viewid"));
     }
 
     @Test

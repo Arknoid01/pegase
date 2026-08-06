@@ -177,8 +177,14 @@ public final class A11yUiMatcher {
                 ? normalizeForMatch(criteria.text) : "";
 
         // Libellé exact / très proche > gros conteneur cliquable ambigu.
-        if (!exact.isEmpty() && normalizeForMatch(label).equals(exact)) score += 120;
-        else if (!exact.isEmpty() && normalizeForMatch(label).startsWith(exact)) score += 70;
+        String lbl = normalizeForMatch(label);
+        if (!exact.isEmpty() && lbl.equals(exact)) score += 120;
+        else if (!exact.isEmpty() && lbl.startsWith(exact)) score += 70;
+        else if (!exact.isEmpty() && lbl.contains(exact)
+                && lbl.length() <= exact.length() + 32) {
+            // Mot dans un libellé court (lien, bouton) > paragraphe entier qui le contient.
+            score += 45;
+        }
 
         java.util.List<String> toks = significantTokens(exact);
         int tokHits = 0;
@@ -305,6 +311,32 @@ public final class A11yUiMatcher {
             "icone", "icones", "icon", "icons", "image", "images"
     ));
 
+
+    /**
+     * Score d'un candidat snapshot (champs seuls, sans nœud vivant) — même esprit
+     * que {@code scoreCandidate} : libellé exact / court > gros bloc qui contient.
+     */
+    public static int scoreFields(String label, String viewId, boolean clickable,
+            Criteria criteria) {
+        int score = 0;
+        String exact = criteria != null && !TextUtils.isEmpty(criteria.text)
+                ? normalizeForMatch(criteria.text) : "";
+        String lbl = normalizeForMatch(label);
+        if (!exact.isEmpty() && lbl.equals(exact)) score += 120;
+        else if (!exact.isEmpty() && lbl.startsWith(exact)) score += 70;
+        else if (!exact.isEmpty() && lbl.contains(exact)
+                && lbl.length() <= exact.length() + 32) {
+            score += 45;
+        }
+        String hay = normalizeForMatch(label + " " + (viewId != null ? viewId : ""));
+        for (String tok : significantTokens(exact)) {
+            if (hay.contains(tok)) score += 12;
+        }
+        if (clickable) score += 25;
+        // Paragraphe entier contenant le mot : moins prioritaire qu'un vrai libellé.
+        if (!exact.isEmpty() && lbl.length() > exact.length() + 120) score -= 60;
+        return score;
+    }
 
     public static Target targetFromNode(AccessibilityNodeInfo node) {
         String label = combinedLabel(node);

@@ -46,6 +46,11 @@ public final class CopilotIntentHandler implements IntentHandler {
                 return null;
             }
         }
+        // « ajoute à ma routine du matin… » = BriefTool add (LifeIntentHandler),
+        // pas une ingestion presse-papiers — le préfixe « ajoute à » est trop glouton.
+        if (LifeIntentHandler.looksLikeAddMorningRoutine(fold, text)) {
+            return null;
+        }
         if (ShareIngestRouter.looksLikeRemember(fold)
                 || ShareIngestRouter.parseContextName(fold) != null) {
             ShareIngestRouter.Result r = ShareIngestRouter.ingestFromVoice(context, text);

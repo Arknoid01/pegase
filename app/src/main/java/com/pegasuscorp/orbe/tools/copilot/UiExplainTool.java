@@ -39,6 +39,7 @@ public final class UiExplainTool implements Tool {
     @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         if (CopilotUiSupport.requireService(ctx, cb) == null) return;
+        String requested = A11yUiExecutor.parseCriteria(params).text;
         A11yUiMatcher.Target target = UiExplainHelper.resolveTarget(ctx, params);
         if (target == null) {
             cb.onError("Je ne trouve pas l'élément à expliquer.");
@@ -51,7 +52,7 @@ public final class UiExplainTool implements Tool {
             return;
         }
 
-        String answer = UiExplainHelper.localAnswer(target, question);
+        String answer = UiExplainHelper.localAnswer(target, requested, question);
         if (TextUtils.isEmpty(answer)) {
             UiExplainVision.explain(ctx, target, question, cb);
             return;

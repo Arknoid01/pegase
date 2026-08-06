@@ -302,7 +302,9 @@ public class PegaseSessionTest {
         session.init(new SessionContext(Channel.TEXT, false));
         AtomicReference<String> finalReply = new AtomicReference<>();
 
-        session.send("Lance stub", new SessionObserver() {
+        // « Fais » et non « Lance » : tryOpenAppLocalShortCircuit intercepte
+        // « lance X » en open_app local sans passer par le LLM.
+        session.send("Fais le stub", new SessionObserver() {
             @Override
             public void onReply(String text, boolean fired) {
                 if (!fired) {
@@ -348,7 +350,8 @@ public class PegaseSessionTest {
         session.init(new SessionContext(Channel.VOICE, true));
         AtomicReference<String> finalReply = new AtomicReference<>();
 
-        session.send("Lance stub", new SessionObserver() {
+        // « Fais » et non « Lance » : évite le court-circuit open_app local.
+        session.send("Fais le stub", new SessionObserver() {
             @Override
             public void onReply(String text, boolean fired) {
                 if (!fired) finalReply.set(text);

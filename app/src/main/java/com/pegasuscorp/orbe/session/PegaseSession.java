@@ -1222,6 +1222,17 @@ public class PegaseSession {
             turnReasoning.noteToolStart(toolId, safeParams);
         }
         final long startedAt = System.currentTimeMillis();
+        try {
+            executeToolGuarded(tool, safeParams, conv, toolId, startedAt, obs);
+        } catch (Exception e) {
+            android.util.Log.e("PegaseSession", "tool.execute crash: " + toolId, e);
+            main.post(() -> finishTool(conv, toolId, startedAt, null,
+                    "L'outil " + toolId + " a planté — réessaie.", false, obs));
+        }
+    }
+
+    private void executeToolGuarded(Tool tool, JSONObject safeParams,
+            ConversationManager conv, String toolId, long startedAt, SessionObserver obs) {
         tool.execute(appContext, safeParams, new ToolCallback() {
             @Override
             public void onSuccess(ToolResult result) {
@@ -1962,10 +1973,11 @@ public class PegaseSession {
     }
 
     private void notifyToolProgress(SessionObserver oneOff, String message) {
-        notify(oneOff, o -> {
-            o.onToolProgress(message);
-            o.onPartial(message);
-        });
+        // Statut uniquement — surtout pas onPartial : la bulle copilote écrivait
+        // « Action en cours… » comme message assistant, jamais remplacé quand
+        // l'outil (scroll/back) finit avec un résultat vide → chat figé sur le
+        // statut ; en voix, le statut pouvait même partir en TTS streamé.
+        notify(oneOff, o -> o.onToolProgress(message));
     }
 
     private void notifyToolStart(SessionObserver oneOff, String toolId) {

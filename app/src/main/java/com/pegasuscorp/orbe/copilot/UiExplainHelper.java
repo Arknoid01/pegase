@@ -41,13 +41,55 @@ public final class UiExplainHelper {
     }
 
     public static String localAnswer(A11yUiMatcher.Target target, String question) {
+        return localAnswer(target, "", question);
+    }
+
+    /**
+     * @param requestedWord mot désigné par l'utilisateur — le nœud matché est souvent
+     *                      le paragraphe entier qui le contient (pas de nœud par mot) :
+     *                      on recentre alors la réponse sur la phrase autour du mot.
+     */
+    public static String localAnswer(A11yUiMatcher.Target target, String requestedWord,
+            String question) {
         if (target == null) return "";
-        if (!TextUtils.isEmpty(target.text)) return target.text;
+        if (!TextUtils.isEmpty(target.text)) {
+            String text = target.text;
+            if (!TextUtils.isEmpty(requestedWord)
+                    && text.length() > requestedWord.length() + 48) {
+                String focused = focusedExcerpt(text, requestedWord);
+                if (!focused.isEmpty()) return focused;
+            }
+            return text;
+        }
         // viewId technique (ex. Astronomie_et_espace-collapsible) → libellé lisible
         if (!TextUtils.isEmpty(target.viewId)) {
             return humanizeViewId(target.viewId);
         }
         return "";
+    }
+
+    /** Phrase (ou fenêtre ±160 car.) autour du mot dans un long bloc de texte. */
+    static String focusedExcerpt(String text, String word) {
+        if (TextUtils.isEmpty(text) || TextUtils.isEmpty(word)) return "";
+        String hay = text.toLowerCase(java.util.Locale.ROOT);
+        int idx = hay.indexOf(word.trim().toLowerCase(java.util.Locale.ROOT));
+        if (idx < 0) return "";
+        int start = idx;
+        int limit = Math.max(0, idx - 160);
+        while (start > limit) {
+            char c = text.charAt(start - 1);
+            if (c == '.' || c == '!' || c == '?' || c == '\n') break;
+            start--;
+        }
+        int end = idx + word.trim().length();
+        int cap = Math.min(text.length(), end + 160);
+        while (end < cap) {
+            char c = text.charAt(end);
+            end++;
+            if (c == '.' || c == '!' || c == '?' || c == '\n') break;
+        }
+        String out = text.substring(start, end).trim();
+        return out.isEmpty() ? "" : out;
     }
 
     static String humanizeViewId(String viewId) {
@@ -92,13 +134,24 @@ public final class UiExplainHelper {
 
     private static A11yUiMatcher.Target findInSnapshot(Context ctx, A11yUiMatcher.Criteria criteria) {
         if (ctx == null || criteria == null || criteria.isEmpty()) return null;
+        // Meilleur score, pas premier match : l'ordre BFS du snapshot place les
+        // conteneurs / gros blocs avant le libellé exact.
+        A11ySnapshot.Node best = null;
+        int bestScore = Integer.MIN_VALUE;
         for (A11ySnapshot.Node node : A11ySnapshot.loadNodes(ctx)) {
-            if (A11yUiMatcher.matchesFields(node.text, node.viewId, node.className, criteria)) {
-                return new A11yUiMatcher.Target(
-                        node.text, node.viewId, node.className, node.clickable,
-                        node.left, node.top, node.right, node.bottom);
+            if (!A11yUiMatcher.matchesFields(node.text, node.viewId, node.className, criteria)) {
+                continue;
+            }
+            int score = A11yUiMatcher.scoreFields(
+                    node.text, node.viewId, node.clickable, criteria);
+            if (score > bestScore) {
+                bestScore = score;
+                best = node;
             }
         }
-        return null;
+        if (best == null) return null;
+        return new A11yUiMatcher.Target(
+                best.text, best.viewId, best.className, best.clickable,
+                best.left, best.top, best.right, best.bottom);
     }
 }
