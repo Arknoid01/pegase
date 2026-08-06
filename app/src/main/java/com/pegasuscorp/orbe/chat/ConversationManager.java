@@ -736,6 +736,15 @@ public class ConversationManager {
                 latch.countDown();
             }
         }, options, traceChannel);
+        // Les backends postent leur réponse sur le main thread : attendre le latch
+        // depuis le main = deadlock garanti jusqu'au timeout (ANR). Échec immédiat,
+        // sauf si la réponse est déjà arrivée (backends de test / erreurs inline).
+        android.os.Looper mainLooper = android.os.Looper.getMainLooper();
+        if (latch.getCount() > 0 && mainLooper != null
+                && android.os.Looper.myLooper() == mainLooper) {
+            throw new IllegalStateException(
+                    "completeEphemeralSync appelé sur le main thread — deadlock évité");
+        }
         if (!latch.await(timeoutSec, TimeUnit.SECONDS)) {
             throw new RuntimeException("Délai dépassé");
         }

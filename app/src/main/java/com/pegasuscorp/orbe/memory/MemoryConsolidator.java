@@ -9,6 +9,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Consolidation : promotion session → permanente via juge Mem0-style
@@ -20,7 +22,28 @@ public final class MemoryConsolidator {
     /** Au-dessus de ce cosine, un fait est considéré comme doublon (fallback sans LLM). */
     static final float SEMANTIC_DEDUP_THRESHOLD = 0.85f;
 
+    /**
+     * Promotion sur thread dédié : le juge Mem0 fait un appel LLM synchrone
+     * (latch 30 s) dont la réponse est postée sur le main thread — bloquer le
+     * main ici le deadlockait jusqu'au timeout, par fait promu → ANR en fin
+     * de discussion. L'embedding MiniLM de findSimilarMemories est aussi
+     * trop lourd pour le main.
+     */
+    private static final ExecutorService CONSOLIDATE_IO =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "pegase-memory-consolidate");
+                t.setPriority(Thread.NORM_PRIORITY - 1);
+                return t;
+            });
+
+    private static volatile boolean synchronousForTests;
+
     private MemoryConsolidator() {}
+
+    /** Tests : exécuter la promotion sur le thread appelant. */
+    public static void setSynchronousForTests(boolean on) {
+        synchronousForTests = on;
+    }
 
     /**
      * Promouvoit les faits, décisions et sujets en attente d'un résumé de session
@@ -32,6 +55,21 @@ public final class MemoryConsolidator {
 
     public static void promoteSession(Context context, SessionSummary summary) {
         if (context == null || summary == null) return;
+        if (synchronousForTests || android.os.Looper.getMainLooper() == null
+                || android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            promoteSessionBlocking(context, summary);
+            return;
+        }
+        CONSOLIDATE_IO.execute(() -> {
+            try {
+                promoteSessionBlocking(context, summary);
+            } catch (Exception e) {
+                Log.w(TAG, "Consolidation session échouée", e);
+            }
+        });
+    }
+
+    private static void promoteSessionBlocking(Context context, SessionSummary summary) {
         promoteItems(context, summary.importantFacts, "session", 0.72, false);
         promoteItems(context, summary.decisions, "decision", 0.68, false);
         promoteItems(context, summary.pendingTopics, "pending", 0.65, true);

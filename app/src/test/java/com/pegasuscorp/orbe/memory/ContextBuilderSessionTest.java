@@ -19,6 +19,9 @@ public class ContextBuilderSessionTest {
     public void setUp() {
         MemoryRepository.setAutoMigrateForTests(false);
         MemoryRepository.resetInstanceForTests();
+        // Promotion synchrone + juge coupé : pas de thread ni de LLM en test.
+        MemoryConsolidator.setSynchronousForTests(true);
+        MemoryUpdateJudge.setEnabledForTests(false);
         ctx = RuntimeEnvironment.getApplication();
         MemoryRepository repo = MemoryRepository.getInstance(ctx);
         while (!repo.getAllSessionSummaries().isEmpty()) {

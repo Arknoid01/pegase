@@ -41,6 +41,7 @@ public class MemoryConsolidatorTest {
     public static void unloadEngine() {
         MemoryUpdateJudge.setEnabledForTests(true);
         MemoryUpdateJudge.setOverrideForTests(null);
+        MemoryConsolidator.setSynchronousForTests(false);
         MemoryRepository.resetInstanceForTests();
         MemoryRepository.setAutoMigrateForTests(true);
         EmbeddingEngine.resetForTests();
@@ -54,6 +55,7 @@ public class MemoryConsolidatorTest {
         EmbeddingEngine.installForTests(sharedEngine);
         MemoryUpdateJudge.setEnabledForTests(false);
         MemoryUpdateJudge.setOverrideForTests(null);
+        MemoryConsolidator.setSynchronousForTests(true);
 
         ctx = RuntimeEnvironment.getApplication();
         File memDir = new File(ctx.getFilesDir(), "memory");
