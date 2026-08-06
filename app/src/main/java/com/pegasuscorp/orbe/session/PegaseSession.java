@@ -1973,10 +1973,11 @@ public class PegaseSession {
     }
 
     private void notifyToolProgress(SessionObserver oneOff, String message) {
-        notify(oneOff, o -> {
-            o.onToolProgress(message);
-            o.onPartial(message);
-        });
+        // Statut uniquement — surtout pas onPartial : la bulle copilote écrivait
+        // « Action en cours… » comme message assistant, jamais remplacé quand
+        // l'outil (scroll/back) finit avec un résultat vide → chat figé sur le
+        // statut ; en voix, le statut pouvait même partir en TTS streamé.
+        notify(oneOff, o -> o.onToolProgress(message));
     }
 
     private void notifyToolStart(SessionObserver oneOff, String toolId) {
