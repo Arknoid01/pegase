@@ -177,8 +177,14 @@ public final class A11yUiMatcher {
                 ? normalizeForMatch(criteria.text) : "";
 
         // Libellé exact / très proche > gros conteneur cliquable ambigu.
-        if (!exact.isEmpty() && normalizeForMatch(label).equals(exact)) score += 120;
-        else if (!exact.isEmpty() && normalizeForMatch(label).startsWith(exact)) score += 70;
+        String lbl = normalizeForMatch(label);
+        if (!exact.isEmpty() && lbl.equals(exact)) score += 120;
+        else if (!exact.isEmpty() && lbl.startsWith(exact)) score += 70;
+        else if (!exact.isEmpty() && lbl.contains(exact)
+                && lbl.length() <= exact.length() + 32) {
+            // Mot dans un libellé court (lien, bouton) > paragraphe entier qui le contient.
+            score += 45;
+        }
 
         java.util.List<String> toks = significantTokens(exact);
         int tokHits = 0;

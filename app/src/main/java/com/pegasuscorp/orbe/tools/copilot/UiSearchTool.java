@@ -42,13 +42,21 @@ public final class UiSearchTool implements Tool {
     if (CopilotUiSupport.requireService(ctx, cb) == null) return;
     String query = params.optString("query", "").trim();
     if (query.isEmpty()) {
+      String requested = A11yUiExecutor.parseCriteria(params).text;
       A11yUiMatcher.Target target = UiExplainHelper.resolveTarget(ctx, params);
       if (target == null || TextUtils.isEmpty(target.text)) {
         cb.onError("Indique le mot à chercher (target ou query).");
         return;
       }
       A11yUiExecutor.highlightTarget(ctx, target);
-      query = target.text;
+      // Le nœud a11y matché est souvent le paragraphe entier contenant le mot
+      // (pas de nœud par mot) — chercher le mot demandé, pas tout le bloc.
+      if (!TextUtils.isEmpty(requested)
+          && target.text.length() > requested.length() + 24) {
+        query = requested;
+      } else {
+        query = target.text;
+      }
     }
     CopilotUiSupport.notifyActionInProgress(ctx, cb);
     try {

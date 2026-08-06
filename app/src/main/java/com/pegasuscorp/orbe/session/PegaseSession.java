@@ -1222,6 +1222,17 @@ public class PegaseSession {
             turnReasoning.noteToolStart(toolId, safeParams);
         }
         final long startedAt = System.currentTimeMillis();
+        try {
+            executeToolGuarded(tool, safeParams, conv, toolId, startedAt, obs);
+        } catch (Exception e) {
+            android.util.Log.e("PegaseSession", "tool.execute crash: " + toolId, e);
+            main.post(() -> finishTool(conv, toolId, startedAt, null,
+                    "L'outil " + toolId + " a planté — réessaie.", false, obs));
+        }
+    }
+
+    private void executeToolGuarded(Tool tool, JSONObject safeParams,
+            ConversationManager conv, String toolId, long startedAt, SessionObserver obs) {
         tool.execute(appContext, safeParams, new ToolCallback() {
             @Override
             public void onSuccess(ToolResult result) {

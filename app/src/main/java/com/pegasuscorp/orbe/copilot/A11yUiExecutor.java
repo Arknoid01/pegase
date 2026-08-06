@@ -32,13 +32,22 @@ public final class A11yUiExecutor {
     private static final long SETTLE_IDLE_MS = 450L;
     private static final long SETTLE_TIMEOUT_MS = 2_500L;
     private static final long FOREGROUND_TIMEOUT_MS = 3_500L;
-    private static final long CONFIRM_TIMEOUT_MS = 120_000L;
+    /**
+     * 30 s et non 120 s : SEQ_IO est mono-thread — une confirmation abandonnée
+     * bloquait toutes les actions UI suivantes (scroll/back coincés sur
+     * « Action en cours ») pendant 2 minutes.
+     */
+    private static final long CONFIRM_TIMEOUT_MS = 30_000L;
 
     private static final ExecutorService SEQ_IO = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "ui-action-seq");
         t.setDaemon(true);
         return t;
     });
+
+    /** Séquence en cours sur SEQ_IO — refuser au lieu d'empiler en silence. */
+    private static final java.util.concurrent.atomic.AtomicBoolean SEQUENCE_RUNNING =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private A11yUiExecutor() {}
@@ -446,9 +455,23 @@ public final class A11yUiExecutor {
             cb.onError("Service d'accessibilité pas encore prêt — réessaie.");
             return;
         }
+        if (!SEQUENCE_RUNNING.compareAndSet(false, true)) {
+            cb.onError("Une action UI est déjà en cours — réponds à la confirmation "
+                    + "affichée ou attends la fin avant de relancer.");
+            return;
+        }
         CopilotUiSupport.notifyActionInProgress(ctx, cb);
         final Context appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
-        SEQ_IO.execute(() -> runSequenceOnIo(appCtx, svc, steps, cb));
+        SEQ_IO.execute(() -> {
+            try {
+                runSequenceOnIo(appCtx, svc, steps, cb);
+            } catch (Exception e) {
+                android.util.Log.e("A11yUiExecutor", "runSequence crash", e);
+                deliverError(cb, "Action UI interrompue par une erreur interne.");
+            } finally {
+                SEQUENCE_RUNNING.set(false);
+            }
+        });
     }
 
     private static void runSequenceOnIo(Context ctx, PegaseAccessibilityService svc,
