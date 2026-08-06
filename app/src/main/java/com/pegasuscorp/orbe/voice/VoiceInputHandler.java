@@ -194,7 +194,13 @@ public final class VoiceInputHandler {
         boolean recoverable = error == SpeechRecognizer.ERROR_NO_MATCH
                 || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 || error == SpeechRecognizer.ERROR_CLIENT;
-        if (recoverable && listenFailureStreak < MAX_LISTEN_FAILURES) {
+        // Écran verrouillé : ERROR_CLIENT / NO_MATCH en série sont fréquents
+        // (keyguard, surface, route audio) — deux échecs clôturaient la session
+        // avant que l'utilisateur ait pu parler (calcul / minuteur lock morts).
+        int maxFailures = LockSessionPolicy.isDeviceLocked(activity)
+                ? MAX_LISTEN_FAILURES * 2
+                : MAX_LISTEN_FAILURES;
+        if (recoverable && listenFailureStreak < maxFailures) {
             listenFailureStreak++;
             long delay = LISTEN_RETRY_BASE_MS * listenFailureStreak;
             mainHandler.postDelayed(this::resumeChatListeningIfNeeded, delay);

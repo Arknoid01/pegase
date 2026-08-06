@@ -75,6 +75,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
                 new ContextEditor(this),
                 new SpeechRulesEditor(this));
         voiceInput.attachVoiceHost();
+        ChatVoiceBridge.registerInPlace(this, voiceInput);
         VoiceMuteStore.syncController(this);
 
         WakeToSttTrace.adoptFromIntent(getIntent());
@@ -94,6 +95,11 @@ public class InPlaceVoiceActivity extends AppCompatActivity
 
     @Override
     public void onWakeAckFinished() {
+        // Écran verrouillé : rester au premier plan (surface showWhenLocked) —
+        // moveTaskToBack derrière le keyguard tuait le STT (ERROR_CLIENT en série).
+        if (com.pegasuscorp.orbe.voice.LockSessionPolicy.isDeviceLocked(this)) {
+            return;
+        }
         if (!isFinishing() && !isDestroyed()) {
             moveTaskToBack(true);
         }
@@ -104,6 +110,7 @@ public class InPlaceVoiceActivity extends AppCompatActivity
         // Ne PAS exitChatMode ici : après moveTaskToBack l'OEM peut détruire
         // l'Activity mid-TTS → conversation.exit + resume wake → STT mort.
         // Clear seulement inPlace ; voiceChatActive reste jusqu'à finalizeChatSession.
+        ChatVoiceBridge.unregisterInPlace(this);
         PegaseWakeController.setInPlaceVoiceActive(false);
         ChatVoiceBridge.releaseSharedVoiceIfIdle();
         importExecutor.shutdownNow();

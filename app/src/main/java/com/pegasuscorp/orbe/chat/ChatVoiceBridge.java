@@ -26,12 +26,29 @@ public final class ChatVoiceBridge {
 
     private static WeakReference<MainActivity> host;
     private static WeakReference<BureauHost> bureauHost;
+    /** Session wake in-place : handler + activity porteuse (écran verrouillé inclus). */
+    private static WeakReference<com.pegasuscorp.orbe.voice.VoiceInputHandler> inPlaceHandler;
+    private static WeakReference<android.app.Activity> inPlaceActivity;
     private static Context appContext;
     private static VoiceManager sharedVoice;
     private static boolean interfaceTakingMic;
     private static boolean sessionPreserved;
 
     private ChatVoiceBridge() {}
+
+    /** Enregistre la session in-place comme destinataire des transcripts STT. */
+    public static void registerInPlace(android.app.Activity activity,
+            com.pegasuscorp.orbe.voice.VoiceInputHandler handler) {
+        inPlaceActivity = new WeakReference<>(activity);
+        inPlaceHandler = new WeakReference<>(handler);
+    }
+
+    public static void unregisterInPlace(android.app.Activity activity) {
+        if (inPlaceActivity != null && inPlaceActivity.get() == activity) {
+            inPlaceActivity = null;
+            inPlaceHandler = null;
+        }
+    }
 
     public static void register(MainActivity activity) {
         host = new WeakReference<>(activity);
@@ -205,6 +222,18 @@ public final class ChatVoiceBridge {
         if (bureau != null) {
             bureau.runOnUiThread(() -> bureau.handleBureauVoice(trimmed));
             return;
+        }
+        // Session wake in-place active : son handler (lockedChatMode, reprise micro)
+        // prime — sinon les transcripts étaient jetés dès que MainActivity n'était
+        // plus host (écran verrouillé notamment).
+        if (PegaseWakeController.isInPlaceVoiceActive()) {
+            com.pegasuscorp.orbe.voice.VoiceInputHandler handler =
+                    inPlaceHandler != null ? inPlaceHandler.get() : null;
+            android.app.Activity act = inPlaceActivity != null ? inPlaceActivity.get() : null;
+            if (handler != null && act != null && !act.isFinishing() && !act.isDestroyed()) {
+                act.runOnUiThread(() -> handler.handleVoiceTranscript(trimmed));
+                return;
+            }
         }
         MainActivity a = host != null ? host.get() : null;
         if (a != null) {
