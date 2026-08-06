@@ -55,11 +55,8 @@ public class CopilotScreenContextTest {
 
     @Test
     public void readFresh_nullWhenStale() {
-        ScreenContextStore.update(ctx, PKG, "Texte");
-        ctx.getSharedPreferences("copilot_screen_ctx", Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_ts", System.currentTimeMillis() - CopilotScreenContext.MAX_AGE_MS - 1_000L)
-                .apply();
+        ScreenContextStore.update(ctx, PKG, "Texte",
+                System.currentTimeMillis() - CopilotScreenContext.MAX_AGE_MS - 1_000L);
 
         assertNull(CopilotScreenContext.readFresh(ctx));
     }

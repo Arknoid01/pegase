@@ -63,12 +63,8 @@ public class CopilotReflectionGateTest {
 
     @Test
     public void needsReflection_falseWhenStale() {
-        ScreenContextStore.update(ctx, PKG, "Contenu");
-        ctx.getSharedPreferences("copilot_screen_ctx", Context.MODE_PRIVATE)
-                .edit()
-                .putLong("last_ts", System.currentTimeMillis()
-                        - CopilotScreenContext.MAX_AGE_MS - 5_000L)
-                .apply();
+        ScreenContextStore.update(ctx, PKG, "Contenu",
+                System.currentTimeMillis() - CopilotScreenContext.MAX_AGE_MS - 5_000L);
 
         assertFalse(CopilotReflectionGate.needsReflection(ctx,
                 "explique ce que je vois à l'écran"));
