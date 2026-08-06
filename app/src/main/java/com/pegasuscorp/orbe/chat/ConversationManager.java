@@ -145,9 +145,14 @@ public class ConversationManager {
         String userText = displayText != null ? displayText : payload;
         if (userTurnPending && !history.isEmpty() && history.get(history.size() - 1).fromUser) {
             replaceLastUserTurn(userText);
-        } else if (!userTurnPending) {
-            addTurn(true, userText);
         } else {
+            if (!userTurnPending && !history.isEmpty()
+                    && history.get(history.size() - 1).fromUser) {
+                // Tour user orphelin d'un échange raté (erreur transitoire) : le
+                // remplacer par une trace neutre — sinon addTurn l'écraserait en
+                // silence avec la nouvelle question.
+                replaceOrphanUserTurnWithLostNote();
+            }
             addTurn(true, userText);
         }
         userTurnPending = true;
@@ -321,6 +326,26 @@ public class ConversationManager {
         }
         addTurn(false, text);
         userTurnPending = false;
+    }
+
+    /** Retire le tour user sans réponse et le remplace par {@code LOST_EXCHANGE_NOTE}. */
+    private void replaceOrphanUserTurnWithLostNote() {
+        if (!history.isEmpty() && history.get(history.size() - 1).fromUser) {
+            history.remove(history.size() - 1);
+        }
+        if (!sessionTurns.isEmpty() && sessionTurns.get(sessionTurns.size() - 1).fromUser) {
+            sessionTurns.remove(sessionTurns.size() - 1);
+        }
+        boolean alreadyNoted = !history.isEmpty()
+                && ChatSpokenErrors.LOST_EXCHANGE_NOTE.equals(
+                        history.get(history.size() - 1).text);
+        if (!alreadyNoted) {
+            ChatBackend.Turn note = new ChatBackend.Turn(
+                    false, ChatSpokenErrors.LOST_EXCHANGE_NOTE);
+            history.add(note);
+            sessionTurns.add(note);
+        }
+        memory.setRecentTurns(new ArrayList<>(history));
     }
 
     private boolean claimsAction(String reply) {
