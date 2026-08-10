@@ -49,5 +49,7 @@ public enum ToolTag {
     ORION_MANAGER,
     ORION_CODE,
     GIT_COMMIT,
+    /** Terminal PC distant (SSH / commandes enregistrées). */
+    PC_SHELL,
     COMPOSITE
 }

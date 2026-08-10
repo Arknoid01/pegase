@@ -93,4 +93,19 @@ public final class PegaseFileSystem {
         }
         return d;
     }
+
+    /** {@code files/pc-shell/} — Terminal PC (commandes SSH). */
+    public File pcShellDir() {
+        return dir("pc-shell");
+    }
+
+    /** {@code files/pc-shell/commands.json} */
+    public File pcShellCommandsJson() {
+        return new File(pcShellDir(), "commands.json");
+    }
+
+    /** {@code files/pc-shell/executions.jsonl} */
+    public File pcShellExecutionsJsonl() {
+        return new File(pcShellDir(), "executions.jsonl");
+    }
 }

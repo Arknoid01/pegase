@@ -35,6 +35,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
     <!-- Pour lister / lancer les apps du tiroir. Sur Android 11+ (API 30),
@@ -284,6 +286,54 @@
             android:exported="false"
             android:theme="@style/Theme.Orbe"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- Terminal PC — SSH via Tailscale -->
+        <activity
+            android:name=".pcshell.PcTerminalActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="pegase" android:host="pc-shell" android:pathPrefix="/run" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".pcshell.PcShellSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".pcshell.PcShellHistoryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe" />
+
+        <activity
+            android:name=".pcshell.PcShellOutputActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe" />
+
+        <activity
+            android:name=".pcshell.PcShellNtfyActionActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="pegase" android:host="pc-shell" android:pathPrefix="/ntfy" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".pcshell.PcShellNtfySnoozeReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".NasaImagePreviewActivity"

@@ -50,6 +50,7 @@ import com.pegasuscorp.orbe.tools.orion.OrionCodeTool;
 import com.pegasuscorp.orbe.tools.orion.OrionFilesTool;
 import com.pegasuscorp.orbe.tools.orion.OrionManagerTool;
 import com.pegasuscorp.orbe.tools.orion.OrionProjectTool;
+import com.pegasuscorp.orbe.tools.pcshell.PcShellTool;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -93,6 +94,7 @@ public class ToolRegistry {
             new OrionFilesTool(),
             new OrionProjectTool(),
             new GitCommitTool(),
+            new PcShellTool(),
             new AlarmTool(),
             new DeviceTool(),
             new NavigationTool(),
@@ -337,6 +339,10 @@ public class ToolRegistry {
                     + "ou local_file / files:[{path,content}] ; 1 commit multi via Git Trees ; "
                     + "sans repo → choix dépôt / créer "
                     + "(« committe tout », « pousse sur GitHub »)\n");
+        }
+        if (tags.contains(ToolTag.PC_SHELL)) {
+            sb.append("  PcShell → {\"tool\":\"pc_shell\",\"params\":{\"action\":\"open\"|\"execute\","
+                    + "\"label\":\"…\"}} — Terminal PC SSH (commandes enregistrées).\n");
         }
         if (tags.contains(ToolTag.NAMED_CONTEXT)) {
             sb.append("  Contexte  → {\"tool\":\"named_context\",\"params\":{\"action\":\"load\",\"name\":\"Orion\"}} "

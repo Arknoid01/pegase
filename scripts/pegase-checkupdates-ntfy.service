@@ -1,0 +1,11 @@
+[Unit]
+Description=Pégase — notification ntfy si mises à jour Arch (checkupdates)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pegase-checkupdates-ntfy.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ import com.pegasuscorp.orbe.voice.handlers.KnowledgeIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.LifeIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.MediaIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.OrionIntentHandler;
+import com.pegasuscorp.orbe.voice.handlers.PcShellIntentHandler;
 import com.pegasuscorp.orbe.voice.handlers.SystemIntentHandler;
 
 import org.json.JSONObject;
@@ -91,6 +92,7 @@ public final class VoiceIntentRouter {
             new LifeIntentHandler(),
             new DiagIntentHandler(),
             new OrionIntentHandler(),
+            new PcShellIntentHandler(),
             new KnowledgeIntentHandler(),
             new MediaIntentHandler(),
             new SystemIntentHandler(),

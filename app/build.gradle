@@ -109,6 +109,13 @@ configurations.configureEach { config ->
     // Orion — index AST Java (OrionCodeIndexer)
     implementation 'com.github.javaparser:javaparser-core:3.28.2'
 
+    // Terminal PC — SSH (Tailscale), clés Ed25519, coffre biométrique
+    implementation 'com.hierynomus:sshj:0.38.0'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    testImplementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+
     // --- PHASE 2 (assistant LLM embarque, quand tu voudras) ---
     // Decommente pour brancher un Gemma on-device via LiteRT-LM.
     // C'est ce qui remplacera LocalKeywordParser sans toucher au reste.
