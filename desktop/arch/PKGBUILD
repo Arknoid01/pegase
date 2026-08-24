@@ -1,0 +1,46 @@
+# Maintainer: Pegase <pegase@local>
+pkgname=pegase-desktop
+pkgver=0.5.0
+pkgrel=1
+pkgdesc="Pégase Desktop — chat LLM streaming + sync Drive bidirectionnelle"
+arch=('any')
+url="https://github.com/pegase/orbe"
+license=('custom')
+depends=(
+  'python'
+  'tk'
+  'python-pystray'
+  'python-pillow'
+)
+makedepends=('python-setuptools' 'python-build' 'python-installer')
+optdepends=(
+  'xbindkeys: raccourci global Super+Shift+P'
+)
+source=()
+options=('!strip')
+
+build() {
+  cd "$startdir/.."
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$startdir/.."
+  local site="${pkgdir}/usr/lib/python3.13/site-packages"
+  install -dm755 "${pkgdir}/usr/bin" "${site}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+
+  install -Dm644 share/pegase-desktop.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/pegase-desktop.svg"
+  install -Dm644 share/pegase-desktop.desktop \
+    "${pkgdir}/usr/share/applications/pegase-desktop.desktop"
+  install -Dm644 share/keys.env.example \
+    "${pkgdir}/usr/share/pegase-desktop/keys.env.example"
+  install -Dm644 share/xbindkeys-pegase-desktop \
+    "${pkgdir}/usr/share/pegase-desktop/xbindkeys-pegase-desktop"
+
+  sed -i 's|@EXEC@|pegase-desktop|g; s|@ICON@|pegase-desktop|g' \
+    "${pkgdir}/usr/share/applications/pegase-desktop.desktop"
+
+  install -Dm755 arch/post-install.sh "${pkgdir}/usr/share/pegase-desktop/post-install.sh"
+}

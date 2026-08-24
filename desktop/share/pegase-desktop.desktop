@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Pégase Desktop
+Comment=Client minimal — mémoire partagée ~/.pegase/
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Utility;
+StartupWMClass=pegase-desktop

@@ -1,0 +1,43 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 32,
+  "spacing": 4,
+  "modules-left": ["hyprland/workspaces"],
+  "modules-center": ["clock"],
+  "modules-right": ["custom/pegase", "pulseaudio", "network", "battery", "tray"],
+  "hyprland/workspaces": {
+    "format": "{icon}",
+    "format-icons": {
+      "active": "●",
+      "default": "○"
+    }
+  },
+  "clock": {
+    "format": "{:%H:%M  %d/%m}",
+    "tooltip-format": "<big>{:%Y-%m-%d}</big>\n<tt><small>{calendar}</small></tt>"
+  },
+  "custom/pegase": {
+    "format": "✦",
+    "tooltip": "Pégase (Super+P)",
+    "on-click": "pegase-hypr-toggle"
+  },
+  "pulseaudio": {
+    "format": "{icon} {volume}%",
+    "format-muted": "🔇",
+    "format-icons": ["🔈", "🔉", "🔊"]
+  },
+  "network": {
+    "format-wifi": "📶 {signalStrength}%",
+    "format-ethernet": "🌐",
+    "format-disconnected": "⚠"
+  },
+  "battery": {
+    "format": "{capacity}% {icon}",
+    "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
+  },
+  "tray": {
+    "icon-size": 16,
+    "spacing": 8
+  }
+}

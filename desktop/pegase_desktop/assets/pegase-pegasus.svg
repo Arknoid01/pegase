@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="P�gase">
+  <defs>
+    <linearGradient id="body" x1="20" y1="20" x2="100" y2="100">
+      <stop offset="0%" stop-color="#b8fcff"/>
+      <stop offset="45%" stop-color="#4de8f2"/>
+      <stop offset="100%" stop-color="#1598a8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#glow)" fill="url(#body)">
+    <path d="M28 78c8-18 22-28 38-30 6-1 12 0 18 3-2-8 0-16 6-22 4-4 10-6 16-5-6 8-8 18-5 28 8-2 16 0 22 6 6 6 8 14 6 22-4 14-16 24-30 28-18 5-36-2-46-16-8-12-8-28-2-40 4-7 10-12 18-14-4 6-4 14 0 20z"/>
+    <path d="M62 28c10-6 22-4 30 4 2 8-2 16-8 22-6-4-14-6-22-4-4-6-2-14 0-22z" opacity="0.95"/>
+    <path d="M88 42c6 2 12 8 14 16-8 2-16 0-22-4 2-6 6-10 8-12z" opacity="0.85"/>
+  </g>
+  <circle cx="92" cy="32" r="2" fill="#e8feff" opacity="0.9"/>
+  <circle cx="98" cy="48" r="1.5" fill="#7aeaf2" opacity="0.7"/>
+  <circle cx="24" cy="44" r="1.5" fill="#7aeaf2" opacity="0.6"/>
+</svg>

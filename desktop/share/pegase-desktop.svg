@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Pégase">
+  <defs>
+    <linearGradient id="bg" x1="16" y1="8" x2="112" y2="120">
+      <stop offset="0%" stop-color="#1a2438"/>
+      <stop offset="100%" stop-color="#0c121c"/>
+    </linearGradient>
+    <linearGradient id="peg" x1="30" y1="24" x2="98" y2="96">
+      <stop offset="0%" stop-color="#c8fcff"/>
+      <stop offset="50%" stop-color="#4de8f2"/>
+      <stop offset="100%" stop-color="#1598a8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <g filter="url(#glow)" fill="url(#peg)">
+    <path d="M30 82c8-20 24-32 42-34 8-1 16 1 24 5-2-10 1-20 8-28 5-5 12-8 20-6-7 10-9 22-5 34 10-2 20 1 28 8 8 7 10 18 7 28-5 16-20 28-36 32-20 6-40-2-50-18-8-14-8-32 0-46 5-8 12-14 22-16-5 7-5 16 0 23z"/>
+    <path d="M66 30c12-7 26-5 34 6 2 10-2 18-10 24-8-5-16-7-24-5-5-7-3-16 0-25z"/>
+  </g>
+  <circle cx="94" cy="36" r="2.5" fill="#e8feff"/>
+  <circle cx="28" cy="48" r="1.8" fill="#7aeaf2" opacity="0.8"/>
+</svg>

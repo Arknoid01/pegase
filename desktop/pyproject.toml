@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pegase-desktop"
+version = "0.5.0"
+description = "Pégase Desktop — chat LLM streaming + sync Drive"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = ["Pillow", "PyGObject"]
+
+[project.optional-dependencies]
+tray = ["pystray"]
+
+[project.scripts]
+pegase-desktop = "pegase_desktop.__main__:main"
+pegase-tray = "pegase_desktop.tray_daemon:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pegase_desktop*"]
+
+[tool.setuptools.package-data]
+pegase_desktop = ["assets/*.md", "assets/*.svg", "assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
