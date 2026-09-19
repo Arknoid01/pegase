@@ -19,6 +19,15 @@ public interface Tool {
     ToolTag tag();
 
     /**
+     * JSON Schema explicite des paramètres (type object). {@code null} = déduit de
+     * {@link #description()}. Un schéma explicite peut déclarer {@code required}, bornes, enums,
+     * et sera appliqué strictement par {@link ToolCallValidator}.
+     */
+    default JSONObject parameters() {
+        return null;
+    }
+
+    /**
      * Exécute l'outil.
      * @param ctx     contexte Android (Application)
      * @param params  objet JSON extrait de la réponse LLM

@@ -323,6 +323,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         for (AgenticChain.Step step : chain.steps()) {
             messages.put(assistantToolCallMessage(step.assistantReply, step.toolCall));
             messages.put(toolResultMessage(step.toolCall, step.toolResultContent));
+            if (step.rejected) continue; // pas de « succès » à confirmer : le modèle doit corriger
             // Hint adapté : search/wiki → synthèse ; notepad/spotify → confirmation courte
             String toolName = step.toolCall != null ? step.toolCall.name : "outil";
             String result = step.toolDisplayText != null && !step.toolDisplayText.isEmpty()

@@ -15,9 +15,10 @@ public final class GroqCompletionParser {
 
     static LlmReply parse(String bodyText) throws Exception {
         JSONObject json = new JSONObject(bodyText);
-        JSONObject message = json.getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message");
+        JSONObject choice = json.getJSONArray("choices").getJSONObject(0);
+        JSONObject message = choice.getJSONObject("message");
+        String finishReason = choice.optString("finish_reason", "");
+        boolean truncated = "length".equals(finishReason);
 
         String content = message.optString("content", null);
         if (content != null && content.trim().isEmpty()) {
@@ -32,24 +33,39 @@ public final class GroqCompletionParser {
                 JSONObject fn = tc.getJSONObject("function");
                 String name = fn.optString("name", "").trim();
                 if (name.isEmpty()) continue;
+                String id = tc.optString("id", "");
                 JSONObject args = parseArguments(fn.optString("arguments", "{}"));
-                calls.add(new NativeToolCall(tc.optString("id", ""), name, args));
+                if (truncated) {
+                    // Sortie coupée : les arguments peuvent être incomplets, même s'ils se lisent.
+                    calls.add(new NativeToolCall(id, name, new JSONObject(),
+                            NativeToolCall.REJECT_TRUNCATED,
+                            "Ta réponse a été coupée par la limite de longueur ; l'appel n'a pas "
+                                    + "été exécuté. Rappelle l'outil avec des arguments plus courts."));
+                } else if (args == null) {
+                    calls.add(new NativeToolCall(id, name, new JSONObject(),
+                            NativeToolCall.REJECT_MALFORMED_ARGUMENTS,
+                            "Les arguments ne sont pas un objet JSON valide ; l'appel n'a pas "
+                                    + "été exécuté. Rappelle l'outil avec un JSON correct."));
+                } else {
+                    calls.add(new NativeToolCall(id, name, args));
+                }
             }
             if (!calls.isEmpty()) {
-                return LlmReply.withNativeToolCalls(content, calls);
+                return LlmReply.withNativeToolCalls(content, calls, finishReason);
             }
         }
 
         String text = content != null ? content.trim() : "";
-        return LlmReply.text(PegasePrompt.sanitizeForSpeech(text));
+        return LlmReply.text(PegasePrompt.sanitizeForSpeech(text), finishReason);
     }
 
+    /** @return les arguments, un objet vide si absents, ou {@code null} si illisibles. */
     private static JSONObject parseArguments(String raw) {
         if (raw == null || raw.trim().isEmpty()) return new JSONObject();
         try {
             return new JSONObject(raw.trim());
         } catch (Exception e) {
-            return new JSONObject();
+            return null;
         }
     }
 }

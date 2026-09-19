@@ -55,6 +55,7 @@ public final class AgenticTurnPolicy {
         if (chain != null && candidate != null) {
             String fp = fingerprint(candidate.name, candidate.arguments);
             for (AgenticChain.Step step : chain.steps()) {
+                if (step.rejected) continue;
                 if (fingerprint(step.toolCall.name, step.toolCall.arguments).equals(fp)) {
                     sameToolSameArgs++;
                 }

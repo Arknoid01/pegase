@@ -18,9 +18,15 @@ public final class AgenticChain {
         public final String toolResultContent;
         /** Texte affichable si la synthèse LLM échoue. */
         public final String toolDisplayText;
+        /**
+         * Appel refusé avant exécution (arguments invalides, sortie tronquée) : le modèle voit le
+         * motif et peut corriger, mais l'étape ne compte ni dans le plafond ni dans l'anti-doublon.
+         */
+        public final boolean rejected;
 
         Step(LlmReply assistantReply, NativeToolCall toolCall, String toolResultContent,
-                String toolDisplayText) {
+                String toolDisplayText, boolean rejected) {
+            this.rejected = rejected;
             this.assistantReply = assistantReply;
             this.toolCall = toolCall;
             this.toolResultContent = toolResultContent != null ? toolResultContent : "";
@@ -54,7 +60,21 @@ public final class AgenticChain {
     public void addStep(LlmReply assistantReply, NativeToolCall toolCall,
             String toolResultContent, String toolDisplayText) {
         if (toolCall == null) return;
-        steps.add(new Step(assistantReply, toolCall, toolResultContent, toolDisplayText));
+        steps.add(new Step(assistantReply, toolCall, toolResultContent, toolDisplayText, false));
+    }
+
+    /** Enregistre un appel refusé avant exécution, avec le motif renvoyé au modèle. */
+    public void addRejectedStep(LlmReply assistantReply, NativeToolCall toolCall,
+            String errorJson) {
+        if (toolCall == null) return;
+        steps.add(new Step(assistantReply, toolCall, errorJson, "", true));
+    }
+
+    /** Nombre d'appels refusés dans ce tour (bornés par la session pour éviter les boucles). */
+    public int rejectedStepCount() {
+        int n = 0;
+        for (Step step : steps) if (step.rejected) n++;
+        return n;
     }
 
     public List<Step> steps() {
@@ -66,17 +86,25 @@ public final class AgenticChain {
     }
 
     public String lastToolResult() {
-        if (steps.isEmpty()) return "";
-        return steps.get(steps.size() - 1).toolResultContent;
+        Step last = lastExecutedStep();
+        return last != null ? last.toolResultContent : "";
     }
 
     public String lastToolDisplayText() {
-        if (steps.isEmpty()) return "";
-        return steps.get(steps.size() - 1).toolDisplayText;
+        Step last = lastExecutedStep();
+        return last != null ? last.toolDisplayText : "";
     }
 
+    private Step lastExecutedStep() {
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            if (!steps.get(i).rejected) return steps.get(i);
+        }
+        return null;
+    }
+
+    /** Outils réellement exécutés (les appels refusés ne comptent pas). */
     public int toolStepCount() {
-        return steps.size();
+        return steps.size() - rejectedStepCount();
     }
 
     public boolean usedSearch() {
@@ -87,6 +115,7 @@ public final class AgenticChain {
         if (toolName == null || toolName.trim().isEmpty()) return false;
         String want = toolName.trim().toLowerCase(java.util.Locale.ROOT);
         for (Step step : steps) {
+            if (step.rejected) continue;
             if (want.equals(step.toolCall.name.trim().toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
@@ -97,6 +126,7 @@ public final class AgenticChain {
     public boolean hasToolCall(String toolName, JSONObject args) {
         String fp = AgenticTurnPolicy.fingerprint(toolName, args);
         for (Step step : steps) {
+            if (step.rejected) continue;
             if (AgenticTurnPolicy.fingerprint(step.toolCall.name, step.toolCall.arguments).equals(fp)) {
                 return true;
             }

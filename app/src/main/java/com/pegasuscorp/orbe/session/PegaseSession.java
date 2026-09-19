@@ -42,6 +42,7 @@ import com.pegasuscorp.orbe.tools.knowledge.DiagTool;
 import com.pegasuscorp.orbe.tools.device.MathCalcTrigger;
 import com.pegasuscorp.orbe.tools.EmptyToolParams;
 import com.pegasuscorp.orbe.tools.Tool;
+import com.pegasuscorp.orbe.tools.ToolCallValidator;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolDispatcher;
 import com.pegasuscorp.orbe.tools.ToolRegistry;
@@ -1327,6 +1328,7 @@ public class PegaseSession {
                 return;
             }
             NativeToolCall call = reply.toolCalls.get(0);
+            if (rejectInvalidNativeCall(conv, reply, call, obs)) return;
             pendingAssistantToolReply = reply;
             pendingNativeToolCall = call;
             executeToolInternal(call.name, call.arguments, null, obs, false);
@@ -1758,6 +1760,7 @@ public class PegaseSession {
             SessionObserver obs) {
         if (reply.hasNativeToolCalls()) {
             NativeToolCall call = reply.toolCalls.get(0);
+            if (rejectInvalidNativeCall(conv, reply, call, obs)) return;
             AgenticTurnPolicy.BlockReason block = AgenticTurnPolicy.blockReason(
                     activeAgenticChain, call);
             if (block != AgenticTurnPolicy.BlockReason.NONE) {
@@ -1804,6 +1807,58 @@ public class PegaseSession {
             return;
         }
         finalizeAgentic(conv, obs, reply.content != null ? reply.content : "");
+    }
+
+    /** Appels refusés (arguments invalides, sortie tronquée) tolérés par tour avant d'abandonner. */
+    private static final int MAX_REJECTED_CALLS_PER_TURN = 2;
+
+    /**
+     * Refuse un appel d'outil natif dont le contrat n'est pas respecté, avant toute exécution.
+     * Le motif est renvoyé au modèle comme résultat d'outil pour qu'il corrige son appel ;
+     * le refus ne consomme ni le plafond d'outils ni l'anti-doublon.
+     *
+     * @return true si l'appel a été refusé (et pris en charge), false s'il peut être exécuté
+     */
+    private boolean rejectInvalidNativeCall(ConversationManager conv, LlmReply reply,
+            NativeToolCall call, SessionObserver obs) {
+        String code = call.rejectionCode;
+        String message = call.rejectionMessage;
+        if (code == null) {
+            Tool tool = toolRegistry.findById(call.name.trim());
+            // Outil inconnu : géré plus loin (suggestions de noms proches)
+            if (tool != null) {
+                ToolCallValidator.Failure failure = ToolCallValidator.validate(tool, call.arguments);
+                if (failure != null) {
+                    code = failure.code;
+                    message = failure.message;
+                }
+            }
+        }
+        if (code == null) return false;
+
+        Trace.toolHesitation(call.name, code.toLowerCase(java.util.Locale.ROOT), message, null);
+        boolean canRetry = useAgenticLoop() && conv != null
+                && (activeAgenticChain == null
+                || activeAgenticChain.rejectedStepCount() < MAX_REJECTED_CALLS_PER_TURN);
+        if (!canRetry) {
+            if (activeAgenticChain != null && !activeAgenticChain.isEmpty()) {
+                finalizeAgentic(conv, obs, "");
+            } else {
+                clearAgenticState();
+                notifyError(obs, "Je n'ai pas réussi à utiliser cet outil, reformule ta demande.");
+            }
+            return true;
+        }
+
+        if (activeAgenticChain == null) {
+            activeAgenticChain = new AgenticChain(conv.historySnapshot(), conv.getLastUserText());
+            activeAgenticOptions = buildSendOptions(conv.getLastUserText());
+            agenticStepIndex = 0;
+        }
+        activeAgenticChain.addRejectedStep(reply, call,
+                ToolCallValidator.errorJson(call.name, code, message));
+        runAgenticStep(conv, obs);
+        return true;
     }
 
     private void finalizeAgentic(ConversationManager conv, SessionObserver obs, String text) {

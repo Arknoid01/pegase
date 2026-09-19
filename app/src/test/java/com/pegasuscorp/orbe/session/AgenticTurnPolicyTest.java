@@ -92,4 +92,29 @@ public class AgenticTurnPolicyTest {
                 new JSONObject()), "soleil");
         assertTrue(AgenticTurnPolicy.allowMoreToolCalls(chain));
     }
+
+    @Test
+    public void rejectedStep_doesNotConsumeCap_norTriggerDuplicateOrToolUsed() throws Exception {
+        JSONObject args = new JSONObject().put("action", "add");
+        AgenticChain chain = new AgenticChain(null, "note ça");
+        chain.addRejectedStep(LlmReply.text(""),
+                new NativeToolCall("c1", "notepad", args), "{\"ok\":false}");
+        assertEquals(0, chain.toolStepCount());
+        assertEquals(1, chain.rejectedStepCount());
+        assertTrue(AgenticTurnPolicy.allowMoreToolCalls(chain));
+        // le modèle doit pouvoir rappeler le même outil avec les mêmes arguments corrigés
+        assertEquals(AgenticTurnPolicy.BlockReason.NONE,
+                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("c2", "notepad", args)));
+    }
+
+    @Test
+    public void rejectedStep_isIgnoredByFallbackText() throws Exception {
+        AgenticChain chain = new AgenticChain(null, "x");
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather", new JSONObject()),
+                "raw", "Il fait beau.");
+        chain.addRejectedStep(LlmReply.text(""), new NativeToolCall("c2", "notepad",
+                new JSONObject()), "{\"ok\":false}");
+        assertEquals("Il fait beau.", chain.lastToolDisplayText());
+        assertEquals(1, chain.toolStepCount());
+    }
 }

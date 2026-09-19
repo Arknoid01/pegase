@@ -38,4 +38,48 @@ public class GroqCompletionParserTest {
         assertFalse(reply.hasNativeToolCalls());
         assertEquals("Salut !", reply.content);
     }
+
+    private static String toolBody(String finish, String arguments) {
+        return "{\"choices\":[{\"finish_reason\":\"" + finish + "\",\"message\":{"
+                + "\"content\":null,"
+                + "\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
+                + "\"function\":{\"name\":\"notepad\",\"arguments\":" + arguments + "}}"
+                + "]}}]}";
+    }
+
+    @Test
+    public void parse_finishReasonLength_rejectsToolCall() throws Exception {
+        LlmReply reply = GroqCompletionParser.parse(
+                toolBody("length", "\"{\\\"action\\\":\\\"add\\\"}\""));
+        assertTrue(reply.hasNativeToolCalls());
+        NativeToolCall call = reply.toolCalls.get(0);
+        assertTrue(call.isRejected());
+        assertEquals(NativeToolCall.REJECT_TRUNCATED, call.rejectionCode);
+        assertEquals("length", reply.finishReason);
+    }
+
+    @Test
+    public void parse_malformedArguments_areRejected_notSilentlyEmpty() throws Exception {
+        LlmReply reply = GroqCompletionParser.parse(
+                toolBody("tool_calls", "\"{\\\"action\\\":\\\"add\\\", \\\"text\\\":\\\"cou\""));
+        NativeToolCall call = reply.toolCalls.get(0);
+        assertTrue(call.isRejected());
+        assertEquals(NativeToolCall.REJECT_MALFORMED_ARGUMENTS, call.rejectionCode);
+    }
+
+    @Test
+    public void parse_blankArguments_areAnEmptyObject_notRejected() throws Exception {
+        LlmReply reply = GroqCompletionParser.parse(toolBody("tool_calls", "\"\""));
+        assertFalse(reply.toolCalls.get(0).isRejected());
+        assertEquals(0, reply.toolCalls.get(0).arguments.length());
+    }
+
+    @Test
+    public void parse_normalToolCall_isNotRejected() throws Exception {
+        LlmReply reply = GroqCompletionParser.parse(
+                toolBody("tool_calls", "\"{\\\"action\\\":\\\"list\\\"}\""));
+        assertFalse(reply.toolCalls.get(0).isRejected());
+        assertEquals("list", reply.toolCalls.get(0).arguments.getString("action"));
+        assertEquals("tool_calls", reply.finishReason);
+    }
 }

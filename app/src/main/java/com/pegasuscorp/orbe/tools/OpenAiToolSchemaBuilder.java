@@ -5,18 +5,9 @@ import org.json.JSONObject;
 
 import java.util.EnumSet;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Convertit {@link ToolRegistry} en schémas OpenAI tools pour Groq. */
 public final class OpenAiToolSchemaBuilder {
-
-    private static final Pattern SIGNATURE = Pattern.compile(
-            "^(\\w+)\\(([^)]*)\\)\\s*[—–-]\\s*(.+)$", Pattern.DOTALL);
-    /** name:type  ou  name:"enum"|…  → propriété string/int/… */
-    private static final Pattern PARAM = Pattern.compile(
-            "([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*"
-                    + "(?:\"[^\"]*\"(?:\\s*\\|\\s*\"[^\"]*\")*|\\w+)");
 
     private OpenAiToolSchemaBuilder() {}
 
@@ -37,38 +28,52 @@ public final class OpenAiToolSchemaBuilder {
     }
 
     static JSONObject toOpenAiToolUnchecked(Tool tool) throws Exception {
-        String desc = tool.description();
-        Matcher m = SIGNATURE.matcher(desc.trim());
-        String fnDescription = desc.trim();
-        String paramsInner = "";
-        if (m.matches()) {
-            fnDescription = m.group(3).trim();
-            paramsInner = m.group(2).trim();
-        }
+        String desc = tool.description() != null ? tool.description().trim() : "";
+        ToolSignature sig = ToolSignature.parse(desc);
 
-        JSONObject parameters = buildParameters(paramsInner);
+        JSONObject parameters = parametersFor(tool, sig);
         JSONObject function = new JSONObject();
+        function.put("name", tool.id());
+        function.put("description", sig.summary);
+        function.put("parameters", parameters);
+        return new JSONObject()
+                .put("type", "function")
+                .put("function", function);
+    }
+
+    /** Schéma des paramètres : explicite si l'outil en déclare un, sinon déduit de la description. */
+    static JSONObject parametersFor(Tool tool) {
         try {
-            function.put("name", tool.id());
-            function.put("description", fnDescription);
-            function.put("parameters", parameters);
-            return new JSONObject()
-                    .put("type", "function")
-                    .put("function", function);
+            return parametersFor(tool, ToolSignature.parse(tool.description()));
         } catch (Exception e) {
             throw new RuntimeException("Schéma outil invalide : " + tool.id(), e);
         }
     }
 
-    private static JSONObject buildParameters(String paramsInner) throws Exception {
+    private static JSONObject parametersFor(Tool tool, ToolSignature sig) throws Exception {
+        JSONObject explicit = tool.parameters();
+        return explicit != null ? explicit : buildParameters(sig);
+    }
+
+    /**
+     * Schéma envoyé au fournisseur : volontairement souple (pas de {@code required}).
+     * Groq / gpt-oss répondent HTTP 400 « tool call validation » quand un appel ne respecte
+     * pas strictement le schéma ; la validation stricte est faite localement par
+     * {@link ToolCallValidator}, qui renvoie l'erreur au modèle pour qu'il se corrige.
+     */
+    private static JSONObject buildParameters(ToolSignature sig) throws Exception {
         JSONObject properties = new JSONObject();
-        if (paramsInner != null && !paramsInner.isEmpty()) {
-            Matcher pm = PARAM.matcher(paramsInner);
-            while (pm.find()) {
-                String name = pm.group(1);
-                String typeHint = inferTypeHint(pm.group(0));
-                properties.put(name, propertySchema(typeHint));
+        for (ToolSignature.Param p : sig.params) {
+            JSONObject prop = new JSONObject().put("type", p.type);
+            if ("array".equals(p.type)) {
+                prop.put("items", new JSONObject());
             }
+            if (!p.enumValues.isEmpty()) {
+                JSONArray values = new JSONArray();
+                for (String v : p.enumValues) values.put(v);
+                prop.put("enum", values);
+            }
+            properties.put(p.name, prop);
         }
         return new JSONObject()
                 .put("type", "object")
@@ -88,22 +93,5 @@ public final class OpenAiToolSchemaBuilder {
         int end = 0;
         while (end < rhs.length() && Character.isLetterOrDigit(rhs.charAt(end))) end++;
         return end > 0 ? rhs.substring(0, end).toLowerCase(Locale.ROOT) : "string";
-    }
-
-    private static JSONObject propertySchema(String typeHint) throws Exception {
-        switch (typeHint) {
-            case "int":
-            case "integer":
-                return new JSONObject().put("type", "integer");
-            case "bool":
-            case "boolean":
-                return new JSONObject().put("type", "boolean");
-            case "float":
-            case "number":
-            case "double":
-                return new JSONObject().put("type", "number");
-            default:
-                return new JSONObject().put("type", "string");
-        }
     }
 }

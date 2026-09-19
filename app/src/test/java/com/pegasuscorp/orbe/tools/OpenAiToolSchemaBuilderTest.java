@@ -68,4 +68,24 @@ public class OpenAiToolSchemaBuilderTest {
         assertFalse(desc.contains("view_id"));
         assertFalse(desc.contains("viewid"));
     }
+
+    @Test
+    public void build_optionalParams_areExposed() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        JSONObject alarm = OpenAiToolSchemaBuilder.toOpenAiTool(registry.findById("alarm"));
+        JSONObject properties = alarm.getJSONObject("function")
+                .getJSONObject("parameters").getJSONObject("properties");
+        assertTrue("hour?:int doit être exposé", properties.has("hour"));
+        assertEquals("integer", properties.getJSONObject("hour").getString("type"));
+        assertTrue("minute?:int doit être exposé", properties.has("minute"));
+    }
+
+    @Test
+    public void build_enumValues_areExposed() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        JSONObject flash = OpenAiToolSchemaBuilder.toOpenAiTool(registry.findById("flashlight"));
+        JSONObject action = flash.getJSONObject("function").getJSONObject("parameters")
+                .getJSONObject("properties").getJSONObject("action");
+        assertEquals(3, action.getJSONArray("enum").length());
+    }
 }
