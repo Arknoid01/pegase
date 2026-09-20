@@ -309,7 +309,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- pas de BROWSABLE : une page web ne doit pas pouvoir déclencher ce lien -->
                 <data android:scheme="pegase" android:host="pc-shell" android:pathPrefix="/run" />
             </intent-filter>
         </activity>
@@ -350,7 +350,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- pas de BROWSABLE : une page web ne doit pas pouvoir déclencher ce lien -->
                 <data android:scheme="pegase" android:host="pc-shell" android:pathPrefix="/ntfy" />
             </intent-filter>
         </activity>
