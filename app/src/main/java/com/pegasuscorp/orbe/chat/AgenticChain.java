@@ -111,6 +111,18 @@ public final class AgenticChain {
         return usedTool("search");
     }
 
+    /** Nombre d'exécutions (hors refusées) d'un outil dans la chaîne. */
+    public int toolUseCount(String toolName) {
+        if (toolName == null || toolName.trim().isEmpty()) return 0;
+        String want = toolName.trim().toLowerCase(java.util.Locale.ROOT);
+        int n = 0;
+        for (Step step : steps) {
+            if (step.rejected) continue;
+            if (want.equals(step.toolCall.name.trim().toLowerCase(java.util.Locale.ROOT))) n++;
+        }
+        return n;
+    }
+
     public boolean usedTool(String toolName) {
         if (toolName == null || toolName.trim().isEmpty()) return false;
         String want = toolName.trim().toLowerCase(java.util.Locale.ROOT);

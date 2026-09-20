@@ -5,15 +5,25 @@ import com.pegasuscorp.orbe.chat.NativeToolCall;
 
 import org.json.JSONObject;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Locale;
+import java.util.Set;
 import java.util.TreeMap;
 
 /** Règles de la boucle agentique — limites par tour et anti-doublon. */
 public final class AgenticTurnPolicy {
 
     /** Nombre max d'exécutions d'outils dans un même tour utilisateur. */
-    public static final int MAX_TOOLS_PER_TURN = 2;
+    public static final int MAX_TOOLS_PER_TURN = 8;
+
+    /** Nombre max d'exécutions d'un même outil (arguments différents) dans un tour. */
+    public static final int MAX_SAME_TOOL_PER_TURN = 3;
+
+    /** Outils dont un seul appel suffit par tour (agrégats / sources uniques). */
+    private static final Set<String> SINGLE_USE_TOOLS = new HashSet<>(Arrays.asList(
+            "brief", "orion_manager", "calculator", "search", "wikipedia", "wikidata"));
 
     public enum BlockReason {
         NONE,
@@ -72,7 +82,10 @@ public final class AgenticTurnPolicy {
         }
         String toolId = candidate.name != null ? candidate.name.trim() : "";
         if (chain != null && !toolId.isEmpty() && chain.usedTool(toolId)) {
-            return new Evaluation(BlockReason.TOOL_ALREADY_USED, executed, sameToolSameArgs);
+            boolean singleUse = SINGLE_USE_TOOLS.contains(toolId.toLowerCase(Locale.ROOT));
+            if (singleUse || chain.toolUseCount(toolId) >= MAX_SAME_TOOL_PER_TURN) {
+                return new Evaluation(BlockReason.TOOL_ALREADY_USED, executed, sameToolSameArgs);
+            }
         }
         if ("search".equalsIgnoreCase(toolId) && chain != null && chain.usedSearch()) {
             return new Evaluation(BlockReason.SEARCH_ALREADY_USED, executed, sameToolSameArgs);

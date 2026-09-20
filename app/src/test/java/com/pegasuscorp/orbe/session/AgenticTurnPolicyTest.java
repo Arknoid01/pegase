@@ -43,24 +43,62 @@ public class AgenticTurnPolicyTest {
     @Test
     public void blockReason_capReached() throws Exception {
         AgenticChain chain = new AgenticChain(null, "x");
-        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather",
-                new JSONObject()), "m1");
-        chain.addStep(LlmReply.text(""), new NativeToolCall("c2", "device",
-                new JSONObject().put("action", "time")), "m2");
+        String[] tools = {"weather", "device", "agenda", "sms", "notepad", "volume", "alarm",
+                "timer"};
+        for (int i = 0; i < AgenticTurnPolicy.MAX_TOOLS_PER_TURN; i++) {
+            chain.addStep(LlmReply.text(""), new NativeToolCall("c" + i, tools[i],
+                    new JSONObject()), "m" + i);
+        }
+        assertFalse(AgenticTurnPolicy.allowMoreToolCalls(chain));
         assertEquals(AgenticTurnPolicy.BlockReason.CAP_REACHED,
-                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("c3", "weather",
+                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("cx", "flashlight",
                         new JSONObject())));
     }
 
     @Test
-    public void blockReason_secondWeatherDifferentArgs() throws Exception {
+    public void enchainement_troisOutilsDifferents_autorise() throws Exception {
+        AgenticChain chain = new AgenticChain(null, "météo, agenda puis sms");
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather",
+                new JSONObject()), "m1");
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c2", "agenda",
+                new JSONObject()), "m2");
+        assertTrue(AgenticTurnPolicy.allowMoreToolCalls(chain));
+        assertEquals(AgenticTurnPolicy.BlockReason.NONE,
+                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("c3", "sms",
+                        new JSONObject().put("to", "Marie"))));
+    }
+
+    @Test
+    public void blockReason_secondWeatherDifferentArgs_autorise() throws Exception {
         AgenticChain chain = new AgenticChain(null, "météo demain");
         chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "weather",
                 new JSONObject().put("days", 1)), "m1");
         NativeToolCall second = new NativeToolCall("c2", "weather",
                 new JSONObject().put("days", 2));
-        assertEquals(AgenticTurnPolicy.BlockReason.TOOL_ALREADY_USED,
+        assertEquals(AgenticTurnPolicy.BlockReason.NONE,
                 AgenticTurnPolicy.blockReason(chain, second));
+    }
+
+    @Test
+    public void blockReason_memeOutilPlafonne() throws Exception {
+        AgenticChain chain = new AgenticChain(null, "météo trois villes");
+        for (int i = 1; i <= AgenticTurnPolicy.MAX_SAME_TOOL_PER_TURN; i++) {
+            chain.addStep(LlmReply.text(""), new NativeToolCall("c" + i, "weather",
+                    new JSONObject().put("days", i)), "m" + i);
+        }
+        assertEquals(AgenticTurnPolicy.BlockReason.TOOL_ALREADY_USED,
+                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("cx", "weather",
+                        new JSONObject().put("days", 9))));
+    }
+
+    @Test
+    public void blockReason_outilUsageUnique_wikipedia() throws Exception {
+        AgenticChain chain = new AgenticChain(null, "wiki");
+        chain.addStep(LlmReply.text(""), new NativeToolCall("c1", "wikipedia",
+                new JSONObject().put("query", "a")), "m1");
+        assertEquals(AgenticTurnPolicy.BlockReason.TOOL_ALREADY_USED,
+                AgenticTurnPolicy.blockReason(chain, new NativeToolCall("c2", "wikipedia",
+                        new JSONObject().put("query", "b"))));
     }
 
     @Test
