@@ -538,6 +538,85 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void text_steering_isSentToModelAtNextStep() throws Exception {
+        backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub", new JSONObject()));
+        backend.nextSynthesisReply = "Fait, avec ta précision.";
+        backend.deferAgentic = true;
+        session.init(new SessionContext(Channel.TEXT, false));
+        AtomicReference<String> finalReply = new AtomicReference<>();
+        SessionObserver obs = new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {
+                if (!fired) finalReply.set(text);
+            }
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        };
+
+        session.send("Fais le stub", obs);
+        drainMainThread();
+        // l'étape agentique est en attente : le tour est en cours
+        assertTrue(session.steer("et fais-le en silence"));
+        backend.flushDeferredAgentic();   // le modèle veut conclure : la consigne est reprise
+        drainMainThread();
+        assertEquals(2, backend.agenticSendCount);
+        backend.flushDeferredAgentic();
+        drainMainThread();
+
+        assertEquals(java.util.Collections.singletonList("et fais-le en silence"),
+                backend.lastAgenticChain.steering());
+        assertEquals("Fait, avec ta précision.", finalReply.get());
+    }
+
+    @Test
+    public void text_stop_cancelsTurn_andIgnoresLateReply() throws Exception {
+        backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub", new JSONObject()));
+        backend.nextSynthesisReply = "Réponse tardive.";
+        backend.deferAgentic = true;
+        session.init(new SessionContext(Channel.TEXT, false));
+        java.util.List<String> replies = new java.util.ArrayList<>();
+        SessionObserver obs = new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {
+                if (!fired) replies.add(text);
+            }
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        };
+
+        session.send("Fais le stub", obs);
+        drainMainThread();
+        session.send("Stop", obs);
+        drainMainThread();
+        backend.flushDeferredAgentic();
+        drainMainThread();
+
+        assertEquals(java.util.Collections.singletonList("D'accord, j'arrête."), replies);
+        assertFalse(session.hasActiveAgenticChain());
+    }
+
+    @Test
+    public void steer_withoutTurn_returnsFalse() {
+        assertFalse(session.steer("bonjour"));
+    }
+
+    @Test
     public void text_searchBlocksSecondSearchInSameTurn() throws Exception {
         JSONObject searchArgs = new JSONObject().put("query", "coupe du monde ce soir");
         backend.nextNativeToolCalls = java.util.Collections.singletonList(

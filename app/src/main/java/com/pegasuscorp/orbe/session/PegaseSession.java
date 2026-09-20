@@ -95,6 +95,12 @@ public class PegaseSession {
      * Appels restants d'un même message assistant (lot) : exécutés dans l'ordre, sans nouvel
      * aller-retour LLM, puis le modèle reçoit tous les résultats.
      */
+    /** Consignes reçues pendant un tour agentique, injectées à la prochaine étape LLM. */
+    private long lastAgenticActivityMs;
+    /** Au-delà, un tour agentique est considéré bloqué : un nouveau message le remplace. */
+    private static final long STEERING_MAX_IDLE_MS = 90_000L;
+    private final List<String> pendingSteering =
+            java.util.Collections.synchronizedList(new ArrayList<>());
     private final java.util.ArrayDeque<NativeToolCall> pendingBatch = new java.util.ArrayDeque<>();
     private AgenticChain activeAgenticChain;
     private ChatSendOptions activeAgenticOptions;
@@ -167,6 +173,46 @@ public class PegaseSession {
         }
     }
 
+    /**
+     * Arrête le tour en cours : les callbacks LLM/outils encore en vol sont ignorés, la file
+     * d'appels et les consignes en attente sont vidées.
+     *
+     * @return true si un tour était en cours
+     */
+    public boolean cancelTurn() {
+        boolean was = turnInFlight;
+        ConversationManager conv = conversation();
+        if (conv != null) conv.cancelInFlight();
+        clearAgenticState();
+        endTurn();
+        return was;
+    }
+
+    /**
+     * Ajoute une consigne au tour agentique en cours (« et ajoute aussi… »). Elle est lue par le
+     * modèle à sa prochaine étape, sans interrompre l'outil en cours ni relancer le tour.
+     *
+     * @return false si aucun tour agentique n'est en cours (l'appelant envoie alors normalement)
+     */
+    public boolean steer(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        if (!turnInFlight || !useAgenticLoop()) return false;
+        if (activeAgenticChain == null && pendingNativeToolCall == null) return false;
+        if (System.currentTimeMillis() - lastAgenticActivityMs > STEERING_MAX_IDLE_MS) return false;
+        pendingSteering.add(text.trim());
+        Trace.error("agentic", "steering reçu (" + pendingSteering.size() + " en attente)");
+        return true;
+    }
+
+    private void applyPendingSteering() {
+        lastAgenticActivityMs = System.currentTimeMillis();
+        if (activeAgenticChain == null || pendingSteering.isEmpty()) return;
+        synchronized (pendingSteering) {
+            for (String note : pendingSteering) activeAgenticChain.addSteering(note);
+            pendingSteering.clear();
+        }
+    }
+
     private void beginTurn() {
         turnInFlight = true;
         turnChannel = sessionContext.channel;
@@ -234,6 +280,17 @@ public class PegaseSession {
         }
         ConversationManager conv = conversation();
         ensureEntered(conv);
+
+        // Tour en cours : « stop » l'annule, toute autre consigne est ajoutée au tour (steering).
+        if (turnInFlight && !PendingToolConfirm.hasPending()) {
+            String incoming = displayText != null ? displayText : payload;
+            if (TurnCancelPolicy.isCancel(incoming)) {
+                cancelTurn();
+                notifyReply(obs, "D'accord, j'arrête.", false);
+                return;
+            }
+            if (steer(incoming)) return;
+        }
 
         // Confirm / choix outil → réponse dans la discussion (pas de popup système)
         if (PendingToolConfirm.hasPending()) {
@@ -1336,6 +1393,7 @@ public class PegaseSession {
             if (rejectInvalidNativeCall(conv, reply, call, obs)) return;
             pendingAssistantToolReply = reply;
             pendingNativeToolCall = call;
+            lastAgenticActivityMs = System.currentTimeMillis();
             stageBatchRemainder(reply);
             executeToolInternal(call.name, call.arguments, null, obs, false);
             return;
@@ -1600,6 +1658,7 @@ public class PegaseSession {
         LlmReply assistantReply = pendingAssistantToolReply;
         NativeToolCall nativeCall = pendingNativeToolCall;
         clearPendingToolCall();
+        lastAgenticActivityMs = System.currentTimeMillis();
 
         // Forcer le contexte positif avant tout appel LLM de synthèse
         String successText = displayForUser(result);
@@ -1661,6 +1720,7 @@ public class PegaseSession {
 
     private void runAgenticStep(ConversationManager conv, SessionObserver obs,
             boolean allowMoreTools) {
+        applyPendingSteering();
         AgenticTurnPolicy.Evaluation eval = AgenticTurnPolicy.evaluate(
                 activeAgenticChain, null);
         Trace.agenticStep(activeRequestId, agenticStepIndex, eval.toolStepCount,
@@ -1728,6 +1788,7 @@ public class PegaseSession {
                 public void onReply(String text) {
                     main.post(() -> {
                         if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        if (rerunForSteering(conv, obs)) return;
                         finalizeAgentic(conv, obs, text);
                     });
                 }
@@ -1762,6 +1823,7 @@ public class PegaseSession {
                 public void onReply(String text) {
                     main.post(() -> {
                         if (!isAgenticGenerationCurrent(agenticGeneration)) return;
+                        if (rerunForSteering(conv, obs)) return;
                         finalizeAgentic(conv, obs, text);
                     });
                 }
@@ -1851,7 +1913,18 @@ public class PegaseSession {
             executeToolInternal(call.name, call.arguments, null, obs, false);
             return;
         }
+        if (rerunForSteering(conv, obs)) return;
         finalizeAgentic(conv, obs, reply.content != null ? reply.content : "");
+    }
+
+    /**
+     * Le modèle allait conclure alors qu'une consigne est arrivée entre-temps : il repart avec
+     * elle au lieu de la perdre (sa réponse provisoire est abandonnée).
+     */
+    private boolean rerunForSteering(ConversationManager conv, SessionObserver obs) {
+        if (activeAgenticChain == null || pendingSteering.isEmpty()) return false;
+        runAgenticStep(conv, obs);
+        return true;
     }
 
     /** Appels refusés (arguments invalides, sortie tronquée) tolérés par tour avant d'abandonner. */
@@ -1929,11 +2002,14 @@ public class PegaseSession {
             Trace.error("agentic", "suppressed already-open claim → " + replaced);
             out = replaced;
         }
+        List<String> steeringNotes = activeAgenticChain != null
+                ? new ArrayList<>(activeAgenticChain.steering()) : java.util.Collections.emptyList();
         clearAgenticState();
         if (out.isEmpty()) {
             notifyError(obs, "Je n'ai pas pu formuler la réponse.");
             return;
         }
+        for (String note : steeringNotes) conv.recordUserMessage(note);
         conv.recordToolReply(out);
         markTurnLlmSynthesis(conv);
         publishReasoningForReply(out);
@@ -2040,6 +2116,7 @@ public class PegaseSession {
         agenticOperationGeneration++;
         clearPendingToolCall();
         pendingBatch.clear();
+        pendingSteering.clear();
         activeAgenticChain = null;
         activeAgenticOptions = null;
         agenticStepIndex = 0;

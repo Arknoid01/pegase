@@ -269,6 +269,11 @@ public class ConversationManager {
         return lastPromptChars;
     }
 
+    /** Ignore les réponses LLM encore en vol (annulation du tour). */
+    public void cancelInFlight() {
+        bumpSendGeneration();
+    }
+
     public void addUserMessage(String userMessage) {
         if (userMessage == null || userMessage.trim().isEmpty()) return;
         stripPoisonFromHistory();

@@ -39,6 +39,8 @@ public final class AgenticChain {
     public final List<ChatBackend.Turn> history;
     public final String userMessage;
     private final List<Step> steps = new ArrayList<>();
+    /** Consignes ajoutées par l'utilisateur pendant le tour (steering), après les étapes. */
+    private final List<String> steering = new ArrayList<>();
 
     public AgenticChain(List<ChatBackend.Turn> history, String userMessage) {
         this.history = history != null ? new ArrayList<>(history) : new ArrayList<>();
@@ -75,6 +77,14 @@ public final class AgenticChain {
         int n = 0;
         for (Step step : steps) if (step.rejected) n++;
         return n;
+    }
+
+    public void addSteering(String text) {
+        if (text != null && !text.trim().isEmpty()) steering.add(text.trim());
+    }
+
+    public List<String> steering() {
+        return Collections.unmodifiableList(steering);
     }
 
     public List<Step> steps() {

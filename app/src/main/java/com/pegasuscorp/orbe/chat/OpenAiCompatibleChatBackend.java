@@ -336,6 +336,9 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
                     ? step.toolDisplayText : step.toolResultContent;
             messages.put(message("system", ToolSuccessHint.build(toolName, result)));
         }
+        for (String note : chain.steering()) {
+            messages.put(message("user", note));
+        }
 
         JSONObject root = new JSONObject();
         root.put("model", currentModelId());
