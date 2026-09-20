@@ -42,13 +42,9 @@ public final class OrionProjectTool implements Tool {
         return "orion_project(action:\"list\"|\"create\"|\"switch\"|\"files\"|\"delete_file\""
                 + "|\"rename\"|\"push\"|\"make_public\", name?:str, file?:str, new_name?:str, "
                 + "files?:[str], message?:str, confirm?:bool, private?:bool) — "
-                + "Workspace local Orion. "
-                + "« nouveau projet X », « passe sur le projet Y », "
-                + "« montre les fichiers du projet », « push le projet sur GitHub », "
-                + "« push index.html seulement » (files:[…]), « renomme a.js en b.js », "
-                + "« passe le dépôt en public » (make_public). "
-                + "Push propose la liste des dépôts (création optionnelle). "
-                + "Fichiers au même chemin = remplacés. private:true pour un dépôt privé.";
+                + "Workspace local Orion : projets, fichiers, renommage, push GitHub "
+                + "(files:[…] = push partiel ; liste les dépôts, création optionnelle ; même "
+                + "chemin = remplacé ; private:true pour privé), make_public.";
     }
 
     @Override

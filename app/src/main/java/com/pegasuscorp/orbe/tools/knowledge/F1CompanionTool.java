@@ -45,13 +45,9 @@ public final class F1CompanionTool implements Tool {
     public String description() {
         return "f1(action:refresh|status|debrief|discuss|live|memory|remember|predict, "
                 + "text?:string, mode?:\"quick\"|\"deep\") — "
-                + "Fiche Grand Prix (OpenF1) + mémoire fan. "
-                + "refresh / status / debrief / discuss / live comme avant. "
-                + "memory = afficher avis/pronostics ; "
-                + "remember(text) = noter un avis (« souviens-toi que… ») ; "
-                + "predict(text) = enregistrer un pronostic. "
-                + "Utilise pour débrief, live, chambrage, « mon pronostic », « souviens-toi ». "
-                + "NE PAS utiliser search/Tavily pour un GP déjà en fiche.";
+                + "Fiche Grand Prix (OpenF1) + mémoire fan : débrief, live, chambrage. "
+                + "memory = avis/pronostics ; remember(text) = noter un avis ; predict(text) = "
+                + "enregistrer un pronostic. NE PAS utiliser search/Tavily pour un GP déjà en fiche.";
     }
 
     @Override

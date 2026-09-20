@@ -38,11 +38,9 @@ public final class ContextTool implements Tool {
     @Override
     public String description() {
         return "named_context(action:load|unload|list|status|search, name?:string, query?:string) — "
-                + "Fichiers de contexte projet (orion, boucherie, fableris, pegase…). "
-                + "load avec name (ex. Orion) ; unload ; list ; status ; "
-                + "search avec query pour chercher sémantiquement dans TOUS les .md "
-                + "(ex. « Tavily », « token cmd.php »). "
-                + "NE PAS confondre avec memory (souvenirs) ni notepad (liste à faire).";
+                + "Fichiers de contexte projet (orion, boucherie, fableris, pegase…) : load/unload "
+                + "par name, search (query) cherche dans tous les .md. "
+                + "Pas les souvenirs (memory) ni la liste à faire (notepad).";
     }
 
     @Override

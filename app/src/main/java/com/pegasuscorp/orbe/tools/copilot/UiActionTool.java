@@ -40,20 +40,13 @@ public final class UiActionTool implements Tool {
         // improvisés par le modèle). Pas de mention d'id technique après le tiret.
         return "ui_action(action:\"click\"|\"type\"|\"scroll\"|\"back\", target:str, "
                 + "value:str, direction:\"up\"|\"down\", steps:list) "
-                + "— Contrôle l'écran de l'app autorisée. "
-                + "target = libellé visible à l'écran, jamais d'identifiant technique. "
-                + "Multi-étapes (préféré si ouvre+clique+tape) : "
-                + "steps=[{action,target?,value?,direction?,name?},…] "
-                + "max " + A11yUiExecutor.MAX_SEQUENCE_STEPS + " — ex. "
-                + "[{action:\"open\",name:\"Brave\"},"
-                + "{action:\"click\",target:\"barre d'adresse\"},"
-                + "{action:\"type\",value:\"Wikipedia\"}]. "
-                + "Pour open : name libellé (Brave), PAS package espacé "
-                + "(évite com. android. chrome). "
-                + "action \"back\" pour retour navigateur / système (mot « retour »). "
-                + "Une seule ui_action avec steps, pas N appels. "
-                + "Si steps échoue (libellé faux, cookie…) → repli auto ui_loop. "
-                + "click peut demander confirmation.";
+                + "— Contrôle l'écran de l'app autorisée. target = libellé visible, jamais "
+                + "d'identifiant technique. Préfère UNE ui_action avec "
+                + "steps=[{action,target?,value?,direction?,name?},…] (max "
+                + A11yUiExecutor.MAX_SEQUENCE_STEPS + "), ex. [{action:\"open\",name:\"Brave\"},"
+                + "{action:\"click\",target:\"barre d'adresse\"},{action:\"type\",value:\"Wikipedia\"}]. "
+                + "open : name = libellé (Brave), pas un package. back = retour système/navigateur. "
+                + "Repli auto sur ui_loop si steps échoue. click peut demander confirmation.";
     }
 
     @Override

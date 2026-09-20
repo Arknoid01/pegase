@@ -37,20 +37,13 @@ public final class NotepadTool implements Tool {
         return "notepad(action:add|list|list_history|list_tomorrow|remove|done|clear, "
                 + "text:string OBLIGATOIRE pour add, due_date?:yyyy-MM-dd, "
                 + "reminder_at?:epoch_ms, projet_tag?:str) — "
-                + "Bloc-notes personnel. "
-                + "RÈGLE STRICTE add : NE JAMAIS noter une phrase informative ou conversationnelle. "
-                + "Exemple à NE PAS noter : « j'ai un buffet avec des courgettes » = information, pas une demande. "
-                + "UNIQUEMENT action=add si l'utilisateur utilise EXPLICITEMENT : "
-                + "« note », « ajoute », « écris », « rappelle-moi », « mets dans la liste ». "
-                + "Si le doute existe → NE PAS appeler add : DEMANDER confirmation avant de noter. "
-                + "Pour action=add : text = contenu exact à noter. "
-                + "Rappel sans heure : passer is_reminder:true (ou due_date) — le device "
-                + "applique un défaut (dans 1 h, ou 9 h si un jour est donné) et l'annonce. "
-                + "EXEMPLE valide : {\"tool\":\"notepad\",\"params\":{\"action\":\"add\","
-                + "\"text\":\"Courgette, huile d'olive\"}} (après « note courgette… »). "
-                + "Ne jamais appeler add sans text. "
-                + "list = résumé actif/proche ; list_history = historique ; done / remove / clear. "
-                + "NE PAS confondre avec memory (mémoire long terme).";
+                + "Bloc-notes personnel. add UNIQUEMENT sur demande explicite (« note », "
+                + "« ajoute », « écris », « rappelle-moi », « mets dans la liste »), text = "
+                + "contenu exact ; une simple information n'est jamais notée, dans le doute "
+                + "demande confirmation. Rappel sans heure : is_reminder:true (ou due_date) — "
+                + "défaut dans 1 h, ou 9 h si un jour est donné. list = résumé actif/proche ; "
+                + "list_history = historique ; done / remove / clear. "
+                + "Pas de mémoire long terme : utilise memory.";
     }
 
     @Override

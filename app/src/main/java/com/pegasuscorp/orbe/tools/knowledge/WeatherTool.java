@@ -78,12 +78,10 @@ public final class WeatherTool implements Tool {
 
     @Override
     public String description() {
-        return "weather(city:str, days:int) — Météo actuelle ou prévisions. "
-                + "Utilise pour TOUTE question sur la météo, température, pluie, vent, "
-                + "\"est-ce qu'il faut un manteau\", \"il va pleuvoir\"... "
-                + "Ne mets PAS city si l'utilisateur demande chez lui — GPS live (ou coords paramètres). "
-                + "city = uniquement pour une AUTRE ville explicitement demandée. "
-                + "days = nb de jours (1=aujourd'hui, 2=demain, 7=semaine).";
+        return "weather(city:str, days:int) — Météo actuelle ou prévisions (température, pluie, "
+                + "vent, « il faut un manteau ? »). Sans city : position live de l'utilisateur ; "
+                + "city seulement pour une AUTRE ville demandée. days : 1=aujourd'hui, 2=demain, "
+                + "7=semaine.";
     }
 
     @Override

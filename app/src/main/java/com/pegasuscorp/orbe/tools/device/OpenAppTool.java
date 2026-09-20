@@ -68,12 +68,10 @@ public final class OpenAppTool implements Tool {
 
     @Override
     public String description() {
-        return "open_app(name:str) — Ouvre une application (ex: \"Spotify\", \"Brave\") "
-                + "ou un raccourci web de l'orbe par son libellé (ex: \"Cursor\"). "
-                + "Alias FR : Horloge = Clock ; Agenda = Calendar. "
-                + "Si la phrase enchaîne aussi un clic/saisie : préfère "
-                + "ui_action steps=[{action:open,name:\"Brave\"},{action:click,...}] "
-                + "(name libellé, PAS package avec points) plutôt que open_app seul.";
+        return "open_app(name:str) — Ouvre une application (« Spotify », « Brave ») ou un "
+                + "raccourci web de l'orbe par son libellé. Alias FR : Horloge = Clock ; Agenda = "
+                + "Calendar. Si la phrase enchaîne un clic/saisie, préfère ui_action avec steps "
+                + "(name = libellé, pas un package).";
     }
 
     @Override

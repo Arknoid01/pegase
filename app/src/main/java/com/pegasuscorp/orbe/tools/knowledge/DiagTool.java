@@ -67,19 +67,13 @@ public final class DiagTool implements Tool {
     public String description() {
         return "diag(action:\"summary\"|\"detail\"|\"hesitations\"|\"failures\"|\"weekly\"|\"search\"|\"analyze\", "
                 + "days?:int, date?:str, query?:str) — Auto-diagnostic de Pégase sur ses traces. "
-                + "summary : bilan d'un jour (date=YYYY-MM-DD ou hier ; défaut = aujourd'hui). "
-                + "Consulte d'abord l'agrégat journalier (comme brief), puis le détail jsonl. "
-                + "detail : raconte les erreurs du jour (agrégat error_details), langage clair. "
-                + "hesitations : fantômes bloqués, JSON malformé, étapes agentiques bloquées. "
-                + "failures : échecs d'outils, erreurs LLM, replis bureau. "
-                + "weekly : bilan sur les archives (7 jours, ou days). "
-                + "search : recherche sémantique dans l'historique de comportement. "
-                + "analyze : bilan → analyse QA Markdown (fichiers, causes, prompts Cursor) ; "
-                + "demande confirmation pour noter dans le bureau. "
-                + "Utilise detail pour « qu'est-ce qui a merdé », « explique l'erreur », "
-                + "ou une relance (« dis m'en plus », « développe ») après un bilan summary. "
-                + "Utilise analyze pour « analyse tes problèmes », « qu'est-ce qui ne va pas », "
-                + "« comment tu t'améliores », « propose des corrections ».";
+                + "summary = bilan d'un jour (date=YYYY-MM-DD ou hier ; défaut aujourd'hui) ; "
+                + "detail = erreurs du jour en langage clair (« qu'est-ce qui a merdé », "
+                + "relance « dis m'en plus ») ; hesitations = fantômes, JSON malformé, étapes bloquées ; "
+                + "failures = échecs d'outils et erreurs LLM ; weekly = 7 jours (ou days) ; "
+                + "search = recherche dans l'historique de comportement ; "
+                + "analyze = analyse QA Markdown (« analyse tes problèmes », « propose des "
+                + "corrections »), confirmation avant d'écrire au bureau.";
     }
 
     @Override

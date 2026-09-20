@@ -45,17 +45,11 @@ public final class BriefTool implements Tool {
     @Override
     public String description() {
         return "brief(action:\"brief\"|\"detail\"|\"add\"|\"list\", query?:str, type?:str, label?:str, ttlDays?:int) — "
-                + "Brief du matin depuis le cache local (météo, boucherie, NASA, diag, routines). "
-                + "action=brief : uniquement sur demande explicite (« brief du matin », "
-                + "« résume ma journée », « qu'est-ce que j'ai aujourd'hui »). "
-                + "NE PAS rappeler brief() si l'utilisateur demande « plus de détail » ou "
-                + "« développe » après un brief — répondre en prose depuis le cache disponible. "
-                + "Rappeler brief() uniquement sur une nouvelle demande explicite de brief. "
-                + "params vides après un brief récent → prose enrichie depuis le cache, "
-                + "pas un nouveau brief. Jamais de réseau. "
-                + "Ne jamais inventer une section diag absente du cache "
-                + "(surtout sur backend fallback / 120b). "
-                + "action=add : ajoute une routine custom. action=list : liste les routines.";
+                + "Brief du matin depuis le cache local (météo, boucherie, NASA, diag, routines), "
+                + "sans réseau. action=brief : seulement sur demande explicite (« brief du matin », "
+                + "« résume ma journée »). Après un brief, « plus de détail » = répondre en prose "
+                + "depuis le cache, NE PAS rappeler brief. Ne jamais inventer une section absente "
+                + "du cache. add = routine custom ; list = routines.";
     }
 
     @Override

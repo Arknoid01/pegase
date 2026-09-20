@@ -56,14 +56,10 @@ public final class GitCommitTool implements Tool {
                 + "local_file?:str, files?:[{path,content}], session?:bool, message?:str, "
                 + "changes?:str|list, branch?:str, repo?:str, "
                 + "create_repo?:bool, new_repo?:str, private?:bool, confirm?:bool, deploy?:bool) — "
-                + "Commit 1 ou N fichiers sur GitHub (Git Trees si plusieurs). "
-                + "session:true = fichiers VALIDATED de la session Orion. "
-                + "Sans repo : propose dépôts ou création (public par défaut). "
-                + "Même chemin de fichier = mise à jour (remplace l'existant). "
-                + "private:true pour un dépôt privé. "
-                + "action=make_public : passe un dépôt en public. "
-                + "action=validate : vérifie GitHub / Hostinger. "
-                + "Webhook Hostinger si configuré.";
+                + "Commit 1 ou N fichiers sur GitHub. session:true = fichiers VALIDATED de la "
+                + "session Orion. Sans repo : propose dépôts ou création (public par défaut, "
+                + "private:true pour privé). Même chemin = mise à jour. make_public = dépôt "
+                + "public ; validate = vérifie GitHub / Hostinger. Webhook Hostinger si configuré.";
     }
 
     @Override

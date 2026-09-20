@@ -35,16 +35,10 @@ public final class FilesTool implements Tool {
     public String description() {
         return "files(action:\"search\"|\"list\"|\"open\"|\"move\"|\"delete\", "
                 + "query?:str, path?:str, folder?:str, destination?:str, permanent?:bool, confirm?:bool) — "
-                + "Gère les fichiers du téléphone. "
-                + "search/list/open = libres (pas de confirmation). "
-                + "move = confirmation si action importante (gros fichier, média, DCIM…). "
-                + "delete = confirmation quasi systématique ; corbeille Android (30 j) par défaut, "
-                + "permanent:true pour supprimer définitivement. "
-                + "folder/destination : downloads|documents|pictures|dcim|movies|music. "
-                + "Ex. cherche : {\"tool\":\"files\",\"params\":{\"action\":\"search\",\"query\":\"facture\"}}. "
-                + "Ex. déplace : {\"tool\":\"files\",\"params\":{\"action\":\"move\",\"query\":\"recap.pdf\","
-                + "\"destination\":\"documents\"}}. "
-                + "Ex. supprime : {\"tool\":\"files\",\"params\":{\"action\":\"delete\",\"query\":\"photo.png\"}}.";
+                + "Gère les fichiers du téléphone. search/list/open libres ; move : confirmation "
+                + "si important (gros fichier, média, DCIM) ; delete : confirmation, corbeille "
+                + "Android 30 j par défaut (permanent:true = définitif). "
+                + "folder/destination : downloads|documents|pictures|dcim|movies|music.";
     }
 
     @Override
