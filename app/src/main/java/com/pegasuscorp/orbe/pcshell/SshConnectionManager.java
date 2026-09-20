@@ -76,8 +76,17 @@ public final class SshConnectionManager {
             return ExecResult.connectionError(
                     "PC non configuré — renseigne l'hostname Tailscale dans les réglages.");
         }
-        SshKeyManager.KeyMaterial keys = SshKeyManager.ensureKeyPair(context);
+        SshKeyManager.KeyMaterial keys;
+        try {
+            keys = SshKeyManager.ensureKeyPair(context);
+        } catch (IllegalStateException e) {
+            return ExecResult.connectionError(e.getMessage());
+        }
         String pem = keys.privateKeyPem;
+        if (TextUtils.isEmpty(pem)) {
+            return ExecResult.connectionError(
+                    "Clé SSH manquante — ouvre Réglages Terminal PC et régénère la clé.");
+        }
         int port = PcShellPrefs.getPort(context);
         String user = PcShellPrefs.getUser(context);
 

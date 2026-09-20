@@ -107,11 +107,6 @@ public class PcTerminalActivity extends PcShellProtectedActivity {
                 "fastfetch-compact",
                 "Fastfetch (compact)",
                 "fastfetch --logo none");
-        store.ensureBuiltin(
-                PcShellAutoRunPending.SLUG_BUILD_APK,
-                "Build APK (main → Drive)",
-                "sudo -u Pegase /usr/local/bin/pegase-sync-build-apk.sh",
-                PcShellPrefs.BUILD_APK_TIMEOUT_SEC);
         scrollback = new PcTerminalScrollback();
 
         LinearLayout root = new LinearLayout(this);

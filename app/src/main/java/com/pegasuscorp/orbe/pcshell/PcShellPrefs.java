@@ -18,14 +18,14 @@ public final class PcShellPrefs {
     public static final int DEFAULT_TIMEOUT_SEC = 180;
     /** Timeout pour pacman / mises à jour système. */
     public static final int PACMAN_TIMEOUT_SEC = 600;
-    /** Timeout pour sync GitHub + gradlew assembleDebug + copie Drive. */
-    public static final int BUILD_APK_TIMEOUT_SEC = 1800;
     /** Plafond timeout par commande enregistrée. */
     public static final int MAX_TIMEOUT_SEC = 3600;
     /** Sortie max stdout/stderr par exécution (Phase 1.5). */
     public static final int MAX_OUTPUT_CHARS = 256 * 1024;
 
     private static final String PREFS_CONFIG = "pc_shell_config";
+    /** Fallback tests Robolectric — pas de Keystore Android. */
+    private static final String PREFS_CONFIG_TEST = "pc_shell_config_test";
     /** Ancien fichier unique — migration vers config + coffre clés. */
     private static final String PREFS_LEGACY = "pc_shell_secure";
     private static final String PREFS_KEYS = "pc_shell_keys";
@@ -51,6 +51,10 @@ public final class PcShellPrefs {
     }
 
     private static SharedPreferences prefsConfig(Context context) {
+        if (bypassForTests) {
+            return context.getApplicationContext()
+                    .getSharedPreferences(PREFS_CONFIG_TEST, Context.MODE_PRIVATE);
+        }
         try {
             MasterKey masterKey = new MasterKey.Builder(context)
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -103,6 +107,9 @@ public final class PcShellPrefs {
 
     /** Migration config + clés depuis l'ancien fichier unique (post-auth). */
     public static synchronized void migrateLegacyKeysIfNeeded(Context context) {
+        if (bypassForTests) {
+            return;
+        }
         SharedPreferences legacy = prefsLegacy(context);
         SharedPreferences config = prefsConfig(context);
 
@@ -132,8 +139,8 @@ public final class PcShellPrefs {
             if (!vault.contains(KEY_PRIVATE_PEM)) {
                 vault.edit()
                         .putString(KEY_PRIVATE_PEM, legacyPriv)
-                        .putString(KEY_PUBLIC_LINE, legacyPub)
                         .apply();
+                promotePublicKeyToConfig(context, legacyPub);
                 config.edit().putBoolean(KEY_HAS_KEY_PAIR, true).apply();
             }
             legacy.edit()
@@ -210,6 +217,11 @@ public final class PcShellPrefs {
     }
 
     public static String getPublicKeyLine(Context context) {
+        migrateLegacyKeysIfNeeded(context);
+        String fromConfig = prefsConfig(context).getString(KEY_PUBLIC_LINE, "").trim();
+        if (!TextUtils.isEmpty(fromConfig)) {
+            return fromConfig;
+        }
         if (!PcShellSession.isUnlocked() && !bypassForTests) {
             return "";
         }
@@ -217,11 +229,25 @@ public final class PcShellPrefs {
         if (!TextUtils.isEmpty(cached)) {
             return cached;
         }
-        return readPublicKeyFromVault(context);
+        String fromVault = readPublicKeyFromVault(context);
+        promotePublicKeyToConfig(context, fromVault);
+        return fromVault;
+    }
+
+    /** Copie la clé publique dans la config (affichage sans biométrie). */
+    static void promotePublicKeyToConfig(Context context, String publicLine) {
+        if (TextUtils.isEmpty(publicLine)) return;
+        SharedPreferences config = prefsConfig(context);
+        if (TextUtils.isEmpty(config.getString(KEY_PUBLIC_LINE, ""))) {
+            config.edit().putString(KEY_PUBLIC_LINE, publicLine.trim()).apply();
+        }
     }
 
     public static boolean hasKeyPair(Context context) {
         migrateLegacyKeysIfNeeded(context);
+        if (!TextUtils.isEmpty(prefsConfig(context).getString(KEY_PUBLIC_LINE, "").trim())) {
+            return true;
+        }
         if (prefsConfig(context).getBoolean(KEY_HAS_KEY_PAIR, false)) {
             return true;
         }
@@ -232,22 +258,33 @@ public final class PcShellPrefs {
 
     public static void saveKeyPair(Context context, String privatePem, String publicLine) {
         migrateLegacyKeysIfNeeded(context);
+        String pub = publicLine != null ? publicLine.trim() : "";
+        String priv = privatePem != null ? privatePem : "";
+        if (TextUtils.isEmpty(priv) && TextUtils.isEmpty(pub)) {
+            throw new IllegalStateException("Refus d'enregistrer une paire de clés vide");
+        }
         try {
-            SharedPreferences vault = prefsKeyVault(context);
-            vault.edit()
-                    .putString(KEY_PRIVATE_PEM, privatePem != null ? privatePem : "")
-                    .putString(KEY_PUBLIC_LINE, publicLine != null ? publicLine : "")
+            SharedPreferences config = prefsConfig(context);
+            config.edit()
+                    .putString(KEY_PUBLIC_LINE, pub)
+                    .putBoolean(KEY_HAS_KEY_PAIR, true)
                     .apply();
-            prefsConfig(context).edit().putBoolean(KEY_HAS_KEY_PAIR, true).apply();
-            if (PcShellSession.isUnlocked() || bypassForTests) {
-                PcShellKeyCache.putCachedKeys(
-                        privatePem != null ? privatePem : "",
-                        publicLine != null ? publicLine : "");
+            if (!TextUtils.isEmpty(priv)) {
+                SharedPreferences vault = prefsKeyVault(context);
+                vault.edit()
+                        .putString(KEY_PRIVATE_PEM, priv)
+                        .remove(KEY_PUBLIC_LINE)
+                        .apply();
             }
-            prefsLegacy(context).edit()
-                    .remove(KEY_PRIVATE_PEM)
-                    .remove(KEY_PUBLIC_LINE)
-                    .apply();
+            if (PcShellSession.isUnlocked() || bypassForTests) {
+                PcShellKeyCache.putCachedKeys(priv, pub);
+            }
+            if (!bypassForTests) {
+                prefsLegacy(context).edit()
+                        .remove(KEY_PRIVATE_PEM)
+                        .remove(KEY_PUBLIC_LINE)
+                        .apply();
+            }
         } catch (Exception e) {
             throw new IllegalStateException("Enregistrement clé SSH impossible", e);
         }
@@ -258,7 +295,10 @@ public final class PcShellPrefs {
             prefsKeyVault(context).edit().clear().apply();
         } catch (Exception ignored) {
         }
-        prefsConfig(context).edit().putBoolean(KEY_HAS_KEY_PAIR, false).apply();
+        prefsConfig(context).edit()
+                .putBoolean(KEY_HAS_KEY_PAIR, false)
+                .remove(KEY_PUBLIC_LINE)
+                .apply();
         prefsLegacy(context).edit()
                 .remove(KEY_PRIVATE_PEM)
                 .remove(KEY_PUBLIC_LINE)
@@ -289,6 +329,8 @@ public final class PcShellPrefs {
         }
         context.getApplicationContext()
                 .getSharedPreferences(PREFS_KEYS_TEST, Context.MODE_PRIVATE).edit().clear().apply();
+        context.getApplicationContext()
+                .getSharedPreferences(PREFS_CONFIG_TEST, Context.MODE_PRIVATE).edit().clear().apply();
         prefsLegacy(context).edit().clear().apply();
         PcShellSession.resetForTests();
         PcShellKeyCache.resetForTests();

@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.pcshell;
 
 import android.content.Context;
+import android.text.TextUtils;
 import android.util.Base64;
 
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -41,23 +42,45 @@ public final class SshKeyManager {
 
     public static synchronized KeyMaterial ensureKeyPair(Context context) {
         KeyMaterial material;
+        boolean persist = false;
         if (PcShellPrefs.hasKeyPair(context)) {
             String priv = PcShellPrefs.getPrivateKeyPem(context);
             String pub = PcShellPrefs.getPublicKeyLine(context);
-            if (priv.contains("BEGIN PRIVATE KEY")) {
+            if (TextUtils.isEmpty(priv)) {
+                if (!TextUtils.isEmpty(pub)) {
+                    throw new IllegalStateException(
+                            "Clé privée inaccessible — déverrouille le Terminal PC (biométrie).");
+                }
+                material = generate();
+                persist = true;
+            } else if (priv.contains("BEGIN PRIVATE KEY")) {
                 material = migratePkcs8ToOpenSsh(priv, pub);
+                persist = true;
             } else {
                 material = new KeyMaterial(priv, pub);
             }
         } else {
             material = generate();
+            persist = true;
         }
-        material = syncPublicFromPrivate(material);
-        PcShellPrefs.saveKeyPair(context, material.privateKeyPem, material.publicKeyLine);
+        KeyMaterial synced = syncPublicFromPrivate(material);
+        if (!TextUtils.isEmpty(synced.publicKeyLine)
+                && !synced.publicKeyLine.equals(material.publicKeyLine)) {
+            material = synced;
+            persist = true;
+        }
+        if (persist && !TextUtils.isEmpty(material.privateKeyPem)) {
+            PcShellPrefs.saveKeyPair(context, material.privateKeyPem, material.publicKeyLine);
+        }
+        if (TextUtils.isEmpty(material.privateKeyPem)) {
+            throw new IllegalStateException(
+                    "Clé SSH manquante — appuie sur « Régénérer » dans Réglages Terminal PC.");
+        }
         return material;
     }
 
     public static synchronized KeyMaterial regenerate(Context context) {
+        PcShellPrefs.clearKeyPair(context);
         KeyMaterial material = generate();
         PcShellPrefs.saveKeyPair(context, material.privateKeyPem, material.publicKeyLine);
         return material;

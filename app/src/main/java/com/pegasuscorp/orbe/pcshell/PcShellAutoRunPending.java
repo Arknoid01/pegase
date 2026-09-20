@@ -11,8 +11,6 @@ public final class PcShellAutoRunPending {
     public static final String EXTRA_AUTO_RUN_COMMAND = "autoRunCommand";
     /** Slug intégré pour {@code sudo pacman -Syu} via notification ntfy. */
     public static final String SLUG_MISE_A_JOUR_ARCH = "mise-a-jour-arch";
-    /** Slug intégré : sync main + build APK + copie Google Drive. */
-    public static final String SLUG_BUILD_APK = "build-apk";
 
     private static final String PREFS = "pc_shell_autorun";
     private static final String KEY_SLUG = "slug";

@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.method.ScrollingMovementMethod;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -89,8 +90,18 @@ public class PcShellSettingsActivity extends PcShellProtectedActivity {
         root.addView(pairingHelp);
 
         publicKeyView = new TextView(this);
-        publicKeyView.setText(keys.publicKeyLine);
-        publicKeyView.setTextColor(C_CYAN);
+        String pubLine = keys.publicKeyLine;
+        if (TextUtils.isEmpty(pubLine)) {
+            pubLine = PcShellPrefs.getPublicKeyLine(this);
+        }
+        if (TextUtils.isEmpty(pubLine)) {
+            pubLine = "(clé absente — appuie sur « Régénérer », copie la nouvelle clé sur le PC, "
+                    + "puis réessaie une commande)";
+            publicKeyView.setTextColor(C_MUTED);
+        } else {
+            publicKeyView.setTextColor(C_CYAN);
+        }
+        publicKeyView.setText(pubLine);
         publicKeyView.setTextSize(11);
         publicKeyView.setTypeface(Typeface.MONOSPACE);
         publicKeyView.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -99,9 +110,13 @@ public class PcShellSettingsActivity extends PcShellProtectedActivity {
         root.addView(publicKeyView, wrapLp());
 
         TextView fp = new TextView(this);
-        String fingerprint = SshKeyManager.fingerprintSha256(keys.publicKeyLine);
-        fp.setText("Empreinte (ssh-keygen -lf) :\n" + fingerprint
-                + "\nDoit être identique à : sudo ssh-keygen -lf authorized_keys");
+        String fingerprint = TextUtils.isEmpty(keys.publicKeyLine)
+                ? ""
+                : SshKeyManager.fingerprintSha256(keys.publicKeyLine);
+        fp.setText(TextUtils.isEmpty(fingerprint)
+                ? "Empreinte indisponible — régénère la clé si la connexion échoue."
+                : "Empreinte (ssh-keygen -lf) :\n" + fingerprint
+                        + "\nDoit être identique à : sudo ssh-keygen -lf authorized_keys");
         fp.setTextColor(C_MUTED);
         fp.setTextSize(10);
         fp.setTypeface(Typeface.MONOSPACE);

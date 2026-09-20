@@ -109,9 +109,32 @@ La commande intégrée **Mise à jour Arch** (`mise-a-jour-arch`) est créée au
 
 ## Build APK → Google Drive
 
-Pipeline : **GitHub `main`** → `git reset --hard` → `./gradlew :app:assembleDebug` → copie vers **`/home/Pegase/GoogleDrive/app-debug.apk`**.
+Pipeline : **GitHub `main`** → `git reset --hard` → `./gradlew :app:assembleDebug` → copie vers **`/home/Pegase/GoogleDrive/app-debug.apk`** (montage rclone → cloud automatique).
 
-### Installation (Arch, une fois)
+### Montage Google Drive (Arch, une fois)
+
+`~/GoogleDrive` est monté via **rclone** (`gdrive:`) au login et au boot :
+
+```bash
+cd /home/Pegase/Documents/orbe/orbe
+chmod +x scripts/install-pegase-gdrive-mount.sh
+./scripts/install-pegase-gdrive-mount.sh
+# Boot sans session graphique :
+sudo loginctl enable-linger Pegase
+```
+
+Prérequis : `rclone config` avec un remote `gdrive:` (ou `PEGASE_RCLONE_REMOTE`).
+
+Vérif :
+
+```bash
+mountpoint ~/GoogleDrive
+systemctl --user status pegase-gdrive-mount.service
+```
+
+Toute copie dans `~/GoogleDrive/` est envoyée sur Google Drive (cache VFS, quelques secondes).
+
+### Build APK (script ou Cursor)
 
 ```bash
 cd /home/Pegase/Documents/orbe/orbe
@@ -119,23 +142,19 @@ chmod +x scripts/install-pegase-sync-build-apk.sh scripts/pegase-sync-build-apk.
 sudo ./scripts/install-pegase-sync-build-apk.sh
 ```
 
-Vérifie que Google Drive est monté/synchronisé (`/home/Pegase/GoogleDrive`).
-
 Test manuel :
 
 ```bash
 sudo -u Pegase /usr/local/bin/pegase-sync-build-apk.sh
 ```
 
-### Depuis Pégase (téléphone)
-
-Commande intégrée **Build APK (main → Drive)** (`build-apk`) — timeout 30 min.
-
-Prérequis : push sur `main` du repo [pegase](https://github.com/Arknoid01/pegase.git) avant de lancer.
+Prérequis : push/merge sur `main` du repo [pegase](https://github.com/Arknoid01/pegase.git) avant le build.
 
 Après le build : ouvre **Google Drive** sur le téléphone → `app-debug.apk` → installer.
 
 Config PC optionnelle : `/etc/pegase/build-apk.env`
+
+Depuis Cursor : `./gradlew :app:assembleDebug` puis `cp app/build/outputs/apk/debug/app-debug.apk ~/GoogleDrive/app-debug.apk`.
 
 ### Test manuel
 
@@ -151,6 +170,26 @@ sudo /usr/local/bin/pegase-checkupdates-ntfy.sh
 | Clé refusée | Clé publique dans `authorized_keys` ? droits 600/700 ? |
 | Permission denied (sudo) | Commande exacte dans sudoers ? |
 | Timeout | PC en veille ? pare-feu local ? |
+| Drive vide / APK absente sur le tel | `mountpoint ~/GoogleDrive` ? `systemctl --user status pegase-gdrive-mount` ? boot : `sudo loginctl enable-linger Pegase` |
+| Fichiers Drive absents localement (rclone) | `systemctl --user restart pegase-gdrive-mount` — cache listing 10s (`--dir-cache-time 10s`) |
+| Sync : chemin incohérent | Dossier unique `~/GoogleDrive/Pegase/` (casse exacte) — voir `/etc/pegase/drive-sync.defaults.env` |
+| PC→tel : ops non importées | Normal côté script bash (lit `android-*` seulement) ; import tel via app → **Synchroniser maintenant** |
+
+## Sync Drive (bloc-notes + mémoires)
+
+Source unique des chemins : `scripts/pegase-drive-sync.defaults.env` → `/etc/pegase/` (Android : `DriveSyncLayout.java`).
+
+```
+~/GoogleDrive/Pegase/
+  android-<deviceId>/op-*.json    ← tel → PC (script systemd importe)
+  pc-pegase-arch/op-*.json        ← PC → tel (app Android importe)
+```
+
+Install : `sudo ./scripts/install-pegase-sync-drive-notepad.sh` · Montage : `./scripts/install-pegase-gdrive-mount.sh`
+
+## Pégase Desktop (Arch)
+
+Client Python minimal — chat texte, mémoire partagée `~/.pegase/`. Voir `desktop/README.md` · install : `./desktop/scripts/install-pegase-desktop.sh`
 
 ## Fichiers côté Pégase (téléphone)
 

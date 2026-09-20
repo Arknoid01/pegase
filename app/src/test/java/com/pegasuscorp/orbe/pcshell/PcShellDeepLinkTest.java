@@ -45,19 +45,6 @@ public class PcShellDeepLinkTest {
     }
 
     @Test
-    public void ensureBuiltin_createsBuildApk() {
-        PcShellCommandStore store = PcShellCommandStore.getInstance(ctx);
-        SavedCommand cmd = store.ensureBuiltin(
-                PcShellAutoRunPending.SLUG_BUILD_APK,
-                "Build APK (main → Drive)",
-                "sudo -u Pegase /usr/local/bin/pegase-sync-build-apk.sh",
-                PcShellPrefs.BUILD_APK_TIMEOUT_SEC);
-        assertNotNull(cmd);
-        assertEquals("build-apk", cmd.slug);
-        assertEquals(Integer.valueOf(PcShellPrefs.BUILD_APK_TIMEOUT_SEC), cmd.timeoutSeconds);
-    }
-
-    @Test
     public void ensureBuiltin_createsMiseAJourArch() {
         PcShellCommandStore store = PcShellCommandStore.getInstance(ctx);
         SavedCommand cmd = store.ensureBuiltin(

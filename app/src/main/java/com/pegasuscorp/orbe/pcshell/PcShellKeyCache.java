@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.pcshell;
 
 import android.content.Context;
+import android.text.TextUtils;
 
 /**
  * Clés SSH en mémoire — disponibles uniquement après déverrouillage biométrique.
@@ -16,6 +17,10 @@ public final class PcShellKeyCache {
         PcShellPrefs.migrateLegacyKeysIfNeeded(context);
         privateKeyPem = PcShellPrefs.readPrivateKeyFromVault(context);
         publicKeyLine = PcShellPrefs.readPublicKeyFromVault(context);
+        PcShellPrefs.promotePublicKeyToConfig(context, publicKeyLine);
+        if (TextUtils.isEmpty(publicKeyLine)) {
+            publicKeyLine = PcShellPrefs.getPublicKeyLine(context);
+        }
     }
 
     public static synchronized void lock() {

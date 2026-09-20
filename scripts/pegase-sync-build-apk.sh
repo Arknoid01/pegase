@@ -44,6 +44,13 @@ if [[ ! -d "${DRIVE}" ]]; then
   exit 1
 fi
 
+if ! mountpoint -q "${DRIVE}" 2>/dev/null; then
+  echo "Google Drive non monté : ${DRIVE}" >&2
+  echo "Lance : systemctl --user start pegase-gdrive-mount.service" >&2
+  echo "Ou installe : ./scripts/install-pegase-gdrive-mount.sh" >&2
+  exit 1
+fi
+
 log "Sync ${REPO} ← origin/${BRANCH}"
 cd "${REPO}"
 git fetch origin "${BRANCH}"
