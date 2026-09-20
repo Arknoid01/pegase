@@ -38,6 +38,7 @@ import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.fs.UriDisplayNames;
 import com.pegasuscorp.orbe.memory.MemoryRepository;
 import com.pegasuscorp.orbe.session.PegaseSession;
+import com.pegasuscorp.orbe.session.TurnCancelPolicy;
 import com.pegasuscorp.orbe.session.SessionObserver;
 import com.pegasuscorp.orbe.tools.PegaseInterfaceData;
 import com.pegasuscorp.orbe.tools.ToolResult;
@@ -525,7 +526,7 @@ public class DiscussionFragment extends Fragment {
     private void startNewDiscussion() {
         Context ctx = requireContext();
         if (viewModel != null) viewModel.setChatSending(false);
-        if (chatSendBtn != null) chatSendBtn.setEnabled(true);
+        setSendButtonBusy(false);
         if (thinkingView != null) thinkingView.reset();
 
         boolean saved = false;
@@ -987,7 +988,7 @@ public class DiscussionFragment extends Fragment {
     private void sendTextChatMessage() {
         if (chatInput == null || viewModel == null) return;
         if (viewModel.isChatSending()) {
-            Toast.makeText(requireContext(), "Envoi en cours…", Toast.LENGTH_SHORT).show();
+            handleSendWhileBusy();
             return;
         }
         String text = chatInput.getText().toString().trim();
@@ -1025,7 +1026,7 @@ public class DiscussionFragment extends Fragment {
         ensureTurnsListener();
         chatInput.setText("");
         viewModel.setChatSending(true);
-        if (chatSendBtn != null) chatSendBtn.setEnabled(false);
+        setSendButtonBusy(true);
         if (thinkingView != null) {
             thinkingView.reset();
         }
@@ -1165,10 +1166,48 @@ public class DiscussionFragment extends Fragment {
         finishTextChatReply();
     }
 
+    /** Bouton d'envoi : « ↗ » au repos, « ⏹ » pendant un tour (arrêt ou consigne). */
+    private void setSendButtonBusy(boolean busy) {
+        if (chatSendBtn == null) return;
+        chatSendBtn.setEnabled(true);
+        chatSendBtn.setText(busy ? "⏹" : "↗");
+        chatSendBtn.setContentDescription(busy ? "Arrêter" : "Envoyer");
+    }
+
+    /**
+     * Pendant un tour : champ vide ou « stop » = arrête le tour ; sinon le texte est ajouté au
+     * tour agentique en cours comme consigne (steering).
+     */
+    private void handleSendWhileBusy() {
+        Context ctx = requireContext();
+        PegaseSession session = PegaseSession.get(ctx);
+        String text = chatInput.getText().toString().trim();
+        if (text.isEmpty() || TurnCancelPolicy.isCancel(text)) {
+            if (session.cancelTurn()) {
+                chatInput.setText("");
+                PegaseWakeController.setAssistantThinking(false);
+                if (thinkingView != null) thinkingView.onComplete();
+                finishTextChatReply();
+                Toast.makeText(ctx, "Arrêté", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(ctx, "Envoi en cours…", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        if (session.steer(text)) {
+            chatInput.setText("");
+            Toast.makeText(ctx, "Consigne ajoutée à la réponse en cours", Toast.LENGTH_SHORT)
+                    .show();
+        } else {
+            Toast.makeText(ctx, "Réponse en cours — appuie sur ⏹ pour l'arrêter",
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void finishTextChatReply() {
         if (viewModel != null) viewModel.setChatSending(false);
         if (!isAdded()) return;
-        if (chatSendBtn != null) chatSendBtn.setEnabled(true);
+        setSendButtonBusy(false);
         lastConversationText = "";
         refreshConversationIfNeeded();
         if (host != null) host.updateSubtitle();
