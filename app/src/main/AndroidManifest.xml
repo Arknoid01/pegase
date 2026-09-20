@@ -319,6 +319,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".sync.DriveSyncSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".pcshell.PcShellHistoryActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe" />
@@ -327,12 +333,6 @@
             android:name=".pcshell.PcShellOutputActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe" />
-
-        <activity
-            android:name=".sync.DriveSyncSettingsActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Orbe"
-            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".pcshell.PcShellNtfyActionActivity"
@@ -395,6 +395,11 @@
             android:name=".prefetch.PrefetchAlarmReceiver"
             android:exported="false" />
 
+        <service
+            android:name=".prefetch.PrefetchIdleJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <receiver
             android:name=".prefetch.PrefetchBootReceiver"
             android:exported="true"
@@ -405,11 +410,6 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
-        <service
-            android:name=".prefetch.PrefetchIdleJobService"
-            android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE" />
-
 
         <receiver
             android:name=".intentions.IntentionActionReceiver"
