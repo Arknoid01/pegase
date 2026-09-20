@@ -1530,6 +1530,39 @@ public class PegaseSession {
         });
     }
 
+    /**
+     * Une erreur d'outil pendant un tour agentique n'interrompt plus le tour : elle est renvoyée
+     * au modèle comme résultat d'outil (permission manquante, question de précision…) pour qu'il
+     * explique, demande ou change d'approche. Bornée comme les appels refusés ; le reste d'un lot
+     * en cours est abandonné.
+     *
+     * @return true si le tour continue avec le modèle
+     */
+    private boolean recoverFromToolError(ConversationManager conv, SessionObserver obs,
+            LlmReply failedReply, NativeToolCall failedCall, String error) {
+        if (!useAgenticLoop() || conv == null || failedReply == null || failedCall == null) {
+            return false;
+        }
+        if (activeAgenticChain != null
+                && activeAgenticChain.rejectedStepCount() >= MAX_REJECTED_CALLS_PER_TURN) {
+            return false;
+        }
+        clearPendingToolCall();
+        pendingBatch.clear();
+        if (activeAgenticChain == null) {
+            activeAgenticChain = new AgenticChain(conv.historySnapshot(), conv.getLastUserText());
+            activeAgenticOptions = buildSendOptions(conv.getLastUserText());
+            agenticStepIndex = 0;
+        }
+        String message = (error != null ? error.trim() : "")
+                + " — n'insiste pas avec le même appel ; explique le problème à l'utilisateur, "
+                + "pose-lui la question utile ou propose une alternative.";
+        activeAgenticChain.addRejectedStep(failedReply, failedCall,
+                ToolCallValidator.errorJson(failedCall.name, "TOOL_ERROR", message));
+        runAgenticStep(conv, obs);
+        return true;
+    }
+
     private void finishTool(ConversationManager conv, String toolId, long startedAt,
             ToolResult result, String error, boolean exit, SessionObserver obs) {
         long duration = System.currentTimeMillis() - startedAt;
@@ -1537,11 +1570,14 @@ public class PegaseSession {
             if (turnReasoning != null) {
                 turnReasoning.noteToolEnd(toolId, false, duration, error);
             }
-            clearAgenticState();
+            LlmReply failedReply = pendingAssistantToolReply;
+            NativeToolCall failedCall = pendingNativeToolCall;
             Trace.toolEnd(toolId, false, duration, null, error);
             Trace.toolFailureContext(toolId, "tool_execute_error", error,
                     conv != null ? conv.getLastUserText() : null);
             notifyToolEnd(obs, toolId, false);
+            if (recoverFromToolError(conv, obs, failedReply, failedCall, error)) return;
+            clearAgenticState();
             notifyError(obs, error);
             return;
         }

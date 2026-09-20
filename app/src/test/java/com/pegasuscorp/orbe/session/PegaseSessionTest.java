@@ -476,6 +476,68 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void text_toolError_isFedBackToModel_insteadOfEndingTurn() throws Exception {
+        backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub_fail", new JSONObject()));
+        backend.nextSynthesisReply = "Il faut autoriser les contacts dans les réglages.";
+        session.init(new SessionContext(Channel.TEXT, false));
+        AtomicReference<String> finalReply = new AtomicReference<>();
+
+        session.send("Appelle Marie via stub_fail", new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {
+                if (!fired) finalReply.set(text);
+            }
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail("l'erreur d'outil doit être expliquée par le modèle : " + message);
+            }
+        });
+
+        drainMainThread();
+        assertEquals(1, backend.agenticSendCount);
+        assertEquals(1, backend.lastAgenticChain.steps().size());
+        assertTrue(backend.lastAgenticChain.steps().get(0).rejected);
+        assertTrue(backend.lastAgenticChain.steps().get(0).toolResultContent
+                .contains("TOOL_ERROR"));
+        assertEquals("Il faut autoriser les contacts dans les réglages.", finalReply.get());
+    }
+
+    @Test
+    public void text_toolError_dropsRestOfBatch() throws Exception {
+        backend.nextNativeToolCalls = java.util.Arrays.asList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub_fail", new JSONObject()),
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_2", "stub2", new JSONObject()));
+        backend.nextSynthesisReply = "Je n'ai pas pu.";
+        session.init(new SessionContext(Channel.TEXT, false));
+
+        session.send("Lot avec échec", new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {}
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        });
+
+        drainMainThread();
+        assertEquals(1, backend.agenticSendCount);
+        assertEquals(1, backend.lastAgenticChain.steps().size());
+        assertEquals("stub_fail", backend.lastAgenticChain.steps().get(0).toolCall.name);
+    }
+
+    @Test
     public void text_searchBlocksSecondSearchInSameTurn() throws Exception {
         JSONObject searchArgs = new JSONObject().put("query", "coupe du monde ce soir");
         backend.nextNativeToolCalls = java.util.Collections.singletonList(
@@ -784,6 +846,7 @@ public class PegaseSessionTest {
             if ("stub".equals(id)) return new StubTool(false, "stub");
             if ("stub2".equals(id)) return new StubTool(false, "stub2");
             if ("stub_image".equals(id)) return new StubTool(true, "stub_image");
+            if ("stub_fail".equals(id)) return new StubTool(false, "stub_fail");
             if ("search".equals(id)) return new StubTool(false, "search");
             return super.findById(id);
         }
@@ -817,6 +880,8 @@ public class PegaseSessionTest {
         public void execute(Context ctx, JSONObject params, ToolCallback cb) {
             if (image) {
                 cb.onSuccess(ToolResult.imageUrl("APOD caption", "https://example.test/apod.jpg"));
+            } else if ("stub_fail".equals(toolId)) {
+                cb.onError("Autorise l'accès aux contacts dans les réglages Android.");
             } else if ("search".equals(toolId)) {
                 cb.onSuccess(ToolResult.text("Résultat web synthétisé pour test."));
             } else {
