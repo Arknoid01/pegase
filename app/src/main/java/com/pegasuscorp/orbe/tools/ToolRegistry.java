@@ -113,7 +113,8 @@ public class ToolRegistry {
             new UiExplainTool(),
             new UiSearchTool(),
             new ContactsTool(),
-            new FilesTool()
+            new FilesTool(),
+            new com.pegasuscorp.orbe.tools.skills.SkillsTool()
     );
 
     private final CompositeTool compositeTool;

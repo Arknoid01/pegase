@@ -72,6 +72,12 @@ public final class ContextAnalyzer {
             allowedTools = toolsFor(intent, fold);
         }
 
+        // Skills : outil exposé (et index injecté) seulement si au moins un skill est installé.
+        if (!allowedTools.isEmpty() && hasSkills(context)) {
+            allowedTools = EnumSet.copyOf(allowedTools);
+            allowedTools.add(ToolTag.SKILLS);
+        }
+
         EnumSet<ProfileSection> sections = sectionsFor(intent, entities);
         int budget = budgetFor(intent, entities);
 
@@ -82,6 +88,15 @@ public final class ContextAnalyzer {
 
         return new ContextIntent(intent, entityIds, requiresTool, requiresFresh, budget, sections,
                 allowedTools);
+    }
+
+    private static boolean hasSkills(Context context) {
+        try {
+            return context != null
+                    && !new com.pegasuscorp.orbe.skills.SkillStore(context).list().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Intent ContextAnalyzer pour un id d'outil UserExamples. */

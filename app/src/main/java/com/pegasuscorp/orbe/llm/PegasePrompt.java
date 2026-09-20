@@ -60,7 +60,20 @@ public final class PegasePrompt {
                 + projectObjectsLine(context)
                 + personality
                 + buildOperationalRules(name, nativeFunctionCalling)
-                + toolsSection;
+                + toolsSection
+                + skillsIndex(context, allowedTools);
+    }
+
+    private static String skillsIndex(Context context, EnumSet<ToolTag> allowedTools) {
+        if (context == null || allowedTools == null
+                || !allowedTools.contains(ToolTag.SKILLS)) {
+            return "";
+        }
+        try {
+            return new com.pegasuscorp.orbe.skills.SkillStore(context).promptIndex();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static String situationLine(Context context) {

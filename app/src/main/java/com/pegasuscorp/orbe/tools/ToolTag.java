@@ -51,5 +51,7 @@ public enum ToolTag {
     GIT_COMMIT,
     /** Terminal PC distant (SSH / commandes enregistrées). */
     PC_SHELL,
-    COMPOSITE
+    COMPOSITE,
+    /** Skills : procédures chargées à la demande. */
+    SKILLS
 }
