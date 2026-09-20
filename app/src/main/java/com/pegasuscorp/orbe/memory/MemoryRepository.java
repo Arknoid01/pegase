@@ -1,5 +1,6 @@
 package com.pegasuscorp.orbe.memory;
 
+import com.pegasuscorp.orbe.diag.Trace;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
@@ -833,7 +834,8 @@ public class MemoryRepository implements MemoryStore {
         try {
             SyncJournal.get(appContext).appendMemoryUpsert(entry.id, entry.toJson());
             DriveSyncEngine.scheduleAfterChange(appContext);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "MemoryRepository.journalMemoryUpsert : " + e.getClass().getSimpleName());
         }
     }
 
@@ -842,7 +844,8 @@ public class MemoryRepository implements MemoryStore {
         try {
             SyncJournal.get(appContext).appendMemoryDelete(id);
             DriveSyncEngine.scheduleAfterChange(appContext);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "MemoryRepository.journalMemoryDelete : " + e.getClass().getSimpleName());
         }
     }
 
@@ -1063,7 +1066,9 @@ public class MemoryRepository implements MemoryStore {
     private void writeJsonArray(File file, JSONArray arr) {
         try (FileOutputStream out = new FileOutputStream(file)) {
             out.write(arr.toString(2).getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Trace.error("io_write", "MemoryRepository.writeJsonArray : " + e.getClass().getSimpleName());
+        }
     }
 
     private static String today() {

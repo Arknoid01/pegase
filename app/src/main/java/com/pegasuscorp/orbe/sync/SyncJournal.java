@@ -1,5 +1,6 @@
 package com.pegasuscorp.orbe.sync;
 
+import com.pegasuscorp.orbe.diag.Trace;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.fs.PegaseFileSystem;
@@ -147,7 +148,8 @@ public final class SyncJournal {
                 w.write(entry.toJson().toString());
                 w.newLine();
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "SyncJournal.writeLine : " + e.getClass().getSimpleName());
         }
     }
 }

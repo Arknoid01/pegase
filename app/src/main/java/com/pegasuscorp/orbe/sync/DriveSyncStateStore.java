@@ -1,5 +1,6 @@
 package com.pegasuscorp.orbe.sync;
 
+import com.pegasuscorp.orbe.diag.Trace;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.fs.PegaseFileSystem;
@@ -150,7 +151,8 @@ public final class DriveSyncStateStore {
             try (FileOutputStream out = new FileOutputStream(stateFile)) {
                 out.write(o.toString(2).getBytes(StandardCharsets.UTF_8));
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "DriveSyncStateStore.save : " + e.getClass().getSimpleName());
         }
     }
 

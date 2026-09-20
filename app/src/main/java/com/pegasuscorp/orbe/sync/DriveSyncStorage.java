@@ -56,7 +56,9 @@ public final class DriveSyncStorage {
                 out.write(op.toJson().toString(2).getBytes(StandardCharsets.UTF_8));
                 return true;
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            com.pegasuscorp.orbe.diag.Trace.error("io_write",
+                    "DriveSyncStorage.writeOp : " + e.getClass().getSimpleName());
             return false;
         }
     }

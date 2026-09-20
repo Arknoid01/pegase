@@ -1,5 +1,6 @@
 package com.pegasuscorp.orbe.notepad;
 
+import com.pegasuscorp.orbe.diag.Trace;
 import android.content.Context;
 
 import com.pegasuscorp.orbe.fs.PegaseFileSystem;
@@ -425,7 +426,8 @@ public final class NotepadStore {
         try {
             SyncJournal.get(appContext).appendNotepadUpsert(item.id, item.toJson());
             DriveSyncEngine.scheduleAfterChange(appContext);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "NotepadStore.journalUpsert : " + e.getClass().getSimpleName());
         }
     }
 
@@ -434,7 +436,8 @@ public final class NotepadStore {
         try {
             SyncJournal.get(appContext).appendNotepadDelete(id);
             DriveSyncEngine.scheduleAfterChange(appContext);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Trace.error("io_write", "NotepadStore.journalDelete : " + e.getClass().getSimpleName());
         }
     }
 
@@ -607,7 +610,9 @@ public final class NotepadStore {
             try (FileOutputStream out = new FileOutputStream(storeFile)) {
                 out.write(root.toString(2).getBytes(StandardCharsets.UTF_8));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Trace.error("io_write", "NotepadStore.save : " + e.getClass().getSimpleName());
+        }
     }
 
     private static String fold(String text) {
