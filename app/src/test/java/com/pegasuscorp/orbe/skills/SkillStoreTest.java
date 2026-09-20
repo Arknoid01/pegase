@@ -126,4 +126,12 @@ public class SkillStoreTest {
         assertFalse(new File(root.getParentFile(), "evil").exists());
         assertNull(store.find("evil"));
     }
+
+    @Test
+    public void idFromFileName_normalise() {
+        assertEquals("mon-skill", SkillStore.idFromFileName("Mon Skill.zip"));
+        assertEquals("rapport_v2", SkillStore.idFromFileName("primary:Download/Rapport_v2.ZIP"));
+        assertEquals("skill", SkillStore.idFromFileName("!!!.zip"));
+        assertEquals("skill", SkillStore.idFromFileName(null));
+    }
 }

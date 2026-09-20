@@ -207,6 +207,18 @@ public final class SkillStore {
         return valid;
     }
 
+    /** Id de repli dérivé d'un nom de fichier ({@code Mon Skill.zip} → {@code mon-skill}). */
+    public static String idFromFileName(String fileName) {
+        String base = fileName != null ? fileName : "skill";
+        int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf(':'));
+        if (slash >= 0) base = base.substring(slash + 1);
+        if (base.toLowerCase(Locale.ROOT).endsWith(".zip")) base = base.substring(0, base.length() - 4);
+        String id = base.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_-]+", "-")
+                .replaceAll("^-+|-+$", "");
+        if (id.length() > 64) id = id.substring(0, 64);
+        return isValidId(id) ? id : "skill";
+    }
+
     static boolean isValidId(String id) {
         return id != null && id.matches("[a-z0-9][a-z0-9_-]{0,63}");
     }

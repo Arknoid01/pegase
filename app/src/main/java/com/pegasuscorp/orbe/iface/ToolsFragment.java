@@ -22,6 +22,8 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
@@ -31,6 +33,7 @@ import com.pegasuscorp.orbe.KnowMeSettingsActivity;
 import com.pegasuscorp.orbe.MemorySettingsActivity;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.pcshell.PcTerminalActivity;
+import com.pegasuscorp.orbe.skills.SkillStore;
 import com.pegasuscorp.orbe.sync.DriveSyncSettingsActivity;
 import com.pegasuscorp.orbe.tools.PegaseInterfaceData;
 import com.pegasuscorp.orbe.tools.ToolFavoritesStore;
@@ -63,6 +66,10 @@ public class ToolsFragment extends Fragment {
     private LinearLayout toolsRoot;
     /** Clés de sections ouvertes ; vide = tout replié (défaut). */
     private final Set<String> expandedSections = new HashSet<>();
+
+    private final ActivityResultLauncher<String[]> skillZipPicker =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(),
+                    this::importSkillZip);
 
     @Override
     public void onAttach(@NonNull Context context) {
@@ -121,6 +128,7 @@ public class ToolsFragment extends Fragment {
 
         addPcShellEntry(ctx);
         addDriveSyncEntry(ctx);
+        addSkillsEntry(ctx);
 
         Set<String> pinnedKeys = new HashSet<>(ToolFavoritesStore.getPinnedKeys(ctx));
         List<PegaseInterfaceData.ToolHint> pinned = PegaseInterfaceData.pinnedHints(ctx);
@@ -584,5 +592,93 @@ public class ToolsFragment extends Fragment {
             startActivity(new Intent(ctx, DriveSyncSettingsActivity.class));
         });
         toolsRoot.addView(row, rowLp);
+    }
+
+    private void addSkillsEntry(Context ctx) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor(C_CARD));
+        bg.setCornerRadius(dp(ctx, 8));
+        bg.setStroke(dp(ctx, 1), Color.parseColor(C_SEP));
+        row.setBackground(bg);
+        LinearLayout.LayoutParams rowLp = matchWrap();
+        rowLp.bottomMargin = dp(ctx, 8);
+        row.setLayoutParams(rowLp);
+
+        LinearLayout textCol = new LinearLayout(ctx);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        row.addView(textCol, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView label = new TextView(ctx);
+        label.setText("Skills");
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(14);
+        label.setTypeface(null, Typeface.BOLD);
+        textCol.addView(label);
+
+        int count;
+        try {
+            count = new SkillStore(ctx).list().size();
+        } catch (Exception e) {
+            count = 0;
+        }
+        TextView sub = new TextView(ctx);
+        sub.setText((count == 0 ? "Aucun skill installé" : count + " installé(s)")
+                + " · appuie pour importer un ZIP");
+        sub.setTextColor(Color.parseColor(C_MUTED));
+        sub.setTextSize(11);
+        sub.setPadding(0, dp(ctx, 2), 0, 0);
+        textCol.addView(sub);
+
+        TextView chev = new TextView(ctx);
+        chev.setText("+");
+        chev.setTextColor(Color.parseColor(C_CYAN));
+        chev.setTextSize(18);
+        row.addView(chev);
+
+        row.setOnClickListener(v -> {
+            PegaseSheets.haptic(v);
+            skillZipPicker.launch(new String[]{"application/zip",
+                    "application/x-zip-compressed", "application/octet-stream"});
+        });
+        toolsRoot.addView(row, rowLp);
+    }
+
+    /** Importe le ZIP choisi (un ou plusieurs skills) hors du thread UI. */
+    private void importSkillZip(@Nullable android.net.Uri uri) {
+        if (uri == null || getContext() == null) return;
+        final Context app = requireContext().getApplicationContext();
+        final String fallbackId = SkillStore.idFromFileName(displayName(app, uri));
+        new Thread(() -> {
+            String message;
+            try (java.io.InputStream in = app.getContentResolver().openInputStream(uri)) {
+                if (in == null) throw new java.io.IOException("Fichier illisible.");
+                List<String> ids = new SkillStore(app).importZip(in, fallbackId);
+                message = ids.isEmpty()
+                        ? "Aucun skill valide dans cette archive (SKILL.md avec description requis)."
+                        : "Skills installés : " + String.join(", ", ids);
+            } catch (Exception e) {
+                message = "Import impossible : "
+                        + (e.getMessage() != null ? e.getMessage() : "erreur");
+            }
+            final String toast = message;
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                Toast.makeText(app, toast, Toast.LENGTH_LONG).show();
+                if (isAdded()) rebuildToolsList();
+            });
+        }, "skill-import").start();
+    }
+
+    private static String displayName(Context ctx, android.net.Uri uri) {
+        try (android.database.Cursor c = ctx.getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) return c.getString(0);
+        } catch (Exception ignored) {
+        }
+        return uri.getLastPathSegment();
     }
 }
