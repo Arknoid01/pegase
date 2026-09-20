@@ -2,11 +2,10 @@ package com.pegasuscorp.orbe.secure;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
-
-import com.pegasuscorp.orbe.diag.Trace;
 
 import java.util.Map;
 
@@ -58,7 +57,8 @@ public final class SecurePrefs {
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
         } catch (Exception | Error e) {
-            Trace.error("secure_prefs", "stockage chiffré indisponible ("
+            // Log seulement : sous JVM (tests) le Keystore est absent, ce n'est pas une erreur d'appli
+            Log.w("SecurePrefs", "stockage chiffré indisponible ("
                     + e.getClass().getSimpleName() + ") : " + name);
             return null;
         }
