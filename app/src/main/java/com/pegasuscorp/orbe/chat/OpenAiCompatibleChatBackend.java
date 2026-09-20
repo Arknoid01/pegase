@@ -33,6 +33,12 @@ import java.util.concurrent.Executors;
  */
 public final class OpenAiCompatibleChatBackend implements ChatBackend {
 
+    /**
+     * Autorise plusieurs appels d'outils dans un même message ; la session les exécute en lot,
+     * dans l'ordre, sans aller-retour LLM intermédiaire.
+     */
+    static final boolean PARALLEL_TOOL_CALLS = true;
+
     private final Context appContext;
     private final LlmProvider provider;
     private final String modelOverride;
@@ -274,7 +280,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             JSONArray tools = OpenAiToolSchemaBuilder.build(toolRegistry, options.allowedTools);
             root.put("tools", tools);
             root.put("tool_choice", "auto");
-            root.put("parallel_tool_calls", false);
+            root.put("parallel_tool_calls", PARALLEL_TOOL_CALLS);
             toolsChars = tools.toString().length();
         }
         applyQwenReasoningFormat(root, currentModelId());
@@ -344,7 +350,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             JSONArray tools = OpenAiToolSchemaBuilder.build(toolRegistry, options.allowedTools);
             root.put("tools", tools);
             root.put("tool_choice", "auto");
-            root.put("parallel_tool_calls", false);
+            root.put("parallel_tool_calls", PARALLEL_TOOL_CALLS);
         }
         applyQwenReasoningFormat(root, currentModelId());
         return root.toString();

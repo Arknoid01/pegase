@@ -91,6 +91,11 @@ public class PegaseSession {
     /** Contexte du tour en cours — boucle agentique après tool_calls natif. */
     private LlmReply pendingAssistantToolReply;
     private NativeToolCall pendingNativeToolCall;
+    /**
+     * Appels restants d'un même message assistant (lot) : exécutés dans l'ordre, sans nouvel
+     * aller-retour LLM, puis le modèle reçoit tous les résultats.
+     */
+    private final java.util.ArrayDeque<NativeToolCall> pendingBatch = new java.util.ArrayDeque<>();
     private AgenticChain activeAgenticChain;
     private ChatSendOptions activeAgenticOptions;
     private long activeRequestId;
@@ -1331,6 +1336,7 @@ public class PegaseSession {
             if (rejectInvalidNativeCall(conv, reply, call, obs)) return;
             pendingAssistantToolReply = reply;
             pendingNativeToolCall = call;
+            stageBatchRemainder(reply);
             executeToolInternal(call.name, call.arguments, null, obs, false);
             return;
         }
@@ -1583,9 +1589,11 @@ public class PegaseSession {
             if (result.kind == ToolResult.Kind.IMAGE_URL) {
                 notifyToolResult(obs, result);
             }
+            if (runNextBatchedCall(conv, obs)) return;
             runAgenticStep(conv, obs);
             return;
         }
+        pendingBatch.clear();
 
         // Outil direct (voix / JSON) — pas de synthèse agentique
         if (result.kind == ToolResult.Kind.IMAGE_URL) {
@@ -1803,6 +1811,7 @@ public class PegaseSession {
             }
             pendingAssistantToolReply = reply;
             pendingNativeToolCall = call;
+            stageBatchRemainder(reply);
             executeToolInternal(call.name, call.arguments, null, obs, false);
             return;
         }
@@ -1946,6 +1955,46 @@ public class PegaseSession {
         return captured == agenticOperationGeneration;
     }
 
+    /** Met en file les appels 2..N d'un message assistant qui en contient plusieurs. */
+    private void stageBatchRemainder(LlmReply reply) {
+        pendingBatch.clear();
+        if (reply == null || !useAgenticLoop()) return;
+        for (int i = 1; i < reply.toolCalls.size(); i++) {
+            pendingBatch.add(reply.toolCalls.get(i));
+        }
+    }
+
+    /**
+     * Exécute le prochain appel du lot s'il reste et s'il est sûr. Au moindre doute (appel refusé,
+     * outil inconnu, arguments invalides, politique de tour), le reste du lot est abandonné et le
+     * modèle reprend la main avec les résultats déjà obtenus.
+     *
+     * @return true si un appel a été lancé (la suite est pilotée par son résultat)
+     */
+    private boolean runNextBatchedCall(ConversationManager conv, SessionObserver obs) {
+        while (!pendingBatch.isEmpty()) {
+            if (!AgenticTurnPolicy.allowMoreToolCalls(activeAgenticChain)) break;
+            NativeToolCall next = pendingBatch.pollFirst();
+            if (next.isRejected()) break;
+            Tool tool = toolRegistry.findById(next.name.trim());
+            if (tool == null || ToolCallValidator.validate(tool, next.arguments) != null) break;
+            if (AgenticTurnPolicy.blockReason(activeAgenticChain, next)
+                    != AgenticTurnPolicy.BlockReason.NONE) {
+                break;
+            }
+            if (!allowToolExecution(obs)) break;
+            Trace.error("agentic", "batch: exécute " + next.name + " ("
+                    + pendingBatch.size() + " restant(s) après)");
+            pendingAssistantToolReply = LlmReply.withNativeToolCalls(null,
+                    Collections.singletonList(next));
+            pendingNativeToolCall = next;
+            executeToolInternal(next.name, next.arguments, null, obs, false);
+            return true;
+        }
+        pendingBatch.clear();
+        return false;
+    }
+
     private void clearPendingToolCall() {
         pendingAssistantToolReply = null;
         pendingNativeToolCall = null;
@@ -1954,6 +2003,7 @@ public class PegaseSession {
     private void clearAgenticState() {
         agenticOperationGeneration++;
         clearPendingToolCall();
+        pendingBatch.clear();
         activeAgenticChain = null;
         activeAgenticOptions = null;
         agenticStepIndex = 0;

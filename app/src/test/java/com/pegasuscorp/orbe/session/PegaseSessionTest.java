@@ -410,6 +410,72 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void text_batchedToolCalls_runInOneLlmRoundTrip() throws Exception {
+        backend.nextNativeToolCalls = java.util.Arrays.asList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub", new JSONObject()),
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_2", "stub2", new JSONObject()));
+        backend.nextSynthesisReply = "Les deux stubs sont faits.";
+        session.init(new SessionContext(Channel.TEXT, false));
+        AtomicReference<String> finalReply = new AtomicReference<>();
+
+        session.send("Double stub en lot", new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {
+                if (!fired) finalReply.set(text);
+            }
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        });
+
+        drainMainThread();
+        // un seul appel LLM après le lot (synthèse), au lieu d'un par outil
+        assertEquals(1, backend.agenticSendCount);
+        assertEquals(2, backend.lastAgenticChain.steps().size());
+        assertEquals("stub", backend.lastAgenticChain.steps().get(0).toolCall.name);
+        assertEquals("stub2", backend.lastAgenticChain.steps().get(1).toolCall.name);
+        assertEquals("Les deux stubs sont faits.", finalReply.get());
+    }
+
+    @Test
+    public void text_batchedToolCalls_unknownToolDropsRestOfBatch() throws Exception {
+        backend.nextNativeToolCalls = java.util.Arrays.asList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub", new JSONObject()),
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_2", "outil_inexistant", new JSONObject()),
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_3", "stub2", new JSONObject()));
+        backend.nextSynthesisReply = "Fait.";
+        session.init(new SessionContext(Channel.TEXT, false));
+
+        session.send("Lot avec un intrus", new SessionObserver() {
+            @Override
+            public void onReply(String text, boolean fired) {}
+
+            @Override
+            public void onToolResult(ToolResult result) {}
+
+            @Override
+            public void onError(String message) {
+                fail(message);
+            }
+        });
+
+        drainMainThread();
+        assertEquals(1, backend.agenticSendCount);
+        assertEquals(1, backend.lastAgenticChain.steps().size());
+        assertEquals("stub", backend.lastAgenticChain.steps().get(0).toolCall.name);
+    }
+
+    @Test
     public void text_searchBlocksSecondSearchInSameTurn() throws Exception {
         JSONObject searchArgs = new JSONObject().put("query", "coupe du monde ce soir");
         backend.nextNativeToolCalls = java.util.Collections.singletonList(
