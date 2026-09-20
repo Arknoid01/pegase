@@ -20,6 +20,7 @@ public class OrbeApplication extends Application {
         PcShellCrypto.ensureSecurityProviders();
         SyncEngine.scheduleStartupSync(this);
         com.pegasuscorp.orbe.mcp.McpStore.reload(this);
+        com.pegasuscorp.orbe.diag.ReasoningStore.init(this);
         AppListCache.registerAutoRefresh(this);
     }
 }

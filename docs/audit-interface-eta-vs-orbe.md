@@ -26,7 +26,7 @@ Capture Eta : bulle utilisateur grise à droite ; sous elle une carte repliable 
 
 | Fonction | Eta | Orbe | Écart |
 |---|---|---|---|
-| **Historique des outils dans le fil** | Carte repliable **conservée** : outils, statut, durée, raisonnement | Pendant la réponse : `ThinkingView`, ligne éphémère. **Après** : une icône 🔍 sous chaque réponse ouvre un panneau `ReasoningCard` (outils ✅/❌ avec paramètres, résultat et durée, souvenirs et contextes utilisés, sources web, fournisseur, alerte de fiabilité) [vérifié : `ConversationChatAdapter`]. Le contenu est **plus riche** que celui d'Eta, mais caché derrière une petite icône ; **corrigé après cet audit** : une ligne de résumé « 🔧 outil ✅ · outil ✅ · 2,1 s » est maintenant visible sous la réponse | Presque comblé. Reste : les cartes sont **volatiles** (48 en mémoire, perdues au redémarrage : le panneau affiche alors « pas encore de carte ») |
+| **Historique des outils dans le fil** | Carte repliable **conservée** : outils, statut, durée, raisonnement | Pendant la réponse : `ThinkingView`, ligne éphémère. **Après** : une icône 🔍 sous chaque réponse ouvre un panneau `ReasoningCard` (outils ✅/❌ avec paramètres, résultat et durée, souvenirs et contextes utilisés, sources web, fournisseur, alerte de fiabilité) [vérifié : `ConversationChatAdapter`]. Le contenu est **plus riche** que celui d'Eta, mais caché derrière une petite icône ; **corrigé après cet audit** : une ligne de résumé « 🔧 outil ✅ · outil ✅ · 2,1 s » est maintenant visible sous la réponse | Comblé : les cartes sont désormais conservées sur disque (48 dernières) et survivent au redémarrage |
 | **Raisonnement du modèle** | Raisonnement du fournisseur affiché, repliable, avec durée | Le panneau montre le cheminement de Pégase (intention, outils, contexte) ; pas le raisonnement brut du modèle | Différent, pas absent |
 | **Actions sur un message** | Copier la réponse / le code / la commande, modifier, régénérer, supprimer | Copier ajouté après cet audit (bouton 📋 et appui long, y compris sur tes messages) ; ni modifier, ni régénérer, ni supprimer | Copier comblé |
 | **Rendu Markdown** | Streaming Markdown, blocs de code copiables | Bulles de texte simple. Les réponses sont nettoyées pour l'oral (`sanitizeForSpeech`) et contiennent donc peu de Markdown : **peu utile pour Orbe**, on ne le fait pas | Écart assumé |
@@ -80,7 +80,7 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 
 | # | Amélioration | État |
 |---|---|---|
-| 1 | Résumé des outils visible sous la réponse | **Fait** (`ConversationChatAdapter.toolsSummary`) ; reste à **persister** les cartes de raisonnement au-delà du redémarrage |
+| 1 | Résumé des outils visible sous la réponse, cartes de raisonnement conservées | **Fait** (`ConversationChatAdapter.toolsSummary` ; `ReasoningStore` écrit les 48 dernières cartes dans `files/diag/reasoning_cards.json` ; paramètres et résultats des outils sensibles non conservés) |
 | 2 | Copier une réponse | **Fait** (📋 et appui long). Rendu Markdown écarté (réponses nettoyées pour l'oral) |
 | 3 | **Prérequis par outil** (« autorise l'accès aux photos », « accès données d'usage ») avec un appui qui ouvre le bon réglage | À faire, 1-2 j : les erreurs d'outil renvoient déjà ces messages au modèle, l'utilisateur ne les voit qu'au moment de l'échec |
 | 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md | À faire, 0,5 j : seul le compteur est visible |

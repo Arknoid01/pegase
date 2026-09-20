@@ -278,6 +278,80 @@ public final class ReasoningCard {
         return o;
     }
 
+    /**
+     * Forme complète pour la persistance locale (redémarrage). Les paramètres et résultats des
+     * outils sensibles ne sont pas conservés (voir {@link com.pegasuscorp.orbe.tools.SensitiveTools}).
+     */
+    public JSONObject toStoreJson() {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("intent", intentDetected);
+            o.put("context_chunks", contextChunks);
+            o.put("backend", backend);
+            o.put("latency_ms", latencyMs);
+            o.put("prompt_chars", promptChars);
+            o.put("halluc", potentialHallucination);
+            o.put("halluc_reason", hallucinationReason);
+            o.put("tavily", tavilyQuery);
+            o.put("session", sessionUsed);
+            JSONArray tools = new JSONArray();
+            for (ToolStep s : toolsUsed) {
+                boolean hide = com.pegasuscorp.orbe.tools.SensitiveTools.isSensitive(s.name);
+                tools.put(new JSONObject().put("name", s.name).put("ok", s.ok)
+                        .put("ms", s.latencyMs)
+                        .put("params", hide ? "" : s.paramsPreview)
+                        .put("result", hide ? "" : s.resultPreview));
+            }
+            o.put("tools", tools);
+            o.put("memories", strings(memoriesUsed));
+            o.put("contexts", strings(contextsLoaded));
+            o.put("atlas", strings(atlasUsed));
+            o.put("profile", strings(profileUsed));
+            o.put("web", strings(webSources));
+        } catch (Exception ignored) {
+        }
+        return o;
+    }
+
+    /** @return la carte relue depuis {@link #toStoreJson()}, ou null si illisible */
+    public static ReasoningCard fromStoreJson(JSONObject o) {
+        if (o == null) return null;
+        try {
+            List<ToolStep> steps = new ArrayList<>();
+            JSONArray tools = o.optJSONArray("tools");
+            if (tools != null) {
+                for (int i = 0; i < tools.length(); i++) {
+                    JSONObject t = tools.getJSONObject(i);
+                    steps.add(new ToolStep(t.optString("name"), t.optString("params"),
+                            t.optString("result"), t.optLong("ms"), t.optBoolean("ok")));
+                }
+            }
+            return new ReasoningCard(o.optString("intent", "Conversation"), steps,
+                    o.optInt("context_chunks"), list(o, "memories"), list(o, "contexts"),
+                    list(o, "atlas"), list(o, "profile"), o.optString("session"),
+                    list(o, "web"), o.optString("tavily"), o.optString("backend"),
+                    o.optLong("latency_ms"), o.optInt("prompt_chars"), false,
+                    o.optBoolean("halluc"), o.optString("halluc_reason"));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static JSONArray strings(List<String> values) {
+        JSONArray arr = new JSONArray();
+        for (String v : values) arr.put(clip(v, 200));
+        return arr;
+    }
+
+    private static List<String> list(JSONObject o, String key) {
+        List<String> out = new ArrayList<>();
+        JSONArray arr = o.optJSONArray(key);
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) out.add(arr.optString(i));
+        }
+        return out;
+    }
+
     private int countToolsOk() {
         int n = 0;
         for (ToolStep s : toolsUsed) {
