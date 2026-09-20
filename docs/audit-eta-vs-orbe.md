@@ -54,7 +54,7 @@ Lecture : les deux bases sont de taille comparable. Orbe a plus de tests en nomb
 | Sujet | Eta | Orbe (état actuel) | Écart |
 |---|---|---|---|
 | Machine à états d'un run | `RUNNING → COMMITTING → TERMINAL`, un seul gagnant pour le résultat final [vérifié, doc] | Générations (`agenticOperationGeneration`) qui invalident les callbacks tardifs [vérifié] | Orbe fonctionne, moins formel |
-| Retry modèle | Transactionnel : jusqu'à 3 retries, backoff 2 s / 4 s / 8 s, l'historique n'est validé qu'après réponse complète, arrêt si un outil hébergé a démarré [vérifié, `AgentModelRetry.kt`] | Cas ciblés : 429 avec `Retry-After`, 413 avec réduction de prompt, ré-essai avec outils élargis, rotation de fournisseur [vérifié] | Pas de politique générale d'erreurs transitoires (5xx, réseau) constatée **[à confirmer]** |
+| Retry modèle | Transactionnel : jusqu'à 3 retries, backoff 2 s / 4 s / 8 s, l'historique n'est validé qu'après réponse complète, arrêt si un outil hébergé a démarré [vérifié, `AgentModelRetry.kt`] | Rotation sur **toute** erreur (429, timeout, 5xx, réseau) vers le modèle puis le fournisseur suivant, avec suivi de santé ; cas ciblés : 429 avec `Retry-After`, 413 avec réduction de prompt, ré-essai avec outils élargis [vérifié, `MultiProviderBackend`] | Approche différente et plus robuste tant que plusieurs fournisseurs sont configurés. Seul manque : si toute la chaîne échoue d'un coup (coupure réseau), aucune nouvelle tentative après attente |
 | Validation des arguments | JSON Schema complet, `$ref`, `oneOf`… (348 lignes) | `ToolCallValidator` (227 lignes), schémas explicites ou déduits | Comparable ; Orbe déduit encore certains schémas de la ligne de description |
 | Appels tronqués | Refusés, erreur structurée renvoyée | Idem depuis `59829e6` | Équivalent |
 | Lots d'outils | Séquentiels, résultats groupés | Séquentiels sans aller-retour LLM (`ce60ed3`) | Équivalent |
@@ -126,7 +126,7 @@ Lecture : les deux bases sont de taille comparable. Orbe a plus de tests en nomb
 |---|---|---|
 | Q1 : ramener les 10 descriptions les plus lourdes sous 400 caractères ; déplacer les règles vers le prompt système, chargées seulement à l'intention concernée | 1 j | Libère ≈ 1 000 tokens en usage quotidien |
 | S5 : liste d'outils sensibles à la manière d'Eta (notifications, sms, contacts, clipboard, app_usage, read_image, web_read, mcp_*) : jamais dans `recent_turns`, ni dans la trace, ni dans la mémoire durable | 1 j | Politique unique et testable |
-| Politique générale de retry (5xx, timeouts, coupure réseau) avec backoff 2 s / 4 s / 8 s, à valider d'abord dans `MultiProviderBackend` | 1 j | Moins d'échecs sur réseau mobile |
+| ~~Politique générale de retry~~ : la rotation de fournisseurs couvre déjà les erreurs transitoires. Reste à envisager : une nouvelle tentative de toute la chaîne après 1,5 s quand tout échoue d'un coup (coupure réseau) | 0,5 j | Moins d'échecs sur réseau mobile instable |
 | S3 : retirer `BROWSABLE` des deux liens profonds ou exiger une confirmation explicite | 2 h | Ferme le déclenchement depuis une page web |
 
 ### Priorité 3 : plus lourd
@@ -148,3 +148,21 @@ Le runtime en processus séparé (coût d'IPC, complexité), les hooks par ROM, 
 - Les 441 exceptions avalées ont été comptées par motif textuel ; toutes ne sont pas des erreurs (certaines sont légitimes : `NumberFormatException` attendue, etc.).
 - La taille des schémas d'outils est celle envoyée par `OpenAiToolSchemaBuilder` ; les fournisseurs tokenisent différemment (estimation à 4 caractères par token, comme le fait `PromptBudget`).
 - Je n'ai pas audité : le module `desktop/`, les scripts de sync, le code natif (llama.cpp, ONNX), ni les permissions une à une.
+
+
+---
+
+## 8. Statut des actions (mis à jour le 2026-09-20)
+
+| Action | État | Commit |
+|---|---|---|
+| S1 sauvegarde (`allowBackup=false`) | fait | `27bfb04` |
+| S1 bis clés API et jeton MCP chiffrés (`SecurePrefs`, migration) | fait | `79eae8f`, `0392ef5` |
+| S2 `DiagSuiteReceiver` réservé au manifest debug | fait | `647cd55` |
+| S4 trace censurée par défaut en release | fait | `d139d5a` |
+| Q3 échecs d'écriture tracés (8 chemins) | fait | `cfea027` |
+| Q1 descriptions d'outils raccourcies (−2,1 Ko sur 25,3 ; quotidien −0,8 Ko) | fait, gain limité : c'est le *nombre* d'outils qui pèse | `fd2e5a1` |
+| S5 politique d'outils sensibles (trace, historique, Drive, mémoire) | fait | `e7dff0b` |
+| S3 liens `pegase://pc-shell` sans `BROWSABLE` | fait, **à vérifier** avec la notification ntfy de mise à jour Arch | `fbd86ed` |
+| Retry général | non nécessaire dans l'état (rotation), voir §3 | — |
+| Q2 découpage de `PegaseSession`, R8, `targetSdk`, reprise après arrêt du processus | non fait | — |
