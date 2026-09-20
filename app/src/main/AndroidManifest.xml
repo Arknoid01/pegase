@@ -319,6 +319,12 @@
             android:theme="@style/Theme.Orbe" />
 
         <activity
+            android:name=".sync.DriveSyncSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".pcshell.PcShellNtfyActionActivity"
             android:exported="true"
             android:excludeFromRecents="true"

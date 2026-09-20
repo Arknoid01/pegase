@@ -79,6 +79,16 @@ public final class PegaseFileSystem {
         return new File(routingDir(), "examples.json");
     }
 
+    /** {@code files/notepad/} */
+    public File notepadDir() {
+        return dir("notepad");
+    }
+
+    /** {@code files/notepad/items.json} */
+    public File notepadItemsJson() {
+        return new File(notepadDir(), "items.json");
+    }
+
     /** {@code files/orion/} */
     public File orionDir() {
         return dir("orion");
@@ -107,5 +117,30 @@ public final class PegaseFileSystem {
     /** {@code files/pc-shell/executions.jsonl} */
     public File pcShellExecutionsJsonl() {
         return new File(pcShellDir(), "executions.jsonl");
+    }
+
+    /** {@code files/sync/} — journal et état de sync offline-first. */
+    public File syncDir() {
+        return dir("sync");
+    }
+
+    /** {@code files/sync/journal.jsonl} */
+    public File syncJournalJsonl() {
+        return new File(syncDir(), "journal.jsonl");
+    }
+
+    /** {@code files/sync/sync_state.json} */
+    public File syncStateJson() {
+        return new File(syncDir(), "sync_state.json");
+    }
+
+    /** {@code files/sync/device.json} */
+    public File syncDeviceJson() {
+        return new File(syncDir(), "device.json");
+    }
+
+    /** {@code files/sync/drive_state.json} */
+    public File driveSyncStateJson() {
+        return new File(syncDir(), "drive_state.json");
     }
 }

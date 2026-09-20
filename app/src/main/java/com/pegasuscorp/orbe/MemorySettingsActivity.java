@@ -110,7 +110,9 @@ public class MemorySettingsActivity extends AppCompatActivity {
         });
 
         setContentView(root);
-        selectTab(TAB_MEMORIES);
+        boolean openSessions = getIntent() != null
+                && getIntent().getBooleanExtra("open_sessions", false);
+        selectTab(openSessions ? TAB_SESSIONS : TAB_MEMORIES);
     }
 
     private void selectTab(int tab) {

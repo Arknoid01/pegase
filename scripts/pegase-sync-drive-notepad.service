@@ -1,0 +1,7 @@
+[Unit]
+Description=Pégase — sync bloc-notes depuis Google Drive
+
+[Service]
+Type=oneshot
+Environment=PEGASE_BUILD_USER=Pegase
+ExecStart=/usr/local/bin/pegase-sync-drive-notepad.sh

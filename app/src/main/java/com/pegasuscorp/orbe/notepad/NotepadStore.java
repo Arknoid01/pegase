@@ -2,6 +2,10 @@ package com.pegasuscorp.orbe.notepad;
 
 import android.content.Context;
 
+import com.pegasuscorp.orbe.fs.PegaseFileSystem;
+import com.pegasuscorp.orbe.sync.DriveSyncEngine;
+import com.pegasuscorp.orbe.sync.SyncJournal;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -34,9 +38,12 @@ public final class NotepadStore {
         public final long reminderAt;
         public final boolean done;
         public final String projetTag;
+        /** Horodatage LWW pour la sync (ms epoch). */
+        public final long updatedAtMs;
 
         Item(String id, String text, String created, String dueDate,
-                int priority, long reminderAt, boolean done, String projetTag) {
+                int priority, long reminderAt, boolean done, String projetTag,
+                long updatedAtMs) {
             this.id = id;
             this.text = text;
             this.created = created;
@@ -45,6 +52,7 @@ public final class NotepadStore {
             this.reminderAt = reminderAt;
             this.done = done;
             this.projetTag = projetTag == null ? "" : projetTag;
+            this.updatedAtMs = updatedAtMs;
         }
 
         static Item fromJson(JSONObject o) {
@@ -56,7 +64,8 @@ public final class NotepadStore {
                     o.optInt("priority", 0),
                     o.optLong("reminderAt", 0),
                     o.optBoolean("done", false),
-                    o.optString("projetTag", ""));
+                    o.optString("projetTag", ""),
+                    o.optLong("updatedAtMs", 0));
         }
 
         JSONObject toJson() throws Exception {
@@ -68,7 +77,8 @@ public final class NotepadStore {
                     .put("priority", priority)
                     .put("reminderAt", reminderAt)
                     .put("done", done)
-                    .put("projetTag", projetTag);
+                    .put("projetTag", projetTag)
+                    .put("updatedAtMs", updatedAtMs);
         }
 
         public boolean hasUpcomingReminder() {
@@ -83,12 +93,11 @@ public final class NotepadStore {
     private final Context appContext;
     private final File storeFile;
     private final List<Item> items = new ArrayList<>();
+    private boolean applyingRemote;
 
     private NotepadStore(Context context) {
         appContext = context.getApplicationContext();
-        File dir = new File(appContext.getFilesDir(), "notepad");
-        if (!dir.exists()) dir.mkdirs();
-        storeFile = new File(dir, "items.json");
+        storeFile = PegaseFileSystem.get(appContext).notepadItemsJson();
         load();
     }
 
@@ -183,11 +192,13 @@ public final class NotepadStore {
         }
         String tag = projetTag == null ? "" : projetTag.trim();
         String id = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
         Item item = new Item(id, cleaned, NotepadDateHelper.today(),
-                due, 0, rem, false, tag);
+                due, 0, rem, false, tag, now);
         items.add(item);
         trimIfNeeded();
         save();
+        journalUpsert(item);
         if (rem > System.currentTimeMillis()) {
             NotepadReminderScheduler.schedule(appContext, id, cleaned, rem);
         }
@@ -206,9 +217,10 @@ public final class NotepadStore {
         for (Item item : items) {
             if (item.id.equals(id)) {
                 NotepadReminderScheduler.cancel(appContext, item.id);
+                long now = System.currentTimeMillis();
                 Item updated = new Item(item.id, item.text, item.created,
                         dueDate == null ? "" : dueDate, item.priority,
-                        reminderAt, item.done, item.projetTag);
+                        reminderAt, item.done, item.projetTag, now);
                 next.add(updated);
                 if (reminderAt > System.currentTimeMillis() && !item.done) {
                     NotepadReminderScheduler.schedule(appContext, item.id, item.text, reminderAt);
@@ -222,6 +234,12 @@ public final class NotepadStore {
             items.clear();
             items.addAll(next);
             save();
+            for (Item item : items) {
+                if (item.id.equals(id)) {
+                    journalUpsert(item);
+                    break;
+                }
+            }
         }
         return changed;
     }
@@ -232,8 +250,10 @@ public final class NotepadStore {
         int removed = 0;
         for (int i = items.size() - 1; i >= 0; i--) {
             if (fold(items.get(i).text).contains(q)) {
-                NotepadReminderScheduler.cancel(appContext, items.get(i).id);
+                String removedId = items.get(i).id;
+                NotepadReminderScheduler.cancel(appContext, removedId);
                 items.remove(i);
+                journalDelete(removedId);
                 removed++;
             }
         }
@@ -245,11 +265,14 @@ public final class NotepadStore {
         if (id == null || id.isEmpty()) return false;
         boolean changed = false;
         List<Item> next = new ArrayList<>();
+        Item changedItem = null;
         for (Item item : items) {
             if (item.id.equals(id) && !item.done) {
                 NotepadReminderScheduler.cancel(appContext, item.id);
-                next.add(new Item(item.id, item.text, item.created, item.dueDate,
-                        item.priority, item.reminderAt, true, item.projetTag));
+                long now = System.currentTimeMillis();
+                changedItem = new Item(item.id, item.text, item.created, item.dueDate,
+                        item.priority, item.reminderAt, true, item.projetTag, now);
+                next.add(changedItem);
                 changed = true;
             } else {
                 next.add(item);
@@ -259,6 +282,7 @@ public final class NotepadStore {
             items.clear();
             items.addAll(next);
             save();
+            if (changedItem != null) journalUpsert(changedItem);
         }
         return changed;
     }
@@ -270,6 +294,7 @@ public final class NotepadStore {
                 NotepadReminderScheduler.cancel(appContext, items.get(i).id);
                 items.remove(i);
                 save();
+                journalDelete(id);
                 return true;
             }
         }
@@ -281,11 +306,15 @@ public final class NotepadStore {
         if (q.isEmpty()) return false;
         boolean changed = false;
         List<Item> next = new ArrayList<>();
+        List<Item> changedItems = new ArrayList<>();
         for (Item item : items) {
             if (!item.done && fold(item.text).contains(q)) {
                 NotepadReminderScheduler.cancel(appContext, item.id);
-                next.add(new Item(item.id, item.text, item.created, item.dueDate,
-                        item.priority, item.reminderAt, true, item.projetTag));
+                long now = System.currentTimeMillis();
+                Item doneItem = new Item(item.id, item.text, item.created, item.dueDate,
+                        item.priority, item.reminderAt, true, item.projetTag, now);
+                next.add(doneItem);
+                changedItems.add(doneItem);
                 changed = true;
             } else {
                 next.add(item);
@@ -295,6 +324,7 @@ public final class NotepadStore {
             items.clear();
             items.addAll(next);
             save();
+            for (Item item : changedItems) journalUpsert(item);
         }
         return changed;
     }
@@ -303,12 +333,109 @@ public final class NotepadStore {
         boolean changed = false;
         for (int i = items.size() - 1; i >= 0; i--) {
             if (!items.get(i).done) {
-                NotepadReminderScheduler.cancel(appContext, items.get(i).id);
+                String removedId = items.get(i).id;
+                NotepadReminderScheduler.cancel(appContext, removedId);
                 items.remove(i);
+                journalDelete(removedId);
                 changed = true;
             }
         }
         if (changed) save();
+    }
+
+    /** Applique un upsert distant (LWW sur {@code tsMs}). */
+    public synchronized boolean applyRemoteUpsert(JSONObject payload, long tsMs) {
+        if (payload == null || tsMs <= 0) return false;
+        Item remote = Item.fromJson(payload);
+        if (remote.id.isEmpty() || remote.text.isEmpty()) return false;
+        Item local = findById(remote.id);
+        if (local != null && local.updatedAtMs > tsMs) return false;
+        applyingRemote = true;
+        try {
+            long version = Math.max(tsMs, remote.updatedAtMs);
+            Item merged = new Item(
+                    remote.id,
+                    remote.text,
+                    remote.created.isEmpty() ? NotepadDateHelper.today() : remote.created,
+                    remote.dueDate,
+                    remote.priority,
+                    remote.reminderAt,
+                    remote.done,
+                    remote.projetTag,
+                    version);
+            replaceOrAdd(merged);
+            refreshReminder(merged);
+            save();
+            return true;
+        } finally {
+            applyingRemote = false;
+        }
+    }
+
+    /** Applique une suppression distante (LWW sur {@code tsMs}). */
+    public synchronized boolean applyRemoteDelete(String id, long tsMs) {
+        if (id == null || id.isEmpty() || tsMs <= 0) return false;
+        Item local = findById(id);
+        if (local != null && local.updatedAtMs > tsMs) return false;
+        if (local == null) return false;
+        applyingRemote = true;
+        try {
+            NotepadReminderScheduler.cancel(appContext, id);
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).id.equals(id)) {
+                    items.remove(i);
+                    save();
+                    return true;
+                }
+            }
+            return false;
+        } finally {
+            applyingRemote = false;
+        }
+    }
+
+    private Item findById(String id) {
+        if (id == null || id.isEmpty()) return null;
+        for (Item item : items) {
+            if (id.equals(item.id)) return item;
+        }
+        return null;
+    }
+
+    private void replaceOrAdd(Item item) {
+        for (int i = 0; i < items.size(); i++) {
+            if (items.get(i).id.equals(item.id)) {
+                items.set(i, item);
+                return;
+            }
+        }
+        items.add(item);
+        trimIfNeeded();
+    }
+
+    private void refreshReminder(Item item) {
+        NotepadReminderScheduler.cancel(appContext, item.id);
+        if (!item.done && item.reminderAt > System.currentTimeMillis()) {
+            NotepadReminderScheduler.schedule(appContext, item.id, item.text, item.reminderAt);
+        }
+    }
+
+    private void journalUpsert(Item item) {
+        if (applyingRemote) return;
+        try {
+            SyncJournal.get(appContext).appendNotepadUpsert(item.id, item.toJson());
+            DriveSyncEngine.scheduleAfterChange(appContext);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void journalDelete(String id) {
+        if (applyingRemote) return;
+        try {
+            SyncJournal.get(appContext).appendNotepadDelete(id);
+            DriveSyncEngine.scheduleAfterChange(appContext);
+        } catch (Exception ignored) {
+        }
     }
 
     /** Résumé oral — portée proche, pas un dump technique. */

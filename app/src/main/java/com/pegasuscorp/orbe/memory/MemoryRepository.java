@@ -8,6 +8,8 @@ import com.pegasuscorp.orbe.chat.ChatBackend;
 import com.pegasuscorp.orbe.rag.EmbeddingEngine;
 import com.pegasuscorp.orbe.rag.MemoryRagMigrator;
 import com.pegasuscorp.orbe.rag.VectorStore;
+import com.pegasuscorp.orbe.sync.DriveSyncEngine;
+import com.pegasuscorp.orbe.sync.SyncJournal;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -39,6 +41,7 @@ public class MemoryRepository implements MemoryStore {
     private static final String TAG = "MemoryRepository";
     private static final String PREFS = "memory_repository";
     private static final String KEY_LAST_DECAY_MS = "last_decay_ms";
+    private static final String KEY_CONVERSATION_UPDATED_MS = "conversation_updated_ms";
     private static final long DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000L;
     private static final int MAX_TURNS = ConversationHistorySanitizer.MAX_STORED_TURNS;
     private static final int MAX_SESSION_SUMMARIES = 12;
@@ -63,6 +66,9 @@ public class MemoryRepository implements MemoryStore {
     private List<ChatBackend.Turn> recentTurns = new ArrayList<>();
 
     private volatile VectorStore vectorStore;
+
+    private boolean applyingRemote;
+    private boolean suppressJournal;
 
     private MemoryRepository(Context context) {
         appContext = context.getApplicationContext();
@@ -373,9 +379,12 @@ public class MemoryRepository implements MemoryStore {
         for (MemoryEntry existing : permanentMemories) {
             MemoryGraph.linkSharedEntities(entry, existing);
         }
+        entry.ensureSyncFields();
+        entry.touchUpdatedAt();
         permanentMemories.add(entry);
         savePermanent();
         indexMemoryAsync(entry);
+        journalMemoryUpsert(entry);
     }
 
     /**
@@ -396,8 +405,10 @@ public class MemoryRepository implements MemoryStore {
         live.invalidAtMs = System.currentTimeMillis();
         live.invalidReason = reason != null ? reason : "";
         live.supersededByKey = supersededByKey != null ? supersededByKey : "";
+        live.touchUpdatedAt();
         savePermanent();
         deleteVectorAsync(live);
+        journalMemoryUpsert(live);
     }
 
     /**
@@ -421,6 +432,7 @@ public class MemoryRepository implements MemoryStore {
         live.invalidAtMs = 0L;
         live.invalidReason = "";
         live.touchRetrieval(System.currentTimeMillis());
+        live.touchUpdatedAt();
         MemoryLinker.autoLink(appContext, live);
         for (int i = 0; i < permanentMemories.size(); i++) {
             if (i == index) continue;
@@ -438,6 +450,109 @@ public class MemoryRepository implements MemoryStore {
         } else {
             reindexAfterContentChangeAsync(oldKey, live);
         }
+        journalMemoryUpsert(live);
+    }
+
+    /** Applique un upsert distant (LWW sur {@code tsMs}). */
+    public synchronized boolean applyRemoteUpsert(JSONObject payload, long tsMs) {
+        if (payload == null || tsMs <= 0) return false;
+        MemoryEntry remote;
+        try {
+            remote = MemoryEntry.fromJson(payload);
+        } catch (Exception e) {
+            return false;
+        }
+        if (remote.id == null || remote.id.isEmpty()) return false;
+        MemoryEntry local = findById(remote.id);
+        if (local != null && local.updatedAtMs > tsMs) return false;
+        String oldKey = local != null ? local.memoryKey() : null;
+        applyingRemote = true;
+        try {
+            long version = Math.max(tsMs, remote.updatedAtMs);
+            remote.updatedAtMs = version;
+            replaceOrAdd(remote);
+            MemoryLinker.autoLink(appContext, remote);
+            for (MemoryEntry other : permanentMemories) {
+                if (other != remote) MemoryGraph.linkSharedEntities(remote, other);
+            }
+            savePermanent();
+            if (remote.isInvalid()) {
+                deleteVectorAsync(remote);
+            } else {
+                if (oldKey != null && !oldKey.equals(remote.memoryKey())) {
+                    deleteVectorByKeyAsync(oldKey);
+                }
+                indexMemoryAsync(remote);
+            }
+            return true;
+        } finally {
+            applyingRemote = false;
+        }
+    }
+
+    /** Applique une suppression distante (LWW sur {@code tsMs}). */
+    public synchronized boolean applyRemoteDelete(String id, long tsMs) {
+        if (id == null || id.isEmpty() || tsMs <= 0) return false;
+        MemoryEntry local = findById(id);
+        if (local != null && local.updatedAtMs > tsMs) return false;
+        if (local == null) return false;
+        applyingRemote = true;
+        try {
+            permanentMemories.remove(local);
+            savePermanent();
+            deleteVectorAsync(local);
+            return true;
+        } finally {
+            applyingRemote = false;
+        }
+    }
+
+    /** Applique l'historique chat distant (LWW sur {@code tsMs}). */
+    public synchronized boolean applyRemoteConversation(JSONObject payload, long tsMs) {
+        if (payload == null || tsMs <= 0) return false;
+        long localTs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_CONVERSATION_UPDATED_MS, 0L);
+        if (localTs > 0 && tsMs <= localTs) return false;
+        JSONArray turnsArr = payload.optJSONArray("turns");
+        if (turnsArr == null) return false;
+        List<ChatBackend.Turn> parsed = new ArrayList<>();
+        for (int i = 0; i < turnsArr.length(); i++) {
+            JSONObject o = turnsArr.optJSONObject(i);
+            if (o == null) continue;
+            String text = ConversationHistorySanitizer.forStorage(
+                    o.optBoolean("fromUser"), o.optString("text", ""));
+            if (text.isEmpty()) continue;
+            parsed.add(new ChatBackend.Turn(o.optBoolean("fromUser"), text));
+        }
+        applyingRemote = true;
+        try {
+            recentTurns = ConversationHistorySanitizer.normalizeKeepingTrailingUser(parsed);
+            saveTurns();
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putLong(KEY_CONVERSATION_UPDATED_MS, tsMs).apply();
+            notifyTurnsChanged();
+            return true;
+        } finally {
+            applyingRemote = false;
+        }
+    }
+
+    private MemoryEntry findById(String id) {
+        if (id == null || id.isEmpty()) return null;
+        for (MemoryEntry entry : permanentMemories) {
+            if (id.equals(entry.id)) return entry;
+        }
+        return null;
+    }
+
+    private void replaceOrAdd(MemoryEntry entry) {
+        for (int i = 0; i < permanentMemories.size(); i++) {
+            if (permanentMemories.get(i).id.equals(entry.id)) {
+                permanentMemories.set(i, entry);
+                return;
+            }
+        }
+        permanentMemories.add(entry);
     }
 
     int indexOfMemory(MemoryEntry entry) {
@@ -537,9 +652,11 @@ public class MemoryRepository implements MemoryStore {
             MemoryGraph.linkSharedEntities(entry, permanentMemories.get(i));
         }
         permanentMemories.set(index, entry);
+        entry.touchUpdatedAt();
         savePermanent();
         deleteVectorAsync(old);
         indexMemoryAsync(entry);
+        journalMemoryUpsert(entry);
     }
 
     public void removePermanentMemoryAt(int index) {
@@ -547,6 +664,7 @@ public class MemoryRepository implements MemoryStore {
         MemoryEntry removed = permanentMemories.remove(index);
         savePermanent();
         deleteVectorAsync(removed);
+        journalMemoryDelete(removed.id);
     }
 
     public List<SessionSummary> getAllSessionSummaries() {
@@ -570,7 +688,10 @@ public class MemoryRepository implements MemoryStore {
         });
         if (!removed.isEmpty()) {
             savePermanent();
-            for (MemoryEntry e : removed) deleteVectorAsync(e);
+            for (MemoryEntry e : removed) {
+                deleteVectorAsync(e);
+                journalMemoryDelete(e.id);
+            }
         }
         return removed.size();
     }
@@ -584,15 +705,21 @@ public class MemoryRepository implements MemoryStore {
         int count = 0;
         long now = System.currentTimeMillis();
         String why = reason != null ? reason : "";
+        List<MemoryEntry> changed = new ArrayList<>();
         for (MemoryEntry e : permanentMemories) {
             if (e == null || e.isInvalid() || e.content == null) continue;
             if (!e.content.toLowerCase(Locale.ROOT).contains(q)) continue;
             e.invalidAtMs = now;
             e.invalidReason = why;
+            e.touchUpdatedAt();
             deleteVectorAsync(e);
+            changed.add(e);
             count++;
         }
-        if (count > 0) savePermanent();
+        if (count > 0) {
+            savePermanent();
+            for (MemoryEntry e : changed) journalMemoryUpsert(e);
+        }
         return count;
     }
 
@@ -603,8 +730,10 @@ public class MemoryRepository implements MemoryStore {
             if (e.content != null && e.content.contains(search)) {
                 String oldKey = VectorStore.keyFor(e.category, e.content);
                 e.content = e.content.replace(search, replacement);
+                e.touchUpdatedAt();
                 count++;
                 reindexAfterContentChangeAsync(oldKey, e);
+                journalMemoryUpsert(e);
             }
         }
         if (count > 0) savePermanent();
@@ -676,7 +805,11 @@ public class MemoryRepository implements MemoryStore {
 
     private void deleteVectorAsync(MemoryEntry entry) {
         if (entry == null) return;
-        String key = VectorStore.keyFor(entry.category, entry.content);
+        deleteVectorByKeyAsync(VectorStore.keyFor(entry.category, entry.content));
+    }
+
+    private void deleteVectorByKeyAsync(String key) {
+        if (key == null || key.isEmpty()) return;
         if (!autoMigrate) {
             try {
                 vectors().delete(key);
@@ -692,6 +825,25 @@ public class MemoryRepository implements MemoryStore {
                 Log.w(TAG, "Delete vector échoué", e);
             }
         });
+    }
+
+    private void journalMemoryUpsert(MemoryEntry entry) {
+        if (applyingRemote || suppressJournal || entry == null) return;
+        entry.ensureSyncFields();
+        try {
+            SyncJournal.get(appContext).appendMemoryUpsert(entry.id, entry.toJson());
+            DriveSyncEngine.scheduleAfterChange(appContext);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void journalMemoryDelete(String id) {
+        if (applyingRemote || suppressJournal || id == null || id.isEmpty()) return;
+        try {
+            SyncJournal.get(appContext).appendMemoryDelete(id);
+            DriveSyncEngine.scheduleAfterChange(appContext);
+        } catch (Exception ignored) {
+        }
     }
 
     private void reindexAfterContentChangeAsync(String oldKey, MemoryEntry entry) {
@@ -798,9 +950,22 @@ public class MemoryRepository implements MemoryStore {
     private List<MemoryEntry> readPermanent() {
         JSONArray arr = readJsonArray(permanentFile);
         List<MemoryEntry> out = new ArrayList<>();
+        boolean migrated = false;
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.optJSONObject(i);
-            if (o != null) out.add(MemoryEntry.fromJson(o));
+            if (o == null) continue;
+            boolean hadId = o.has("id") && !o.optString("id", "").isEmpty();
+            MemoryEntry entry = MemoryEntry.fromJson(o);
+            if (!hadId) migrated = true;
+            out.add(entry);
+        }
+        if (migrated && !out.isEmpty()) {
+            suppressJournal = true;
+            try {
+                writePermanentEntries(out);
+            } finally {
+                suppressJournal = false;
+            }
         }
         return out;
     }
@@ -827,7 +992,11 @@ public class MemoryRepository implements MemoryStore {
     }
 
     private void savePermanent() {
-        writeJsonArray(permanentFile, entriesToJson(permanentMemories));
+        writePermanentEntries(permanentMemories);
+    }
+
+    private void writePermanentEntries(List<MemoryEntry> entries) {
+        writeJsonArray(permanentFile, entriesToJson(entries));
     }
 
     private void saveSessions() {
@@ -850,6 +1019,22 @@ public class MemoryRepository implements MemoryStore {
             } catch (Exception ignored) {}
         }
         writeJsonArray(turnsFile, arr);
+        appendConversationJournal(arr);
+    }
+
+    private void appendConversationJournal(JSONArray turns) {
+        if (applyingRemote || suppressJournal) return;
+        try {
+            long now = System.currentTimeMillis();
+            JSONObject payload = new JSONObject()
+                    .put("id", "recent")
+                    .put("updatedAtMs", now)
+                    .put("turns", turns);
+            appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putLong(KEY_CONVERSATION_UPDATED_MS, now).apply();
+            SyncJournal.get(appContext).appendConversationUpsert("recent", payload);
+            DriveSyncEngine.scheduleAfterChange(appContext);
+        } catch (Exception ignored) {}
     }
 
     private JSONArray entriesToJson(List<MemoryEntry> entries) {

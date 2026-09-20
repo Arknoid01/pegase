@@ -114,6 +114,7 @@ configurations.configureEach { config ->
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
     implementation 'androidx.biometric:biometric:1.1.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    implementation 'androidx.documentfile:documentfile:1.0.1'
     testImplementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     // --- PHASE 2 (assistant LLM embarque, quand tu voudras) ---

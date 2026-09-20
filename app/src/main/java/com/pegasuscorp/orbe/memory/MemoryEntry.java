@@ -3,9 +3,11 @@ package com.pegasuscorp.orbe.memory;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Souvenir permanent (profil, projets, préférences…).
@@ -44,6 +46,10 @@ public class MemoryEntry {
     public String supersededByKey;
     /** Contenu avant le dernier UPDATE (chronologie courte). */
     public String previousContent;
+    /** Identifiant stable pour la sync (UUID). */
+    public String id;
+    /** Horodatage LWW pour la sync offline-first. */
+    public long updatedAtMs;
 
     public MemoryEntry(String category, String content, double importance, String createdAt) {
         this(category, content, importance, createdAt, SOURCE_USER);
@@ -60,6 +66,8 @@ public class MemoryEntry {
         long now = System.currentTimeMillis();
         this.lastUsedAtMs = now;
         this.importanceAtLastUse = importance;
+        this.id = UUID.randomUUID().toString();
+        this.updatedAtMs = now;
     }
 
     public boolean isFallbackSource() {
@@ -100,8 +108,33 @@ public class MemoryEntry {
         return com.pegasuscorp.orbe.rag.VectorStore.keyFor(category, content);
     }
 
+    /** Assure id + updatedAtMs (migration fichiers sans sync). */
+    public void ensureSyncFields() {
+        if (id == null || id.isEmpty()) {
+            id = stableIdFromKey(memoryKey());
+        }
+        if (updatedAtMs <= 0) {
+            updatedAtMs = lastUsedAtMs > 0 ? lastUsedAtMs : System.currentTimeMillis();
+        }
+    }
+
+    public void touchUpdatedAt() {
+        updatedAtMs = System.currentTimeMillis();
+    }
+
+    static String stableIdFromKey(String key) {
+        if (key == null || key.isEmpty()) {
+            return UUID.randomUUID().toString();
+        }
+        return UUID.nameUUIDFromBytes(("pegase-mem:" + key).getBytes(StandardCharsets.UTF_8))
+                .toString();
+    }
+
     public JSONObject toJson() throws Exception {
+        ensureSyncFields();
         JSONObject o = new JSONObject()
+                .put("id", id)
+                .put("updatedAtMs", updatedAtMs)
                 .put("category", category)
                 .put("content", content)
                 .put("importance", importance)
@@ -145,6 +178,9 @@ public class MemoryEntry {
         entry.previousContent = o.optString("previousContent", "");
         readStringList(o.optJSONArray("entityIds"), entry.entityIds);
         readStringList(o.optJSONArray("relatedMemoryKeys"), entry.relatedMemoryKeys);
+        entry.id = o.optString("id", "");
+        entry.updatedAtMs = o.optLong("updatedAtMs", 0);
+        entry.ensureSyncFields();
         return entry;
     }
 

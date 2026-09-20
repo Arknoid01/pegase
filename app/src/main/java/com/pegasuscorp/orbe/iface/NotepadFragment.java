@@ -25,7 +25,12 @@ import androidx.fragment.app.Fragment;
 
 import com.pegasuscorp.orbe.notepad.NotepadDateHelper;
 import com.pegasuscorp.orbe.notepad.NotepadStore;
+import com.pegasuscorp.orbe.sync.DriveSyncEngine;
+import com.pegasuscorp.orbe.sync.DriveSyncSettingsActivity;
+import com.pegasuscorp.orbe.sync.DriveSyncStatus;
 import com.pegasuscorp.orbe.ui.PegaseSheets;
+
+import android.content.Intent;
 
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -51,7 +56,9 @@ public class NotepadFragment extends Fragment {
 
     private PegaseInterfaceHost host;
     private LinearLayout notepadListHost;
+    private TextView syncStatusView;
     private String lastNotepadSignature = "";
+    private String lastSyncLabel = "";
     private boolean showingHistory = false;
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshTick = new Runnable() {
@@ -86,13 +93,23 @@ public class NotepadFragment extends Fragment {
         header.setPadding(0, 0, 0, dp(ctx, 8));
         root.addView(header, matchWrap());
 
+        LinearLayout titleCol = new LinearLayout(ctx);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        header.addView(titleCol, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
         TextView title = new TextView(ctx);
         title.setText("📝 Bloc-notes");
         title.setTextColor(Color.parseColor(C_CYAN));
         title.setTextSize(14);
         title.setTypeface(null, Typeface.BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        titleCol.addView(title);
+
+        syncStatusView = new TextView(ctx);
+        syncStatusView.setTextSize(11);
+        syncStatusView.setPadding(0, dp(ctx, 2), 0, 0);
+        titleCol.addView(syncStatusView);
+        updateSyncStatus(ctx);
 
         Button add = makeIconButton(ctx, "+");
         add.setOnClickListener(v -> showAddNotepadItem());
@@ -134,6 +151,7 @@ public class NotepadFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        DriveSyncEngine.scheduleIfDue(requireContext());
         refreshHandler.removeCallbacks(refreshTick);
         refreshHandler.post(refreshTick);
     }
@@ -157,9 +175,42 @@ public class NotepadFragment extends Fragment {
                 ? store.getHistoryItems()
                 : store.getNearActive();
         String signature = notepadSignature(items) + (showingHistory ? "|H" : "|N");
-        if (signature.equals(lastNotepadSignature)) return;
+        if (signature.equals(lastNotepadSignature)) {
+            updateSyncStatus(requireContext());
+            return;
+        }
         lastNotepadSignature = signature;
         populateNotepadItems(notepadListHost, store, items);
+        updateSyncStatus(requireContext());
+    }
+
+    private void updateSyncStatus(Context ctx) {
+        if (syncStatusView == null) return;
+        DriveSyncStatus status = DriveSyncStatus.current(ctx);
+        if (status.label.equals(lastSyncLabel)) return;
+        lastSyncLabel = status.label;
+        syncStatusView.setText(status.label);
+        int color;
+        switch (status.level) {
+            case OK:
+                color = Color.parseColor("#6BCB77");
+                break;
+            case ERROR:
+                color = Color.parseColor("#FF6B6B");
+                break;
+            case PENDING:
+                color = Color.parseColor("#F0C060");
+                break;
+            case NOT_CONFIGURED:
+            default:
+                color = Color.parseColor(C_MUTED);
+                break;
+        }
+        syncStatusView.setTextColor(color);
+        syncStatusView.setOnClickListener(v -> {
+            PegaseSheets.haptic(v);
+            startActivity(new Intent(ctx, DriveSyncSettingsActivity.class));
+        });
     }
 
     private static String notepadSignature(List<NotepadStore.Item> items) {
