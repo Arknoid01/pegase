@@ -191,6 +191,10 @@ public class SpeechOutput {
     }
 
     public void speak(String text, Runnable onComplete) {
+        PiperOfferBridge.maybeOffer(appContext, () -> speakInternal(text, onComplete));
+    }
+
+    private void speakInternal(String text, Runnable onComplete) {
         streamMode = false;
         streamChunksQueued = 0;
         final int session = ++sessionId;

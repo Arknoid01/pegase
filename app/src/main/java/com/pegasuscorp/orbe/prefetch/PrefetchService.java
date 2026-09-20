@@ -70,6 +70,7 @@ public final class PrefetchService {
         if (!RUNNING.compareAndSet(false, true)) return;
         try {
             Trace.init(ctx);
+            com.pegasuscorp.orbe.intentions.location.LocationLazyGate.warmForBackgroundUse(ctx);
             if (!isFirstLaunchToday(ctx)) return;
 
             // Obligatoire : rotation avant lecture DiagTool / prefetchDiag

@@ -35,10 +35,15 @@ import com.pegasuscorp.orbe.notepad.NotepadEditor;
 import com.pegasuscorp.orbe.orion.OrionChatHistory;
 import com.pegasuscorp.orbe.orion.OrionSessionArchive;
 import com.pegasuscorp.orbe.prefetch.PrefetchScheduler;
+import com.pegasuscorp.orbe.prefetch.PrefetchIdleScheduler;
+import com.pegasuscorp.orbe.session.AssistantBootstrap;
 import com.pegasuscorp.orbe.session.Channel;
+import com.pegasuscorp.orbe.session.HomeBootstrapCoordinator;
+import com.pegasuscorp.orbe.session.HomeLoadPolicy;
 import com.pegasuscorp.orbe.session.LifecycleBridge;
 import com.pegasuscorp.orbe.session.PegaseSession;
 import com.pegasuscorp.orbe.session.SessionContext;
+import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.ui.HomeAssetController;
 import com.pegasuscorp.orbe.ui.HomeLauncherActions;
 import com.pegasuscorp.orbe.ui.OrbUiController;
@@ -54,6 +59,8 @@ import com.pegasuscorp.orbe.voice.VoiceOutputHandler;
 import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 import com.pegasuscorp.orbe.voice.WakeHealthUi;
 import com.pegasuscorp.orbe.voice.PegaseVisualStateHub;
+import com.pegasuscorp.orbe.voice.PiperOfferBridge;
+import com.pegasuscorp.orbe.termux.TermuxLauncher;
 
 import java.util.concurrent.ExecutorService;
 
@@ -93,9 +100,12 @@ public class MainActivity extends AppCompatActivity
     private LifecycleBridge lifecycle;
     private HomeAssetController homeAssets;
     private HomeLauncherActions homeLaunchers;
+    private PiperOfferBridge.Offerer piperOfferer;
 
     private PegaseSession pegaseSession;
     private ConversationManager conversation;
+
+    private boolean assistantWired;
 
     private final ResponseDelivery responseDelivery = new ResponseDelivery();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -106,12 +116,15 @@ public class MainActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         Trace.init(this);
         try { PrefetchScheduler.ensureScheduled(this); } catch (Exception ignored) {}
+        try { PrefetchIdleScheduler.ensureScheduled(this); } catch (Exception ignored) {}
         try {
             com.pegasuscorp.orbe.intentions.IntentionScheduler.ensureScheduled(this);
             if (com.pegasuscorp.orbe.intentions.IntentionPrefs.isEnabled(this)) {
                 com.pegasuscorp.orbe.permissions.PermissionFlow.ensureNotifications(this);
             }
-            com.pegasuscorp.orbe.permissions.PermissionFlow.ensureLocation(this);
+            if (!com.pegasuscorp.orbe.intentions.location.LocationLazyGate.deferAtBoot(this)) {
+                com.pegasuscorp.orbe.permissions.PermissionFlow.ensureLocation(this);
+            }
         } catch (Exception ignored) {}
         try {
             com.pegasuscorp.orbe.f1companion.F1NewsScheduler.ensureScheduled(this);
@@ -195,9 +208,10 @@ public class MainActivity extends AppCompatActivity
         });
 
         setContentView(root);
-        AppListCache.warmUp(this);
         homeAssets.registerLaunchers(this);
         homeLaunchers.registerLaunchers(this);
+        piperOfferer = onReady -> homeAssets.maybeOfferPiperBeforeTts(onReady);
+        PiperOfferBridge.register(piperOfferer);
 
         ShortcutStore.seedDefaultsIfNeeded(this);
         ShortcutStore.migrateSpotifyOrbIfNeeded(this);
@@ -216,21 +230,78 @@ public class MainActivity extends AppCompatActivity
         PegaseVisualStateHub.addListener(visualPhaseListener);
         VoiceWakeClient.get().refreshWakeHealth();
 
-        inkManager = DigitalInkManager.getInstance();
-        attachInkStatusListener();
+        initLifecycleBridge();
         inkZone.setCallback(this::recognizeAndOpenDrawer);
         inkZone.setStrokeActivityListener(active -> {
             if (lifecycle != null) lifecycle.noteHomeInteraction();
         });
         chargingMonitor = new ChargingMonitor(this, chargingThread::setCharging);
 
+        if (!AssistantBootstrap.deferAssistantWire(this)
+                || AssistantBootstrap.needsWireOnColdStart(this, getIntent())) {
+            ensureAssistantWired();
+            finishAssistantColdStart();
+        }
+    }
+
+    private void initLifecycleBridge() {
+        if (lifecycle == null) {
+            lifecycle = new LifecycleBridge(this, mainHandler);
+        }
+    }
+
+    @Override
+    public void ensureAssistantWired() {
+        if (assistantWired) return;
+        assistantWired = true;
+        showAssistantWakeHint();
+
         pegaseSession = PegaseSession.get(this);
         pegaseSession.init(new SessionContext(Channel.VOICE, true));
         conversation = pegaseSession.getConversation();
 
-        homeAssets.maybeOfferPiperDownload();
-        wireVoiceAndLifecycle();
-        VoiceWakeClient.get().sync(this);
+        wireVoiceStack();
+        ChatVoiceBridge.register(this);
+    }
+
+    private void wireVoiceStack() {
+        voiceManager = ChatVoiceBridge.getSharedVoice(this);
+        voiceOutput = new VoiceOutputHandler(this, voiceManager, responseDelivery);
+        voiceInput = new VoiceInputHandler(this, voiceManager, voiceOutput, orbUi, this);
+        voiceInput.bind(pegaseSession, conversation,
+                new LocalKeywordParser(this),
+                new MemoryEditor(this),
+                new NotepadEditor(this),
+                new CorrectionsEditor(this),
+                new ContextEditor(this),
+                new SpeechRulesEditor(this));
+        voiceInput.attachVoiceHost();
+        VoiceMuteStore.syncController(this);
+        PegaseInterfaceState.setOnCloseListener(() -> {
+            if (voiceInput != null) voiceInput.resumeChatListeningIfNeeded();
+        });
+    }
+
+    private void finishAssistantColdStart() {
+        if (!HomeLoadPolicy.isLazyBootstrapEnabled(this)) {
+            VoiceWakeClient.get().sync(this);
+        } else if (getIntent() != null && getIntent().getBooleanExtra("wake_activate", false)) {
+            lifecycle.requestAssistant(HomeBootstrapCoordinator.AssistantReason.WAKE_INTENT);
+        }
+        if (voiceInput != null) {
+            voiceInput.handleWakeIntent(getIntent());
+            voiceInput.deliverPendingTranscriptIfAny(getIntent());
+        }
+    }
+
+    private void showAssistantWakeHint() {
+        if (orbView == null) return;
+        orbView.setThinking(true);
+        mainHandler.postDelayed(() -> {
+            if (orbView != null && (voiceInput == null || !voiceInput.isConversationActive())) {
+                orbView.setThinking(false);
+            }
+        }, 420);
     }
 
     private static FrameLayout.LayoutParams matchParent() {
@@ -256,33 +327,16 @@ public class MainActivity extends AppCompatActivity
                 homeLaunchers.pickAppForSlot(index);
             }
         });
-        orbView.setOnLongPress(() -> { if (voiceInput != null) voiceInput.enterChatMode(); });
-        orbView.setOnDoubleTap(this::openBureau);
+        orbView.setOnLongPress(() -> {
+            if (lifecycle != null) {
+                lifecycle.requestAssistant(HomeBootstrapCoordinator.AssistantReason.ORB_LONG_PRESS);
+            }
+            if (voiceInput != null) voiceInput.enterChatMode();
+        });
+        orbView.setOnDoubleTap(this::openLinuxTerminal);
         orbView.setOnSwipeUp(this::openAppDrawer);
         orbView.setOnTripleTap(this::openWidgetBoard);
-        orbView.setOnPhaseClick(this::openTextDiscussion);
-    }
-
-    private void wireVoiceAndLifecycle() {
-        voiceManager = ChatVoiceBridge.getSharedVoice(this);
-        voiceOutput = new VoiceOutputHandler(this, voiceManager, responseDelivery);
-        voiceInput = new VoiceInputHandler(this, voiceManager, voiceOutput, orbUi, this);
-        voiceInput.bind(pegaseSession, conversation,
-                new LocalKeywordParser(this),
-                new MemoryEditor(this),
-                new NotepadEditor(this),
-                new CorrectionsEditor(this),
-                new ContextEditor(this),
-                new SpeechRulesEditor(this));
-        lifecycle = new LifecycleBridge(this, mainHandler);
-        voiceInput.attachVoiceHost();
-        VoiceMuteStore.syncController(this);
-        PegaseInterfaceState.setOnCloseListener(() -> {
-            if (voiceInput != null) voiceInput.resumeChatListeningIfNeeded();
-        });
-        ChatVoiceBridge.register(this);
-        voiceInput.handleWakeIntent(getIntent());
-        voiceInput.deliverPendingTranscriptIfAny(getIntent());
+        orbView.setOnPhaseClick(this::openPegaseMenu);
     }
 
     // —— ChatVoiceBridge thin forwards ——
@@ -325,6 +379,7 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public boolean ensureMic() {
+        ensureAssistantWired();
         return lifecycle != null && lifecycle.ensureMic();
     }
 
@@ -423,11 +478,13 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onMicGrantedEnterChat() {
+        ensureAssistantWired();
         if (voiceInput != null) voiceInput.enterChatMode();
     }
 
     @Override
     public void onMicGrantedStartListening() {
+        ensureAssistantWired();
         if (voiceManager != null) voiceManager.startListening();
     }
 
@@ -438,8 +495,16 @@ public class MainActivity extends AppCompatActivity
         return stroke || drawer;
     }
 
+    private void ensureInkManager() {
+        if (inkManager != null) return;
+        inkManager = DigitalInkManager.getInstance();
+        attachInkStatusListener();
+        inkManager.ensureLoaded(getApplicationContext());
+    }
+
     private void recognizeAndOpenDrawer(Ink ink) {
-        inkManager.recognize(ink, new DigitalInkManager.RecognitionListener() {
+        ensureInkManager();
+        inkManager.recognize(this, ink, new DigitalInkManager.RecognitionListener() {
             @Override
             public void onRecognized(String text) {
                 if (text == null || text.isEmpty()) return;
@@ -494,9 +559,25 @@ public class MainActivity extends AppCompatActivity
         BureauActivity.open(this);
     }
 
+    private void openLinuxTerminal() {
+        TermuxLauncher.runInteractive(this, "proot-distro login ubuntu");
+    }
+
+    private void openPegaseMenu() {
+        GestureHintsStore.markDiscovered(this, GestureHintsStore.HINT_DISCUSSION);
+        if (orbUi != null) orbUi.hideGestureHintNow();
+        prepareHomeTransition();
+        if (orbView != null) orbView.collapseIfExpanded();
+        startActivity(new Intent(this, PegaseMenuActivity.class));
+        overridePendingTransition(R.anim.pegase_enter, R.anim.pegase_exit);
+    }
+
     private void openTextDiscussion() {
         GestureHintsStore.markDiscovered(this, GestureHintsStore.HINT_DISCUSSION);
         if (orbUi != null) orbUi.hideGestureHintNow();
+        if (lifecycle != null) {
+            lifecycle.requestAssistant(HomeBootstrapCoordinator.AssistantReason.TEXT_DISCUSSION);
+        }
         prepareHomeTransition();
         if (orbView != null) orbView.collapseIfExpanded();
         if (voiceInput != null) voiceInput.ensureHeavyNativesReady();
@@ -579,7 +660,7 @@ public class MainActivity extends AppCompatActivity
         inkManager.setModelStateListener((state, message) -> runOnUiThread(() -> {
             if (state == DigitalInkManager.ModelState.READY) {
                 inkStatusView.setText("");
-            } else {
+            } else if (state != DigitalInkManager.ModelState.IDLE) {
                 inkStatusView.setText(message);
                 inkStatusView.setTextColor(state == DigitalInkManager.ModelState.ERROR
                         ? Color.parseColor("#80FF6B6B")
@@ -592,15 +673,38 @@ public class MainActivity extends AppCompatActivity
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent != null && intent.getBooleanExtra("open_personalization", false)) {
+            if (drawerPanel != null) drawerPanel.openPersonalizationPanel();
+            return;
+        }
+        if (intent != null && intent.getBooleanExtra("open_app_drawer", false)) {
+            openAppDrawer();
+            return;
+        }
+        if (intent != null && intent.getBooleanExtra("open_text_discussion", false)) {
+            openTextDiscussion();
+            return;
+        }
+        if (intent != null && intent.getBooleanExtra("open_bureau", false)) {
+            openBureau();
+            return;
+        }
         if (intent != null && intent.getBooleanExtra("wake_activate", false)) {
+            if (lifecycle != null) {
+                lifecycle.requestAssistant(HomeBootstrapCoordinator.AssistantReason.WAKE_INTENT);
+            }
             if (voiceInput != null) voiceInput.handleWakeIntent(intent);
             return;
         }
-        if (intent != null && intent.getBooleanExtra("resume_chat", false)
-                && voiceInput != null && voiceInput.isConversationActive()) {
-            mainHandler.postDelayed(() -> {
-                if (voiceInput != null) voiceInput.resumeChatListeningIfNeeded();
-            }, 400);
+        if (intent != null && intent.getBooleanExtra("resume_chat", false)) {
+            if (lifecycle != null) {
+                lifecycle.requestAssistant(HomeBootstrapCoordinator.AssistantReason.CHAT_ACTIVE_RESUME);
+            }
+            if (voiceInput != null && voiceInput.isConversationActive()) {
+                mainHandler.postDelayed(() -> {
+                    if (voiceInput != null) voiceInput.resumeChatListeningIfNeeded();
+                }, 400);
+            }
         }
         if (voiceInput != null) voiceInput.deliverPendingTranscriptIfAny(intent);
     }
@@ -633,6 +737,7 @@ public class MainActivity extends AppCompatActivity
         }
         WakeHealthUi.setListener(null);
         if (lifecycle != null) lifecycle.onDestroy();
+        PiperOfferBridge.unregister(piperOfferer);
         if (homeAssets != null) homeAssets.shutdown();
         super.onDestroy();
     }

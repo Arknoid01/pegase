@@ -9,10 +9,10 @@ import androidx.core.app.ActivityCompat;
 
 import com.pegasuscorp.orbe.AppListCache;
 import com.pegasuscorp.orbe.FloatingOrbService;
+import com.pegasuscorp.orbe.MainActivity;
 import com.pegasuscorp.orbe.PegaseInterfaceState;
 import com.pegasuscorp.orbe.PegaseWakeService;
 import com.pegasuscorp.orbe.permissions.PermissionFlow;
-import com.pegasuscorp.orbe.PersonalizationStore;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.llm.LlmEngineManager;
@@ -27,20 +27,16 @@ import com.pegasuscorp.orbe.voice.VoiceWakeClient;
 
 /**
  * Pont lifecycle Activity ↔ orbe / voix / prefetch / LLM idle unload.
+ * Délègue l'orchestration HOME à {@link HomeBootstrapCoordinator} si lazy bootstrap actif.
  */
 public final class LifecycleBridge {
 
     public static final int REQ_MIC = 1001;
 
     private static final long HOME_WARMUP_DELAY_MS = 420L;
-    /** Wake STT après le 1er rendu HOME — startListening = hitch micro. */
     private static final long HOME_WAKE_DELAY_MS = 1_600L;
     private static final long HOME_WARMUP_DELAY_LOW_MS = 1_800L;
     private static final long HOME_WAKE_DELAY_LOW_MS = 4_000L;
-    /**
-     * Après un geste HOME (lettre / tiroir) : attendre le calme avant d'ouvrir le micro
-     * pour ne pas couper le dessin ou le scroll du drawer.
-     */
     private static final long HOME_GESTURE_IDLE_MS = 2_400L;
 
     public interface Host {
@@ -66,14 +62,17 @@ public final class LifecycleBridge {
 
         void onMicGrantedStartListening();
 
-        /** Trait en cours ou tiroir apps ouvert — reporter le hitch micro. */
         default boolean isHomeGestureBusy() {
             return false;
         }
+
+        /** Session + voix + bridge — idempotent (PR3 lazy assistant). */
+        void ensureAssistantWired();
     }
 
     private final Host host;
     private final Handler mainHandler;
+    private final HomeBootstrapCoordinator bootstrap;
     private final Runnable unloadLlmIdle;
     private Runnable deferredHomeWarmup;
     private Runnable deferredWake;
@@ -81,12 +80,30 @@ public final class LifecycleBridge {
     public LifecycleBridge(Host host, Handler mainHandler) {
         this.host = host;
         this.mainHandler = mainHandler;
+        this.bootstrap = new HomeBootstrapCoordinator(host, mainHandler);
         this.unloadLlmIdle = () -> {
             androidx.appcompat.app.AppCompatActivity a = host.activity();
             if (a.isFinishing() || a.isDestroyed()) return;
             if (PegaseInterfaceState.isOpen() || ChatSessionRegistry.isActive()) return;
             LlmEngineManager.getInstance().unloadIfLoaded();
         };
+    }
+
+    public void requestAssistant(HomeBootstrapCoordinator.AssistantReason reason) {
+        host.ensureAssistantWired();
+        if (useLazyBootstrap()) {
+            bootstrap.requestAssistant(reason);
+        } else {
+            bindVoiceHostLegacy();
+        }
+    }
+
+    public HomeBootstrapCoordinator.Phase homePhase() {
+        return bootstrap.phase();
+    }
+
+    private boolean useLazyBootstrap() {
+        return HomeLoadPolicy.isLazyBootstrapEnabled(host.activity());
     }
 
     public void cancelLlmIdleUnload() {
@@ -120,6 +137,7 @@ public final class LifecycleBridge {
                                            @NonNull int[] grantResults) {
         if (requestCode == REQ_MIC && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            host.ensureAssistantWired();
             VoiceManager vm = host.voiceManager();
             if (vm != null) {
                 vm.attachHost(host.activity());
@@ -141,153 +159,35 @@ public final class LifecycleBridge {
     }
 
     public void onStart() {
-        OrbUiController orb = host.orbUi();
-        if (orb != null) {
-            orb.resumeAmbient();
-            // Fluid au frame suivant — ne pas concurrencer le 1er geste / lettre.
-            // Sous low-memory : ne pas démarrer Fluid (animation = pression continue).
-            mainHandler.post(() -> {
-                if (host.activity().isFinishing() || host.activity().isDestroyed()) return;
-                if (MemoryPressure.isLow(host.activity())) return;
-                OrbUiController o = host.orbUi();
-                if (o != null) o.startFluidIfEnabled();
-            });
+        if (useLazyBootstrap()) {
+            bootstrap.onStart();
+            return;
         }
+        onStartLegacy();
     }
 
     public void onResume() {
-        cancelDeferredHomeWarmup();
-        androidx.appcompat.app.AppCompatActivity a = host.activity();
-        final boolean lowMem = MemoryPressure.isLow(a);
-        PegaseSession.get(a).init(new SessionContext(Channel.VOICE, true));
-        ChatVoiceBridge.register((com.pegasuscorp.orbe.MainActivity) a);
-        host.resetHomeTouch();
-        host.clearInk();
-        host.attachInkStatusListener();
-        host.startChargingMonitor();
-        FloatingOrbService.hide(a);
-
-        // Visuels au prochain frame — sous low-mem : pas de re-decode wallpaper / Fluid.
-        mainHandler.post(() -> {
-            if (host.activity().isFinishing() || host.activity().isDestroyed()) return;
-            OrbUiController orb = host.orbUi();
-            if (orb == null) return;
-            if (lowMem || MemoryPressure.isLow(host.activity())) {
-                // Garder ce qui est déjà en RAM ; pas de pic qui tue les apps arrière-plan.
-                return;
-            }
-            orb.reloadWallpaperIfNeeded();
-            orb.refreshFluidPhaseOnResume();
-        });
-
-        long warmupDelay = lowMem ? HOME_WARMUP_DELAY_LOW_MS : HOME_WARMUP_DELAY_MS;
-        long wakeDelay = lowMem ? HOME_WAKE_DELAY_LOW_MS : HOME_WAKE_DELAY_MS;
-        deferredHomeWarmup = () -> runDeferredHomeWarmup(lowMem);
-        mainHandler.postDelayed(deferredHomeWarmup, warmupDelay);
-        deferredWake = () -> runDeferredWake(lowMem);
-        mainHandler.postDelayed(deferredWake, wakeDelay);
-    }
-
-    private void runDeferredHomeWarmup(boolean lowMemAtSchedule) {
-        deferredHomeWarmup = null;
-        androidx.appcompat.app.AppCompatActivity a = host.activity();
-        if (a.isFinishing() || a.isDestroyed()) return;
-        boolean lowMem = lowMemAtSchedule || MemoryPressure.isLow(a);
-
-        // Geste HOME en cours : ne pas rouvrir le micro / prefetch pendant la lettre.
-        if (host.isHomeGestureBusy()) {
-            noteHomeInteraction();
+        if (useLazyBootstrap()) {
+            bootstrap.onResume();
             return;
         }
-
-        VoiceInputHandler voice = host.voiceInput();
-        if (voice != null) {
-            voice.resumeChatListeningIfNeeded();
-        }
-        // Pas de applyAndroidTtsSettings ici : getVoices() lagge le retour HOME.
-        // La voix est déjà appliquée à l'init TTS ; les réglages UI rappellent apply.
-        // Prefetch (embeddings ONNX) = gros pic — jamais sous low-mem au retour HOME.
-        if (!lowMem) {
-            try {
-                PrefetchService.run(a);
-            } catch (Exception ignored) {}
-        }
-        OrbUiController orb = host.orbUi();
-        if (orb != null) {
-            orb.maybeShowGestureHint();
-            // Sync lock wallpaper = autre plein bitmap — skip si pression.
-            if (!lowMem) {
-                orb.syncFluidLockWallpaperIfDue();
-            }
-        }
+        onResumeLegacy();
     }
 
-    private void runDeferredWake(boolean lowMemAtSchedule) {
-        deferredWake = null;
-        androidx.appcompat.app.AppCompatActivity a = host.activity();
-        if (a.isFinishing() || a.isDestroyed()) return;
-        // Encore en train de dessiner / drawer ouvert → reporter encore.
-        if (host.isHomeGestureBusy()) {
-            scheduleWakeAfterGestureIdle(lowMemAtSchedule);
-            return;
-        }
-        // STT Google sous low-mem au retour HOME = hitch + RAM — reporter via sync léger seul.
-        if (lowMemAtSchedule || MemoryPressure.isLow(a)) {
-            PegaseWakeService.sync(a);
-            VoiceWakeClient.get().refreshWakeHealth();
-            return;
-        }
-
-        VoiceInputHandler voice = host.voiceInput();
-        PegaseWakeService.sync(a);
-        VoiceWakeClient.get().refreshWakeHealth();
-        if ((voice == null || !voice.isConversationActive())
-                && PegaseWakeStore.isEnabled(a)
-                && PegaseWakeController.shouldListen()) {
-            VoiceWakeClient.get().startListening(a);
-        }
-    }
-
-    /**
-     * Appelé dès qu'un geste HOME commence (trait encre, ouverture tiroir).
-     * Annule le démarrage micro imminent et le reporte après calme.
-     */
     public void noteHomeInteraction() {
-        androidx.appcompat.app.AppCompatActivity a = host.activity();
-        if (a.isFinishing() || a.isDestroyed()) return;
-        boolean lowMem = MemoryPressure.isLow(a);
-        cancelDeferredWakeOnly();
-        scheduleWakeAfterGestureIdle(lowMem);
-        // Warmup micro chat : même report si encore pending.
-        if (deferredHomeWarmup != null) {
-            mainHandler.removeCallbacks(deferredHomeWarmup);
-            deferredHomeWarmup = () -> runDeferredHomeWarmup(lowMem);
-            mainHandler.postDelayed(deferredHomeWarmup, HOME_GESTURE_IDLE_MS);
+        if (useLazyBootstrap()) {
+            bootstrap.noteHomeInteraction();
+            return;
         }
-    }
-
-    private void scheduleWakeAfterGestureIdle(boolean lowMem) {
-        deferredWake = () -> runDeferredWake(lowMem);
-        mainHandler.postDelayed(deferredWake, HOME_GESTURE_IDLE_MS);
-    }
-
-    private void cancelDeferredWakeOnly() {
-        if (deferredWake != null) {
-            mainHandler.removeCallbacks(deferredWake);
-            deferredWake = null;
-        }
-    }
-
-    private void cancelDeferredHomeWarmup() {
-        if (deferredHomeWarmup != null) {
-            mainHandler.removeCallbacks(deferredHomeWarmup);
-            deferredHomeWarmup = null;
-        }
-        cancelDeferredWakeOnly();
+        noteHomeInteractionLegacy();
     }
 
     public void onPause() {
-        cancelDeferredHomeWarmup();
+        if (useLazyBootstrap()) {
+            bootstrap.cancelScheduledWork();
+        } else {
+            cancelDeferredHomeWarmup();
+        }
         host.resetHomeTouch();
         host.stopChargingMonitor();
         VoiceManager vm = host.voiceManager();
@@ -304,17 +204,13 @@ public final class LifecycleBridge {
                 || com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) {
             return;
         }
-        // Évite le flash orbe : HOME onPause → show, puis Interface onResume → hide.
         final VoiceInputHandler voiceRef = voice;
         mainHandler.postDelayed(() -> {
             if (a.isFinishing() || a.isDestroyed()) return;
-            // Encore au premier plan (ex. dialogue permission) → pas d'overlay
             if (a.hasWindowFocus()) return;
             if (PegaseInterfaceState.isOpen()) return;
             if (com.pegasuscorp.orbe.NasaImagePreviewActivity.isShowing()) return;
             if (!android.provider.Settings.canDrawOverlays(a)) return;
-            // Copilote AlwaysOn prioritaire — sinon open_app (Chrome) + chat actif
-            // bascule l'orbe en VOICE et le tap ouvre MainActivity au lieu de la bulle.
             if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(a)) {
                 FloatingOrbService.showCopilot(a);
             } else if (voiceRef != null && voiceRef.isConversationActive()
@@ -325,6 +221,9 @@ public final class LifecycleBridge {
     }
 
     public void onStop() {
+        if (useLazyBootstrap()) {
+            bootstrap.onStop();
+        }
         OrbUiController orb = host.orbUi();
         if (orb != null) {
             orb.pauseAmbient();
@@ -336,8 +235,6 @@ public final class LifecycleBridge {
             if (vm != null) vm.stopListening();
         } else if (ChatSessionRegistry.isActive()
                 || PegaseWakeController.isVoiceChatActive()) {
-            // Écoute continue : open_app / autre app au premier plan ne doit pas
-            // tuer le STT ni annuler la reprise planifiée après TTS.
         } else {
             if (voice != null) voice.finalizeChatSession(false);
             scheduleLlmIdleUnload();
@@ -351,13 +248,10 @@ public final class LifecycleBridge {
         OrbUiController orb = host.orbUi();
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             if (orb != null) {
-                // Garder le wallpaper en RAM pour un retour HOME sans re-decode (pic LMK).
                 orb.stopFluid();
                 orb.pauseAmbient();
             }
         }
-        // Ne libérer le wallpaper qu'en extrême (COMPLETE) — BACKGROUND trop tôt
-        // forçait un gros reload au prochain HOME et tuait les apps arrière-plan.
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
             if (orb != null) {
                 orb.releaseWallpaperBitmap();
@@ -374,22 +268,22 @@ public final class LifecycleBridge {
     }
 
     public void onDestroy() {
+        if (useLazyBootstrap()) {
+            bootstrap.cancelScheduledWork();
+        }
         androidx.appcompat.app.AppCompatActivity a = host.activity();
         VoiceInputHandler voice = host.voiceInput();
         VoiceManager vm = host.voiceManager();
         boolean interfaceOpen = PegaseInterfaceState.isOpen();
         boolean chatActive = ChatSessionRegistry.isActive()
                 || (voice != null && voice.isConversationActive());
-        // Interface ouverte : garder la session, couper le STT HOME.
-        // Wake in-place / voiceChat : garder la session SANS toucher au VoiceManager
-        // partagé (sinon cancelScheduledListening/stopListening tue l'ack→STT).
         boolean interfacePreserve = interfaceOpen && chatActive;
         boolean wakeSessionPreserve = !interfacePreserve
                 && (PegaseWakeController.isInPlaceVoiceActive()
                 || PegaseWakeController.isVoiceChatActive())
                 && chatActive;
 
-        ChatVoiceBridge.unregister((com.pegasuscorp.orbe.MainActivity) a);
+        ChatVoiceBridge.unregister((MainActivity) a);
         if (interfacePreserve) {
             ChatVoiceBridge.markSessionPreserved(true);
             if (vm != null) {
@@ -403,5 +297,140 @@ public final class LifecycleBridge {
             if (voice != null) voice.finalizeChatSession(false);
             ChatVoiceBridge.releaseSharedVoiceIfIdle();
         }
+    }
+
+    // —— Legacy (lazy bootstrap OFF) ——
+
+    private void onStartLegacy() {
+        OrbUiController orb = host.orbUi();
+        if (orb != null) {
+            orb.resumeAmbient();
+            mainHandler.post(() -> {
+                if (host.activity().isFinishing() || host.activity().isDestroyed()) return;
+                if (MemoryPressure.isLow(host.activity())) return;
+                OrbUiController o = host.orbUi();
+                if (o != null) o.startFluidIfEnabled();
+            });
+        }
+    }
+
+    private void onResumeLegacy() {
+        cancelDeferredHomeWarmup();
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        final boolean lowMem = MemoryPressure.isLow(a);
+        bindVoiceHostLegacy();
+        host.resetHomeTouch();
+        host.clearInk();
+        host.startChargingMonitor();
+        FloatingOrbService.hide(a);
+
+        mainHandler.post(() -> {
+            if (host.activity().isFinishing() || host.activity().isDestroyed()) return;
+            OrbUiController orb = host.orbUi();
+            if (orb == null) return;
+            if (lowMem || MemoryPressure.isLow(host.activity())) return;
+            orb.reloadWallpaperIfNeeded();
+            orb.refreshFluidPhaseOnResume();
+        });
+
+        long warmupDelay = lowMem ? HOME_WARMUP_DELAY_LOW_MS : HOME_WARMUP_DELAY_MS;
+        long wakeDelay = lowMem ? HOME_WAKE_DELAY_LOW_MS : HOME_WAKE_DELAY_MS;
+        deferredHomeWarmup = () -> runDeferredHomeWarmupLegacy(lowMem);
+        mainHandler.postDelayed(deferredHomeWarmup, warmupDelay);
+        deferredWake = () -> runDeferredWakeLegacy(lowMem);
+        mainHandler.postDelayed(deferredWake, wakeDelay);
+    }
+
+    private void bindVoiceHostLegacy() {
+        host.ensureAssistantWired();
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        PegaseSession.get(a).init(new SessionContext(Channel.VOICE, true));
+        ChatVoiceBridge.register((MainActivity) a);
+    }
+
+    private void runDeferredHomeWarmupLegacy(boolean lowMemAtSchedule) {
+        deferredHomeWarmup = null;
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        if (a.isFinishing() || a.isDestroyed()) return;
+        boolean lowMem = lowMemAtSchedule || MemoryPressure.isLow(a);
+
+        if (host.isHomeGestureBusy()) {
+            noteHomeInteractionLegacy();
+            return;
+        }
+
+        VoiceInputHandler voice = host.voiceInput();
+        if (voice != null) {
+            voice.resumeChatListeningIfNeeded();
+        }
+        if (!lowMem && !HomeLoadPolicy.skipPrefetchOnHomeResume(a)) {
+            try {
+                PrefetchService.run(a);
+            } catch (Exception ignored) {}
+        }
+        OrbUiController orb = host.orbUi();
+        if (orb != null) {
+            orb.maybeShowGestureHint();
+            if (!lowMem) {
+                orb.syncFluidLockWallpaperIfDue();
+            }
+        }
+    }
+
+    private void runDeferredWakeLegacy(boolean lowMemAtSchedule) {
+        deferredWake = null;
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        if (a.isFinishing() || a.isDestroyed()) return;
+        if (host.isHomeGestureBusy()) {
+            scheduleWakeAfterGestureIdleLegacy(lowMemAtSchedule);
+            return;
+        }
+        if (lowMemAtSchedule || MemoryPressure.isLow(a)) {
+            PegaseWakeService.sync(a);
+            VoiceWakeClient.get().refreshWakeHealth();
+            return;
+        }
+
+        VoiceInputHandler voice = host.voiceInput();
+        PegaseWakeService.sync(a);
+        VoiceWakeClient.get().refreshWakeHealth();
+        if ((voice == null || !voice.isConversationActive())
+                && PegaseWakeStore.isEnabled(a)
+                && PegaseWakeController.shouldListen()) {
+            VoiceWakeClient.get().startListening(a);
+        }
+    }
+
+    private void noteHomeInteractionLegacy() {
+        androidx.appcompat.app.AppCompatActivity a = host.activity();
+        if (a.isFinishing() || a.isDestroyed()) return;
+        boolean lowMem = MemoryPressure.isLow(a);
+        cancelDeferredWakeOnly();
+        scheduleWakeAfterGestureIdleLegacy(lowMem);
+        if (deferredHomeWarmup != null) {
+            mainHandler.removeCallbacks(deferredHomeWarmup);
+            deferredHomeWarmup = () -> runDeferredHomeWarmupLegacy(lowMem);
+            mainHandler.postDelayed(deferredHomeWarmup, HOME_GESTURE_IDLE_MS);
+        }
+    }
+
+    private void scheduleWakeAfterGestureIdleLegacy(boolean lowMem) {
+        deferredWake = () -> runDeferredWakeLegacy(lowMem);
+        mainHandler.postDelayed(deferredWake, HOME_GESTURE_IDLE_MS);
+    }
+
+    private void cancelDeferredWakeOnly() {
+        if (deferredWake != null) {
+            mainHandler.removeCallbacks(deferredWake);
+            deferredWake = null;
+        }
+    }
+
+    private void cancelDeferredHomeWarmup() {
+        if (deferredHomeWarmup != null) {
+            mainHandler.removeCallbacks(deferredHomeWarmup);
+            deferredHomeWarmup = null;
+        }
+        cancelDeferredWakeOnly();
     }
 }

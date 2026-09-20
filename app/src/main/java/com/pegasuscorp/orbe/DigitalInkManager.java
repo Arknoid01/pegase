@@ -1,5 +1,6 @@
 package com.pegasuscorp.orbe;
 
+import android.content.Context;
 import android.util.Log;
 
 import com.google.mlkit.common.MlKitException;
@@ -14,6 +15,7 @@ import com.google.mlkit.vision.digitalink.Ink;
 
 /**
  * Gère la reconnaissance de tracé de lettres via ML Kit (modèle fr-FR).
+ * Chargement paresseux — pas de init réseau au boot HOME.
  */
 public class DigitalInkManager {
     private static final String TAG = "DigitalInkManager";
@@ -28,7 +30,7 @@ public class DigitalInkManager {
         return instance;
     }
 
-    public enum ModelState { LOADING, READY, ERROR }
+    public enum ModelState { IDLE, LOADING, READY, ERROR }
 
     public interface ModelStateListener {
         void onModelStateChanged(ModelState state, String message);
@@ -41,10 +43,20 @@ public class DigitalInkManager {
 
     private DigitalInkRecognizer recognizer;
     private DigitalInkRecognitionModel model;
-    private ModelState state = ModelState.LOADING;
+    private ModelState state = ModelState.IDLE;
     private ModelStateListener stateListener;
+    private boolean loadStarted;
 
-    private DigitalInkManager() {
+    private DigitalInkManager() {}
+
+    /** Démarre le téléchargement / init ML Kit — idempotent. */
+    public synchronized void ensureLoaded(Context context) {
+        if (loadStarted) return;
+        loadStarted = true;
+        beginLoad();
+    }
+
+    private void beginLoad() {
         DigitalInkRecognitionModelIdentifier modelIdentifier;
         try {
             modelIdentifier = DigitalInkRecognitionModelIdentifier.fromLanguageTag("fr-FR");
@@ -55,10 +67,9 @@ public class DigitalInkManager {
         }
 
         model = DigitalInkRecognitionModel.builder(modelIdentifier).build();
-        RemoteModelManager remoteModelManager = RemoteModelManager.getInstance();
         setState(ModelState.LOADING, "Chargement du modèle…");
 
-        remoteModelManager.isModelDownloaded(model)
+        RemoteModelManager.getInstance().isModelDownloaded(model)
                 .addOnSuccessListener(downloaded -> {
                     if (downloaded) {
                         initRecognizer();
@@ -113,15 +124,19 @@ public class DigitalInkManager {
 
     private String stateMessageFor(ModelState s) {
         switch (s) {
-            case READY:   return "Tracé de lettres prêt";
-            case ERROR:   return "Modèle indisponible";
-            default:      return "Chargement du modèle…";
+            case READY: return "Tracé de lettres prêt";
+            case ERROR: return "Modèle indisponible";
+            case LOADING: return "Chargement du modèle…";
+            default: return "";
         }
     }
 
-    public void recognize(Ink ink, RecognitionListener listener) {
+    public void recognize(Context context, Ink ink, RecognitionListener listener) {
+        if (!loadStarted && context != null) {
+            ensureLoaded(context.getApplicationContext());
+        }
         if (recognizer == null || state != ModelState.READY) {
-            String reason = state == ModelState.LOADING
+            String reason = state == ModelState.LOADING || state == ModelState.IDLE
                     ? "Modèle en cours de chargement…"
                     : "Modèle indisponible";
             if (listener != null) listener.onRecognitionFailed(reason);
@@ -143,5 +158,11 @@ public class DigitalInkManager {
                         listener.onRecognitionFailed("Erreur de reconnaissance");
                     }
                 });
+    }
+
+    /** @deprecated Utiliser {@link #recognize(Context, Ink, RecognitionListener)}. */
+    @Deprecated
+    public void recognize(Ink ink, RecognitionListener listener) {
+        recognize(null, ink, listener);
     }
 }

@@ -23,10 +23,14 @@ public final class IntentionScheduler {
         Context app = ctx.getApplicationContext();
         IntentionEventReceiver.register(app);
         scheduleTick(app);
-        try {
-            com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap
-                    .ensureStarted(app);
-        } catch (Exception ignored) {}
+        if (!com.pegasuscorp.orbe.session.HomeLoadPolicy.deferLocationAtBoot(app)) {
+            try {
+                com.pegasuscorp.orbe.intentions.location.LocationSituationBootstrap
+                        .ensureStarted(app);
+            } catch (Exception ignored) {}
+        } else {
+            com.pegasuscorp.orbe.intentions.location.LocationLazyGate.warmForBackgroundUse(app);
+        }
     }
 
     @SuppressWarnings("deprecation")

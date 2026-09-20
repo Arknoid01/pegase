@@ -29,6 +29,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.pegasuscorp.orbe.DigitalInkManager;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.session.Channel;
@@ -99,6 +100,7 @@ public class BureauCanvasActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         Trace.init(this);
+        DigitalInkManager.getInstance().ensureLoaded(getApplicationContext());
         PegaseSession.get(this).init(new SessionContext(Channel.BUREAU, false));
         Trace.bureauAction("open", "canvas");
         density = getResources().getDisplayMetrics().density;

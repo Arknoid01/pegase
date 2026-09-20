@@ -24,6 +24,9 @@ public final class PrefetchBootReceiver extends BroadcastReceiver {
             PrefetchScheduler.ensureScheduled(app);
         } catch (Exception ignored) {}
         try {
+            PrefetchIdleScheduler.ensureScheduled(app);
+        } catch (Exception ignored) {}
+        try {
             com.pegasuscorp.orbe.intentions.IntentionScheduler.ensureScheduled(app);
         } catch (Exception ignored) {}
         try {

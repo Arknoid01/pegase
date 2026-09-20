@@ -70,7 +70,6 @@ public final class HomeAssetController implements AppDrawerPanel.Personalization
         OrbUiController orbUi = host.orbUi();
         if (orbUi != null) orbUi.applyPersonalization();
         AppListCache.invalidate();
-        AppListCache.warmUp(activity);
     }
 
     @Override
@@ -339,17 +338,36 @@ public final class HomeAssetController implements AppDrawerPanel.Personalization
     }
 
     public void maybeOfferPiperDownload() {
+        maybeOfferPiperBeforeTts(null);
+    }
+
+    /** PR4 — dialog au 1er TTS Piper, pas au wire assistant. */
+    public void maybeOfferPiperBeforeTts(Runnable onReady) {
+        Runnable proceed = onReady != null ? onReady : () -> {};
         AppCompatActivity activity = host.activity();
-        if (PiperModelStore.isModelReady(activity)) return;
-        if (!PiperModelStore.usePiper(activity)) return;
-        if (PiperModelStore.wasDownloadOffered(activity)) return;
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            proceed.run();
+            return;
+        }
+        if (PiperModelStore.isModelReady(activity) || !PiperModelStore.usePiper(activity)) {
+            proceed.run();
+            return;
+        }
+        if (PiperModelStore.wasDownloadOffered(activity)) {
+            proceed.run();
+            return;
+        }
         PiperModelStore.markDownloadOffered(activity);
         new AlertDialog.Builder(activity)
                 .setTitle("Voix Piper")
                 .setMessage("Télécharger la voix française de Pégase ?\n"
                         + "Environ 75 Mo, une seule fois, via Wi-Fi de préférence.")
-                .setPositiveButton("Télécharger", (d, w) -> startPiperDownload())
-                .setNegativeButton("Plus tard", null)
+                .setPositiveButton("Télécharger", (d, w) -> {
+                    startPiperDownload();
+                    proceed.run();
+                })
+                .setNegativeButton("Plus tard", (d, w) -> proceed.run())
+                .setOnCancelListener(d -> proceed.run())
                 .show();
     }
 

@@ -1,7 +1,9 @@
 package com.pegasuscorp.orbe;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
@@ -81,6 +83,39 @@ public final class AppListCache {
     public static void warmUp(Context context) {
         if (cached != null || loading) return;
         loadAsync(context.getApplicationContext(), null);
+    }
+
+    private static boolean autoRefreshRegistered;
+
+    /**
+     * Invalide + recharge le cache dès qu'une app est installée/désinstallée/mise à jour,
+     * pour que le tiroir d'apps reflète l'état réel sans redémarrer le process.
+     * À appeler une fois au démarrage (voir {@code OrbeApplication}).
+     */
+    public static synchronized void registerAutoRefresh(Context context) {
+        if (autoRefreshRegistered) return;
+        autoRefreshRegistered = true;
+        Context app = context.getApplicationContext();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        filter.addDataScheme("package");
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                invalidate();
+                warmUp(app);
+            }
+        };
+        // API 33+ : le flag EXPORTED/NOT_EXPORTED est obligatoire, sinon
+        // IllegalArgumentException au runtime (l'app cible le SDK 34). Ces actions
+        // ne sont émises que par le système — RECEIVER_NOT_EXPORTED est correct.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            app.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            app.registerReceiver(receiver, filter);
+        }
     }
 
     /** Recharge les icônes système (après mutation accidentelle du cache). */

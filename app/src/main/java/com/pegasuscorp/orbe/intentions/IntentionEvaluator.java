@@ -59,6 +59,7 @@ public final class IntentionEvaluator {
 
     /** Tick capteurs (~90 min) — re-check F1 si la fiche a changé. */
     public static void evaluateSensors(Context ctx) {
+        com.pegasuscorp.orbe.intentions.location.LocationLazyGate.warmForBackgroundUse(ctx);
         evaluate(ctx, false);
         try {
             com.pegasuscorp.orbe.intentions.location.LocationSituationTracker.evaluate(ctx);

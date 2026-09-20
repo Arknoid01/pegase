@@ -15,6 +15,7 @@ import android.util.Log;
 
 import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import com.pegasuscorp.orbe.diag.PegaseDiagLog;
+import com.pegasuscorp.orbe.intentions.location.LocationLazyGate;
 import com.pegasuscorp.orbe.intentions.location.LocationSituationReader;
 
 import org.json.JSONArray;
@@ -87,6 +88,7 @@ public final class WeatherTool implements Tool {
 
     @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
+        LocationLazyGate.warmForBackgroundUse(ctx);
         String requestedCity = params.optString("city", "").trim();
         int days = Math.max(1, Math.min(7, params.optInt("days", 1)));
 
