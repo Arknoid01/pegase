@@ -58,7 +58,8 @@ public final class McpStore {
     private final SharedPreferences prefs;
 
     public McpStore(Context ctx) {
-        this.prefs = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        // jetons Bearer : préférences chiffrées (ancien fichier en clair migré au premier accès)
+        this.prefs = com.pegasuscorp.orbe.secure.SecurePrefs.open(ctx, PREFS, PREFS + "_enc");
     }
 
     /** Outils MCP activés, prêts à être exposés (voir {@link #reload}). */
