@@ -62,6 +62,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -90,6 +91,8 @@ public class DiscussionFragment extends Fragment {
     private TextView memoryBannerView;
     private EditText chatInput;
     private Button chatSendBtn;
+    /** Consignes envoyées pendant le tour en cours : affichées en bulle jusqu'à la fin du tour. */
+    private final List<String> pendingSteeringNotes = new ArrayList<>();
     private Button chatPttBtn;
     private TextView chatContextsLine;
     private TextView visionAttachBadge;
@@ -401,7 +404,7 @@ public class DiscussionFragment extends Fragment {
         }
         refreshMemoryBanner();
         List<PegaseInterfaceData.ChatMessageUi> messages =
-                PegaseInterfaceData.conversationMessages(requireContext());
+                withPendingSteering(PegaseInterfaceData.conversationMessages(requireContext()));
         String signature = conversationSignature(messages);
         if (signature.equals(lastConversationText)) return;
         lastConversationText = signature;
@@ -414,6 +417,26 @@ public class DiscussionFragment extends Fragment {
         if (visible) {
             conversationList.post(this::scrollConversationToEnd);
         }
+    }
+
+    /**
+     * Ajoute en fin de fil une bulle par consigne envoyée pendant le tour en cours. Une fois le
+     * tour terminé, la consigne est enregistrée dans l'historique et la bulle provisoire disparaît.
+     */
+    private List<PegaseInterfaceData.ChatMessageUi> withPendingSteering(
+            List<PegaseInterfaceData.ChatMessageUi> messages) {
+        return withSteeringNotes(messages, pendingSteeringNotes);
+    }
+
+    static List<PegaseInterfaceData.ChatMessageUi> withSteeringNotes(
+            List<PegaseInterfaceData.ChatMessageUi> messages, List<String> notes) {
+        if (notes.isEmpty()) return messages;
+        List<PegaseInterfaceData.ChatMessageUi> out = new ArrayList<>(messages);
+        for (String note : notes) {
+            out.add(new PegaseInterfaceData.ChatMessageUi(true, "Toi",
+                    "↪ Consigne : " + note, "prise en compte à la prochaine étape"));
+        }
+        return out;
     }
 
     private static String conversationSignature(List<PegaseInterfaceData.ChatMessageUi> messages) {
@@ -525,6 +548,7 @@ public class DiscussionFragment extends Fragment {
     /** Fin de session + historique vide, prêt pour un nouveau fil. */
     private void startNewDiscussion() {
         Context ctx = requireContext();
+        pendingSteeringNotes.clear();
         if (viewModel != null) viewModel.setChatSending(false);
         setSendButtonBusy(false);
         if (thinkingView != null) thinkingView.reset();
@@ -1196,8 +1220,9 @@ public class DiscussionFragment extends Fragment {
         }
         if (session.steer(text)) {
             chatInput.setText("");
-            Toast.makeText(ctx, "Consigne ajoutée à la réponse en cours", Toast.LENGTH_SHORT)
-                    .show();
+            pendingSteeringNotes.add(text);
+            lastConversationText = "";
+            refreshConversationIfNeeded();
         } else {
             Toast.makeText(ctx, "Réponse en cours — appuie sur ⏹ pour l'arrêter",
                     Toast.LENGTH_SHORT).show();
@@ -1205,6 +1230,7 @@ public class DiscussionFragment extends Fragment {
     }
 
     private void finishTextChatReply() {
+        pendingSteeringNotes.clear();
         if (viewModel != null) viewModel.setChatSending(false);
         if (!isAdded()) return;
         setSendButtonBusy(false);

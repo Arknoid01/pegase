@@ -31,7 +31,7 @@ Capture Eta : bulle utilisateur grise à droite ; sous elle une carte repliable 
 | **Actions sur un message** | Copier la réponse / le code / la commande, modifier, régénérer, supprimer | Copier ajouté après cet audit (bouton 📋 et appui long, y compris sur tes messages) ; ni modifier, ni régénérer, ni supprimer | Copier comblé |
 | **Rendu Markdown** | Streaming Markdown, blocs de code copiables | Bulles de texte simple. Les réponses sont nettoyées pour l'oral (`sanitizeForSpeech`) et contiennent donc peu de Markdown : **peu utile pour Orbe**, on ne le fait pas | Écart assumé |
 | **Arrêter une réponse** | La flèche d'envoi devient « stop » | Idem depuis `7140131` (⏹) | Comblé |
-| **Consigne pendant une réponse** | File d'attente de consignes | Texte saisi pendant un tour → consigne (`7140131`), mais **pas de bulle** dans le fil | Comblé côté moteur, incomplet côté affichage |
+| **Consigne pendant une réponse** | File d'attente de consignes | Texte saisi pendant un tour → consigne (`7140131`) avec une bulle « ↪ Consigne : … » dans le fil | Comblé |
 | **Pièces jointes** | Bouton « + » : fichiers, images | Menu ⋮ → « Analyser une image », « Analyser un PDF », « Joindre / contextes .md » | Orbe couvre autant, mais caché dans un menu |
 | **Choix du modèle** | Dans la barre du chat (modèle, effort de raisonnement) | Réglages (clés API) ; rotation automatique des fournisseurs | Choix d'Orbe : moins de contrôle, moins d'encombrement |
 | **Jauge de contexte** | Utilisation du contexte + action « compacter » | Aucune ; la compaction (`287bd69`) est invisible | Manque |
@@ -84,7 +84,7 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 | 2 | Copier une réponse | **Fait** (📋 et appui long). Rendu Markdown écarté (réponses nettoyées pour l'oral) |
 | 3 | **Prérequis par outil** avec un appui qui ouvre le bon réglage | **Fait** (`ToolRequirement` : photos, contacts, accès aux données d'usage, accès aux notifications, accessibilité ; message orange dans l'onglet Outils, vérifié aussi avant chaque exécution) |
 | 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md, import ZIP | **Fait** (`SkillsActivity`, `SkillStore.setEnabled/delete`) |
-| 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | À faire, 2 h |
+| 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | **Fait** (bulle « ↪ Consigne : … » provisoire ; remplacée à la fin du tour par la vraie entrée d'historique) |
 | 6 | **Jauge de contexte** et mention « contexte abrégé » | À faire, 0,5 j |
 | 7 | **Liste des conversations + recherche** | À faire, 2-3 j |
 | 8 | Factoriser les entrées de l'onglet Outils | **Fait** (`addEntryRow`, −68 lignes) |
