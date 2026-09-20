@@ -96,12 +96,8 @@ public class PegaseSession {
      * aller-retour LLM, puis le modèle reçoit tous les résultats.
      */
     /** Consignes reçues pendant un tour agentique, injectées à la prochaine étape LLM. */
-    private long lastAgenticActivityMs;
-    /** Au-delà, un tour agentique est considéré bloqué : un nouveau message le remplace. */
-    private static final long STEERING_MAX_IDLE_MS = 90_000L;
-    private final List<String> pendingSteering =
-            java.util.Collections.synchronizedList(new ArrayList<>());
-    private final java.util.ArrayDeque<NativeToolCall> pendingBatch = new java.util.ArrayDeque<>();
+    /** Lot d'appels restants et consignes du tour agentique en cours. */
+    private final AgenticTurnQueues queues = new AgenticTurnQueues();
     private AgenticChain activeAgenticChain;
     private ChatSendOptions activeAgenticOptions;
     private long activeRequestId;
@@ -198,19 +194,15 @@ public class PegaseSession {
         if (text == null || text.trim().isEmpty()) return false;
         if (!turnInFlight || !useAgenticLoop()) return false;
         if (activeAgenticChain == null && pendingNativeToolCall == null) return false;
-        if (System.currentTimeMillis() - lastAgenticActivityMs > STEERING_MAX_IDLE_MS) return false;
-        pendingSteering.add(text.trim());
-        Trace.error("agentic", "steering reçu (" + pendingSteering.size() + " en attente)");
+        if (queues.isIdleTooLong()) return false;
+        int pending = queues.addSteering(text.trim());
+        Trace.error("agentic", "steering reçu (" + pending + " en attente)");
         return true;
     }
 
     private void applyPendingSteering() {
-        lastAgenticActivityMs = System.currentTimeMillis();
-        if (activeAgenticChain == null || pendingSteering.isEmpty()) return;
-        synchronized (pendingSteering) {
-            for (String note : pendingSteering) activeAgenticChain.addSteering(note);
-            pendingSteering.clear();
-        }
+        queues.touch();
+        queues.drainSteeringInto(activeAgenticChain);
     }
 
     private void beginTurn() {
@@ -1003,39 +995,7 @@ public class PegaseSession {
 
     /** Lit la trace : y a-t-il eu un tool_start diag récemment ? */
     private String answerDiagToolUsageFromTrace() {
-        try {
-            if (appContext != null) Trace.init(appContext);
-            java.io.File f = Trace.file();
-            if (f == null || !f.isFile()) {
-                return "Non — je n'ai pas d'appel récent à l'outil diag dans mes traces. "
-                        + "Tu veux que je lance un bilan maintenant ?";
-            }
-            boolean found = false;
-            try (java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(
-                            new java.io.FileInputStream(f),
-                            java.nio.charset.StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    if (line.contains("\"tool\":\"diag\"")
-                            || line.contains("\"tool\": \"diag\"")) {
-                        if (line.contains("tool_start") || line.contains("tool_end")) {
-                            found = true;
-                        }
-                    }
-                }
-            }
-            if (found) {
-                return "Oui — j'ai bien enregistré au moins un appel à l'outil diag dans mes traces. "
-                        + "Dis « analyse tes problèmes » ou « bilan de session » pour le détail.";
-            }
-            return "Non — sur ta dernière demande, je n'ai pas appelé l'outil diag. "
-                    + "Je peux le faire maintenant : dis « bilan de session » ou "
-                    + "« analyse tes problèmes ».";
-        } catch (Exception e) {
-            return "Je n'ai pas pu vérifier la trace localement. "
-                    + "Dis « bilan de session » pour forcer un diagnostic.";
-        }
+        return DiagTraceAnswers.toolUsage(appContext);
     }
 
     /**
@@ -1393,7 +1353,7 @@ public class PegaseSession {
             if (rejectInvalidNativeCall(conv, reply, call, obs)) return;
             pendingAssistantToolReply = reply;
             pendingNativeToolCall = call;
-            lastAgenticActivityMs = System.currentTimeMillis();
+            queues.touch();
             stageBatchRemainder(reply);
             executeToolInternal(call.name, call.arguments, null, obs, false);
             return;
@@ -1478,56 +1438,12 @@ public class PegaseSession {
 
     /** Visible tests + logs HTTP 400 validation d'outils Groq/OpenAI. */
     public static boolean isHttp400ToolValidation(String error) {
-        if (error == null || error.isEmpty()) return false;
-        String e = error.toLowerCase(java.util.Locale.ROOT);
-        // Codes / messages Groq typiques (même sans « HTTP 400 » explicite dans le wrap)
-        if (e.contains("tool_use_failed") || e.contains("tool call validation")
-                || e.contains("failed to validate tool")
-                || (e.contains("parameters for tool") && e.contains("did not match schema"))) {
-            return true;
-        }
-        if (!e.contains("http 400") && !e.contains("status code 400")
-                && !e.contains("\"code\":400") && !e.contains(" 400 ")) {
-            return false;
-        }
-        return e.contains("tool") || e.contains("function") || e.contains("tool_call")
-                || e.contains("tools") || e.contains("schema") || e.contains("validation")
-                || e.contains("invalid");
+        return LlmErrorAnalysis.isHttp400ToolValidation(error);
     }
 
-    /**
-     * Extrait un aperçu utile du body 400 (failed_generation / message).
-     * Visible tests.
-     */
+    /** Extrait un aperçu utile du body 400 (failed_generation / message). Visible tests. */
     public static String summarizeToolValidationError(String error) {
-        if (error == null || error.isEmpty()) return "";
-        String raw = error.trim();
-        try {
-            int brace = raw.indexOf('{');
-            if (brace >= 0) {
-                JSONObject root = new JSONObject(raw.substring(brace));
-                JSONObject err = root.optJSONObject("error");
-                if (err == null && root.has("message")) err = root;
-                if (err != null) {
-                    String msg = err.optString("message", "").trim();
-                    String failed = err.optString("failed_generation", "").trim();
-                    if (!failed.isEmpty()) {
-                        String clip = failed.length() > 120
-                                ? failed.substring(0, 117).trim() + "…" : failed;
-                        return (msg.isEmpty() ? "tool validation" : msg) + " | gen=" + clip;
-                    }
-                    if (!msg.isEmpty()) return truncateDetail(msg, 200);
-                }
-            }
-        } catch (Exception ignored) {}
-        return truncateDetail(raw, 200);
-    }
-
-    private static String truncateDetail(String s, int max) {
-        if (s == null) return "";
-        String t = s.trim();
-        if (t.length() <= max) return t;
-        return t.substring(0, max - 1).trim() + "…";
+        return LlmErrorAnalysis.summarizeToolValidationError(error);
     }
 
     private void dispatchToolFromLlm(ConversationManager conv, String llmText, SessionObserver obs) {
@@ -1606,7 +1522,7 @@ public class PegaseSession {
             return false;
         }
         clearPendingToolCall();
-        pendingBatch.clear();
+        queues.clearBatch();
         if (activeAgenticChain == null) {
             activeAgenticChain = new AgenticChain(conv.historySnapshot(), conv.getLastUserText());
             activeAgenticOptions = buildSendOptions(conv.getLastUserText());
@@ -1658,7 +1574,7 @@ public class PegaseSession {
         LlmReply assistantReply = pendingAssistantToolReply;
         NativeToolCall nativeCall = pendingNativeToolCall;
         clearPendingToolCall();
-        lastAgenticActivityMs = System.currentTimeMillis();
+        queues.touch();
 
         // Forcer le contexte positif avant tout appel LLM de synthèse
         String successText = displayForUser(result);
@@ -1688,7 +1604,7 @@ public class PegaseSession {
             runAgenticStep(conv, obs);
             return;
         }
-        pendingBatch.clear();
+        queues.clearBatch();
 
         // Outil direct (voix / JSON) — pas de synthèse agentique
         if (result.kind == ToolResult.Kind.IMAGE_URL) {
@@ -1923,7 +1839,7 @@ public class PegaseSession {
      * elle au lieu de la perdre (sa réponse provisoire est abandonnée).
      */
     private boolean rerunForSteering(ConversationManager conv, SessionObserver obs) {
-        if (activeAgenticChain == null || pendingSteering.isEmpty()) return false;
+        if (activeAgenticChain == null || !queues.hasSteering()) return false;
         runAgenticStep(conv, obs);
         return true;
     }
@@ -2071,11 +1987,11 @@ public class PegaseSession {
 
     /** Met en file les appels 2..N d'un message assistant qui en contient plusieurs. */
     private void stageBatchRemainder(LlmReply reply) {
-        pendingBatch.clear();
-        if (reply == null || !useAgenticLoop()) return;
-        for (int i = 1; i < reply.toolCalls.size(); i++) {
-            pendingBatch.add(reply.toolCalls.get(i));
+        if (!useAgenticLoop()) {
+            queues.clearBatch();
+            return;
         }
+        queues.stageBatchRemainder(reply);
     }
 
     /**
@@ -2086,9 +2002,9 @@ public class PegaseSession {
      * @return true si un appel a été lancé (la suite est pilotée par son résultat)
      */
     private boolean runNextBatchedCall(ConversationManager conv, SessionObserver obs) {
-        while (!pendingBatch.isEmpty()) {
+        while (queues.batchSize() > 0) {
             if (!AgenticTurnPolicy.allowMoreToolCalls(activeAgenticChain)) break;
-            NativeToolCall next = pendingBatch.pollFirst();
+            NativeToolCall next = queues.pollBatch();
             if (next.isRejected()) break;
             Tool tool = toolRegistry.findById(next.name.trim());
             if (tool == null || ToolCallValidator.validate(tool, next.arguments) != null) break;
@@ -2098,14 +2014,14 @@ public class PegaseSession {
             }
             if (!allowToolExecution(obs)) break;
             Trace.error("agentic", "batch: exécute " + next.name + " ("
-                    + pendingBatch.size() + " restant(s) après)");
+                    + queues.batchSize() + " restant(s) après)");
             pendingAssistantToolReply = LlmReply.withNativeToolCalls(null,
                     Collections.singletonList(next));
             pendingNativeToolCall = next;
             executeToolInternal(next.name, next.arguments, null, obs, false);
             return true;
         }
-        pendingBatch.clear();
+        queues.clearBatch();
         return false;
     }
 
@@ -2117,8 +2033,7 @@ public class PegaseSession {
     private void clearAgenticState() {
         agenticOperationGeneration++;
         clearPendingToolCall();
-        pendingBatch.clear();
-        pendingSteering.clear();
+        queues.clear();
         activeAgenticChain = null;
         activeAgenticOptions = null;
         agenticStepIndex = 0;
