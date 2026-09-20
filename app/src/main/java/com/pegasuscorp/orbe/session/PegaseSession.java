@@ -1193,6 +1193,15 @@ public class PegaseSession {
             return;
         }
 
+        // Prérequis manquant (permission, accès spécial) : erreur claire, sans lancer l'outil ;
+        // en boucle agentique elle revient au modèle, qui l'explique à l'utilisateur.
+        com.pegasuscorp.orbe.tools.ToolRequirement missing = tool.requirement(appContext);
+        if (missing != null) {
+            finishTool(conv, toolId.trim(), System.currentTimeMillis(), null, missing.message,
+                    false, obs);
+            return;
+        }
+
         // LLM rappelle brief après « plus de détail » → cache, pas de 2e agrégat
         // (avant seed utterance : {} doit rester « vide » pour ce filet)
         if ("brief".equalsIgnoreCase(toolId.trim())

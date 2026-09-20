@@ -236,10 +236,22 @@ public class ToolsFragment extends Fragment {
             textCol.addView(phrase, matchWrap());
         }
 
+        // Prérequis manquant : message orange, et l'appui ouvre le bon réglage au lieu de lancer
+        com.pegasuscorp.orbe.tools.ToolRequirement missing = requirementFor(ctx, hint);
+        if (missing != null) {
+            TextView warn = new TextView(ctx);
+            warn.setText("⚠ " + missing.message + " Appuie pour régler.");
+            warn.setTextColor(Color.parseColor("#FFB74D"));
+            warn.setTextSize(11);
+            warn.setPadding(0, dp(ctx, 2), 0, 0);
+            textCol.addView(warn, matchWrap());
+        }
+
         Button play = makeIconButton(ctx, "▶");
         play.setTextSize(12);
         play.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
+            if (missing != null) { openFix(ctx, missing); return; }
             launchTool(hint);
         });
         row.addView(play);
@@ -254,9 +266,30 @@ public class ToolsFragment extends Fragment {
 
         row.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
+            if (missing != null) { openFix(ctx, missing); return; }
             launchTool(hint);
         });
         return row;
+    }
+
+    @Nullable
+    private static com.pegasuscorp.orbe.tools.ToolRequirement requirementFor(
+            Context ctx, PegaseInterfaceData.ToolHint hint) {
+        try {
+            com.pegasuscorp.orbe.tools.Tool tool =
+                    new com.pegasuscorp.orbe.tools.ToolRegistry().findById(hint.toolId);
+            return tool != null ? tool.requirement(ctx) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void openFix(Context ctx, com.pegasuscorp.orbe.tools.ToolRequirement req) {
+        try {
+            startActivity(req.fixIntent(ctx));
+        } catch (Exception e) {
+            Toast.makeText(ctx, req.message, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showToolMenu(PegaseInterfaceData.ToolHint hint) {

@@ -36,6 +36,11 @@ public final class CopilotActionTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.accessibility(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         String action = params.optString("action", "").trim().toLowerCase();
         switch (action) {

@@ -50,6 +50,11 @@ public final class UiActionTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.accessibility(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         PegaseAccessibilityService svc = CopilotUiSupport.requireService(ctx, cb);
         if (svc == null) return;

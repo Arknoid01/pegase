@@ -631,6 +631,40 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void text_toolPrerequisManquant_neLanceRien_etRevientAuModele() throws Exception {
+        backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "stub_req", new JSONObject()));
+        backend.nextSynthesisReply = "Il faut autoriser la caméra.";
+        session.init(new SessionContext(Channel.TEXT, false));
+        AtomicReference<String> finalReply = new AtomicReference<>();
+
+        session.send("Fais stub_req", new SessionObserver() {
+            @Override public void onReply(String text, boolean fired) {
+                if (!fired) finalReply.set(text);
+            }
+            @Override public void onToolResult(ToolResult result) {}
+            @Override public void onError(String message) { fail(message); }
+        });
+        drainMainThread();
+
+        assertEquals(1, backend.lastAgenticChain.steps().size());
+        AgenticChainStepHolder.assertToolError(backend.lastAgenticChain.steps().get(0),
+                "Autorise la caméra.");
+        assertEquals("Il faut autoriser la caméra.", finalReply.get());
+    }
+
+    /** Vérifie qu'une étape est une erreur d'outil portant le message attendu. */
+    private static final class AgenticChainStepHolder {
+        static void assertToolError(com.pegasuscorp.orbe.chat.AgenticChain.Step step, String msg) {
+            assertTrue(step.rejected);
+            assertTrue(step.toolResultContent.contains("TOOL_ERROR"));
+            assertTrue(step.toolResultContent.contains(msg));
+            assertFalse(step.toolResultContent.contains("stub_req ok"));
+        }
+    }
+
+    @Test
     public void steer_withoutTurn_returnsFalse() {
         assertFalse(session.steer("bonjour"));
     }
@@ -946,6 +980,7 @@ public class PegaseSessionTest {
             if ("stub_image".equals(id)) return new StubTool(true, "stub_image");
             if ("stub_fail".equals(id)) return new StubTool(false, "stub_fail");
             if ("sms".equals(id)) return new StubTool(false, "sms");
+            if ("stub_req".equals(id)) return new StubTool(false, "stub_req");
             if ("search".equals(id)) return new StubTool(false, "search");
             return super.findById(id);
         }
@@ -973,6 +1008,14 @@ public class PegaseSessionTest {
         @Override
         public String description() {
             return toolId + "() — test";
+        }
+
+        @Override
+        public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+            return "stub_req".equals(toolId)
+                    ? com.pegasuscorp.orbe.tools.ToolRequirement.permission(ctx,
+                            android.Manifest.permission.CAMERA, "Autorise la caméra.")
+                    : null;
         }
 
         @Override

@@ -34,4 +34,12 @@ public interface Tool {
      * @param cb      callback de résultat
      */
     void execute(Context ctx, JSONObject params, ToolCallback cb);
+
+    /**
+     * Ce qui manque pour utiliser l'outil (permission, accès spécial), ou {@code null} s'il est
+     * utilisable. Affiché dans l'onglet Outils et vérifié avant chaque exécution.
+     */
+    default ToolRequirement requirement(Context ctx) {
+        return null;
+    }
 }

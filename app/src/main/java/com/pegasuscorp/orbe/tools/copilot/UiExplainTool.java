@@ -37,6 +37,11 @@ public final class UiExplainTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.accessibility(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         if (CopilotUiSupport.requireService(ctx, cb) == null) return;
         String requested = A11yUiExecutor.parseCriteria(params).text;

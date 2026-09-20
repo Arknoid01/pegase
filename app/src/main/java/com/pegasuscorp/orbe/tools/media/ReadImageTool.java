@@ -45,6 +45,11 @@ public final class ReadImageTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.photos(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         String source = params.optString("source", "last_photo").trim();
         String prompt = params.optString("prompt", "").trim();

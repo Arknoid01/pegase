@@ -40,6 +40,11 @@ public final class AppUsageTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.usageAccess(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         if (!hasUsageAccess(ctx)) {
             cb.onError("Autorise l'accès aux données d'utilisation à Pégase : Réglages > "

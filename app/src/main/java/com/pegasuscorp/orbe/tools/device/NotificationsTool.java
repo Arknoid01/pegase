@@ -40,6 +40,11 @@ public final class NotificationsTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.notificationListener(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         if (!NotificationAccess.isEnabled(ctx)) {
             NotificationAccess.openSettings(ctx);

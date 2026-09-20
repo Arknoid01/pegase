@@ -38,6 +38,11 @@ public final class ContactsTool implements Tool {
     }
 
     @Override
+    public com.pegasuscorp.orbe.tools.ToolRequirement requirement(Context ctx) {
+        return com.pegasuscorp.orbe.tools.ToolRequirement.contacts(ctx);
+    }
+
+    @Override
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
         String action = params != null
                 ? params.optString("action", "search").trim().toLowerCase()
