@@ -217,9 +217,10 @@ public class ToolsFragment extends Fragment {
         row.addView(textCol, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        final boolean off = com.pegasuscorp.orbe.tools.ToolToggles.isDisabled(hint.toolId);
         TextView label = new TextView(ctx);
-        label.setText(hint.label);
-        label.setTextColor(Color.WHITE);
+        label.setText(off ? "⛔ " + hint.label + " (désactivé)" : hint.label);
+        label.setTextColor(off ? Color.parseColor("#888888") : Color.WHITE);
         label.setTextSize(13);
         label.setMaxLines(1);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -251,6 +252,7 @@ public class ToolsFragment extends Fragment {
         play.setTextSize(12);
         play.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
+            if (off) { toastDisabled(ctx); return; }
             if (missing != null) { openFix(ctx, missing); return; }
             launchTool(hint);
         });
@@ -266,6 +268,7 @@ public class ToolsFragment extends Fragment {
 
         row.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
+            if (off) { toastDisabled(ctx); return; }
             if (missing != null) { openFix(ctx, missing); return; }
             launchTool(hint);
         });
@@ -292,16 +295,29 @@ public class ToolsFragment extends Fragment {
         }
     }
 
+    private void toastDisabled(Context ctx) {
+        Toast.makeText(ctx, "Outil désactivé — réactive-le depuis ⋮", Toast.LENGTH_SHORT).show();
+    }
+
     private void showToolMenu(PegaseInterfaceData.ToolHint hint) {
         Context ctx = requireContext();
         boolean pinned = ToolFavoritesStore.isPinned(ctx, hint.favoriteKey());
-        showBottomSheet(ctx, hint.label, new String[]{
-                "Lancer",
-                "Copier la phrase",
-                pinned ? "Retirer des favoris" : "Épingler",
-                "Voir la phrase"
-        }, which -> {
-            if (which == 0) launchTool(hint);
+        boolean canToggle = !hint.isNavigation()
+                && new com.pegasuscorp.orbe.tools.ToolRegistry().findById(hint.toolId) != null;
+        boolean off = com.pegasuscorp.orbe.tools.ToolToggles.isDisabled(hint.toolId);
+        String[] items = canToggle
+                ? new String[]{"Lancer", "Copier la phrase",
+                        pinned ? "Retirer des favoris" : "Épingler", "Voir la phrase",
+                        off ? "Réactiver l'outil" : "Désactiver l'outil"}
+                : new String[]{"Lancer", "Copier la phrase",
+                        pinned ? "Retirer des favoris" : "Épingler", "Voir la phrase"};
+        showBottomSheet(ctx, hint.label, items, which -> {
+            if (which == 4) {
+                com.pegasuscorp.orbe.tools.ToolToggles.setDisabled(ctx, hint.toolId, !off);
+                Toast.makeText(ctx, off ? "Outil réactivé" : "Outil désactivé : Pégase ne l'utilisera plus",
+                        Toast.LENGTH_SHORT).show();
+                rebuildToolsList();
+            } else if (which == 0) { if (off) toastDisabled(ctx); else launchTool(hint); }
             else if (which == 1) copyPhrase(hint.phrase);
             else if (which == 2) {
                 ToolFavoritesStore.toggle(ctx, hint.favoriteKey());

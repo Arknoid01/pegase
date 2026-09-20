@@ -21,6 +21,7 @@ public class OrbeApplication extends Application {
         SyncEngine.scheduleStartupSync(this);
         com.pegasuscorp.orbe.mcp.McpStore.reload(this);
         com.pegasuscorp.orbe.diag.ReasoningStore.init(this);
+        com.pegasuscorp.orbe.tools.ToolToggles.reload(this);
         AppListCache.registerAutoRefresh(this);
     }
 }

@@ -661,6 +661,36 @@ public class PegaseSessionTest {
             assertTrue(step.toolResultContent.contains("TOOL_ERROR"));
             assertTrue(step.toolResultContent.contains(msg));
             assertFalse(step.toolResultContent.contains("stub_req ok"));
+            assertFalse(step.toolResultContent.contains("stub ok"));
+        }
+    }
+
+    @Test
+    public void text_outilDesactive_estRefuse_etRevientAuModele() throws Exception {
+        com.pegasuscorp.orbe.tools.ToolToggles.setDisabled(ctx, "stub", true);
+        try {
+            backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                    new com.pegasuscorp.orbe.chat.NativeToolCall(
+                            "call_1", "stub", new JSONObject()));
+            backend.nextSynthesisReply = "Cet outil est désactivé.";
+            session.init(new SessionContext(Channel.TEXT, false));
+            AtomicReference<String> finalReply = new AtomicReference<>();
+
+            session.send("Fais le stub", new SessionObserver() {
+                @Override public void onReply(String text, boolean fired) {
+                    if (!fired) finalReply.set(text);
+                }
+                @Override public void onToolResult(ToolResult result) {}
+                @Override public void onError(String message) { fail(message); }
+            });
+            drainMainThread();
+
+            assertEquals(1, backend.lastAgenticChain.steps().size());
+            AgenticChainStepHolder.assertToolError(backend.lastAgenticChain.steps().get(0),
+                    "désactivé");
+            assertEquals("Cet outil est désactivé.", finalReply.get());
+        } finally {
+            com.pegasuscorp.orbe.tools.ToolToggles.setDisabled(ctx, "stub", false);
         }
     }
 

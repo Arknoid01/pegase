@@ -1193,6 +1193,14 @@ public class PegaseSession {
             return;
         }
 
+        // Outil désactivé par l'utilisateur : refus net, quelle que soit l'origine de l'appel
+        if (com.pegasuscorp.orbe.tools.ToolToggles.isDisabled(toolId)) {
+            finishTool(conv, toolId.trim(), System.currentTimeMillis(), null,
+                    "L'outil « " + toolId.trim() + " » est désactivé dans l'onglet Outils.",
+                    false, obs);
+            return;
+        }
+
         // Prérequis manquant (permission, accès spécial) : erreur claire, sans lancer l'outil ;
         // en boucle agentique elle revient au modèle, qui l'explique à l'utilisateur.
         com.pegasuscorp.orbe.tools.ToolRequirement missing = tool.requirement(appContext);

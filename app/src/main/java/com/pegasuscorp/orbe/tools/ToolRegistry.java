@@ -202,11 +202,11 @@ public class ToolRegistry {
                 ? allowed : EnumSet.allOf(ToolTag.class);
         List<Tool> out = new ArrayList<>();
         for (Tool t : tools) {
-            if (tags.contains(t.tag())) {
+            if (tags.contains(t.tag()) && !ToolToggles.isDisabled(t.id())) {
                 out.add(t);
             }
         }
-        if (tags.contains(ToolTag.COMPOSITE)) {
+        if (tags.contains(ToolTag.COMPOSITE) && !ToolToggles.isDisabled(compositeTool.id())) {
             out.add(compositeTool);
         }
         if (tags.contains(ToolTag.MCP)) {
@@ -246,7 +246,7 @@ public class ToolRegistry {
         sb.append("\nFormat obligatoire : {\"tool\":\"id\",\"params\":{...}}\n");
         sb.append("\nListe des outils disponibles (ID et signature) :\n");
         for (Tool t : tools) {
-            if (tags.contains(t.tag())) {
+            if (tags.contains(t.tag()) && !ToolToggles.isDisabled(t.id())) {
                 sb.append("  • ").append(t.description()).append("\n");
             }
         }
