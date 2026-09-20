@@ -52,7 +52,7 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 | **Découvrir les outils** | Cartes avec description | **Phrases à dire** avec lancement en un appui : très adapté à la voix, meilleur qu'Eta sur ce point |
 | **Disponibilité d'un outil** | Prérequis affiché par carte (permission manquante…) | Statut global par service seulement (✓/○) ; pas de prérequis par outil |
 | **Activer/désactiver** | Par outil ou famille [documenté], par skill (interrupteur) | Pas d'interrupteur d'outil |
-| **Skills** | Écran : liste, interrupteurs, suppression, import ZIP, installation GitHub | Une ligne avec le compteur + import ZIP (ajouté) ; pas de liste ni de suppression |
+| **Skills** | Écran : liste, interrupteurs, suppression, import ZIP, installation GitHub | Écran complet (ajouté) : liste, interrupteur, aperçu, suppression, import ZIP ; pas d'installation depuis GitHub |
 | **MCP** | Écrans liste, ajout, détail, actualisation, états « connexion… » | Un écran d'ajout et d'activation par outil (ajouté) ; boîtes de dialogue |
 | **Permissions** | Écran « santé des permissions » et carte récapitulative | Demandes ponctuelles au moment du besoin (`PermissionFlow`) ; pas de tableau de bord |
 | **Fournisseurs de modèles** | Liste, détail, en-têtes, onglet des modèles | Écran de clés API |
@@ -83,7 +83,7 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 | 1 | Résumé des outils visible sous la réponse, cartes de raisonnement conservées | **Fait** (`ConversationChatAdapter.toolsSummary` ; `ReasoningStore` écrit les 48 dernières cartes dans `files/diag/reasoning_cards.json` ; paramètres et résultats des outils sensibles non conservés) |
 | 2 | Copier une réponse | **Fait** (📋 et appui long). Rendu Markdown écarté (réponses nettoyées pour l'oral) |
 | 3 | **Prérequis par outil** (« autorise l'accès aux photos », « accès données d'usage ») avec un appui qui ouvre le bon réglage | À faire, 1-2 j : les erreurs d'outil renvoient déjà ces messages au modèle, l'utilisateur ne les voit qu'au moment de l'échec |
-| 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md | À faire, 0,5 j : seul le compteur est visible |
+| 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md, import ZIP | **Fait** (`SkillsActivity`, `SkillStore.setEnabled/delete`) |
 | 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | À faire, 2 h |
 | 6 | **Jauge de contexte** et mention « contexte abrégé » | À faire, 0,5 j |
 | 7 | **Liste des conversations + recherche** | À faire, 2-3 j |

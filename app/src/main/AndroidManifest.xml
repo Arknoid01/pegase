@@ -321,6 +321,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".skills.SkillsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe" />
+
+        <activity
             android:name=".mcp.McpSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe"

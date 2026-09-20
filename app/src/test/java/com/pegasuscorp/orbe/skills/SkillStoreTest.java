@@ -134,4 +134,46 @@ public class SkillStoreTest {
         assertEquals("skill", SkillStore.idFromFileName("!!!.zip"));
         assertEquals("skill", SkillStore.idFromFileName(null));
     }
+
+    @Test
+    public void desactiver_masqueLeSkillDuModele_maisPasDeLEcranDeGestion() throws Exception {
+        File root = tmp.newFolder("skills");
+        writeSkill(root, "a", "---\nname: A\ndescription: skill a\n---\ncorps");
+        writeSkill(root, "b", "---\nname: B\ndescription: skill b\n---\ncorps");
+        SkillStore store = new SkillStore(Collections.singletonList(root));
+
+        store.setEnabled("a", false);
+
+        assertFalse(store.isEnabled("a"));
+        assertTrue(store.isEnabled("b"));
+        assertEquals(2, store.listAll().size());
+        assertEquals(1, store.list().size());
+        assertEquals("b", store.list().get(0).id);
+        assertNull(store.find("a"));
+        assertFalse(store.promptIndex().contains("skill a"));
+        assertTrue(store.promptIndex().contains("skill b"));
+
+        store.setEnabled("a", true);
+        assertEquals(2, store.list().size());
+    }
+
+    @Test
+    public void supprimer_effaceLeDossierEtLEtatDesactive() throws Exception {
+        File root = tmp.newFolder("skills");
+        File dir = writeSkill(root, "a", "---\nname: A\ndescription: skill a\n---\ncorps");
+        new File(dir, "references").mkdirs();
+        Files.write(new File(dir, "references/x.md").toPath(), "x".getBytes());
+        SkillStore store = new SkillStore(Collections.singletonList(root));
+        store.setEnabled("a", false);
+
+        assertTrue(store.delete("a"));
+
+        assertFalse(dir.exists());
+        assertEquals(0, store.listAll().size());
+        assertFalse(store.delete("a"));
+        // un nouveau skill de même id repart activé
+        writeSkill(root, "a", "---\nname: A\ndescription: skill a\n---\ncorps");
+        assertTrue(store.isEnabled("a"));
+        assertEquals(1, store.list().size());
+    }
 }

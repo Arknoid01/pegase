@@ -1,6 +1,7 @@
 package com.pegasuscorp.orbe.skills;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -11,7 +12,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -46,15 +49,58 @@ public final class SkillStore {
         }
     }
 
-    private final List<File> roots;
+    /** Ids de skills désactivés (conservés entre les lancements). */
+    interface DisabledStore {
+        Set<String> get();
 
-    public SkillStore(Context ctx) {
-        this(defaultRoots(ctx));
+        void set(Set<String> ids);
     }
 
-    /** Visible tests. */
+    private static final String PREFS = "pegase_skills";
+    private static final String KEY_DISABLED = "disabled";
+
+    private final List<File> roots;
+    private final DisabledStore disabled;
+
+    public SkillStore(Context ctx) {
+        this(defaultRoots(ctx), prefsStore(ctx.getApplicationContext()));
+    }
+
+    /** Visible tests : dossiers seuls, état « désactivé » en mémoire. */
     public SkillStore(List<File> roots) {
+        this(roots, new DisabledStore() {
+            private Set<String> ids = new HashSet<>();
+
+            @Override
+            public Set<String> get() {
+                return new HashSet<>(ids);
+            }
+
+            @Override
+            public void set(Set<String> next) {
+                ids = new HashSet<>(next);
+            }
+        });
+    }
+
+    SkillStore(List<File> roots, DisabledStore disabled) {
         this.roots = roots;
+        this.disabled = disabled;
+    }
+
+    private static DisabledStore prefsStore(Context app) {
+        SharedPreferences prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return new DisabledStore() {
+            @Override
+            public Set<String> get() {
+                return new HashSet<>(prefs.getStringSet(KEY_DISABLED, new HashSet<>()));
+            }
+
+            @Override
+            public void set(Set<String> ids) {
+                prefs.edit().putStringSet(KEY_DISABLED, new HashSet<>(ids)).apply();
+            }
+        };
     }
 
     private static List<File> defaultRoots(Context ctx) {
@@ -70,7 +116,16 @@ public final class SkillStore {
         return roots.get(0);
     }
 
+    /** Skills activés : ceux que voit le modèle (index du prompt, outil {@code skills}). */
     public List<Skill> list() {
+        Set<String> off = disabled.get();
+        List<Skill> out = new ArrayList<>();
+        for (Skill s : listAll()) if (!off.contains(s.id)) out.add(s);
+        return out;
+    }
+
+    /** Tous les skills installés, activés ou non (écran de gestion). */
+    public List<Skill> listAll() {
         List<Skill> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
         for (File root : roots) {
@@ -86,6 +141,46 @@ public final class SkillStore {
         }
         Collections.sort(out, (a, b) -> a.id.compareTo(b.id));
         return out;
+    }
+
+    public boolean isEnabled(String id) {
+        return id != null && !disabled.get().contains(id.trim().toLowerCase(Locale.ROOT));
+    }
+
+    public void setEnabled(String id, boolean enabled) {
+        if (id == null) return;
+        Set<String> ids = disabled.get();
+        String key = id.trim().toLowerCase(Locale.ROOT);
+        if (enabled) ids.remove(key); else ids.add(key);
+        disabled.set(ids);
+    }
+
+    /**
+     * Supprime le dossier d'un skill (tous les fichiers) et oublie son état.
+     *
+     * @return true si le dossier a disparu
+     */
+    public boolean delete(String id) {
+        Skill skill = findAny(id);
+        if (skill == null) return false;
+        boolean ok = deleteRecursively(skill.dir);
+        if (ok) setEnabled(skill.id, true);   // efface l'état « désactivé »
+        return ok;
+    }
+
+    private Skill findAny(String id) {
+        if (id == null) return null;
+        String want = id.trim().toLowerCase(Locale.ROOT);
+        for (Skill s : listAll()) if (s.id.equals(want)) return s;
+        return null;
+    }
+
+    private static boolean deleteRecursively(File f) {
+        File[] children = f.listFiles();
+        if (children != null) {
+            for (File c : children) deleteRecursively(c);
+        }
+        return f.delete() || !f.exists();
     }
 
     public Skill find(String id) {

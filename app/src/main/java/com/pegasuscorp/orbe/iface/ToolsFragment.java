@@ -22,8 +22,6 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
@@ -66,10 +64,6 @@ public class ToolsFragment extends Fragment {
     private LinearLayout toolsRoot;
     /** Clés de sections ouvertes ; vide = tout replié (défaut). */
     private final Set<String> expandedSections = new HashSet<>();
-
-    private final ActivityResultLauncher<String[]> skillZipPicker =
-            registerForActivityResult(new ActivityResultContracts.OpenDocument(),
-                    this::importSkillZip);
 
     @Override
     public void onAttach(@NonNull Context context) {
@@ -514,52 +508,24 @@ public class ToolsFragment extends Fragment {
     }
 
     private void addSkillsEntry(Context ctx) {
-        int count;
+        int total;
+        int active;
         try {
-            count = new SkillStore(ctx).list().size();
+            SkillStore store = new SkillStore(ctx);
+            total = store.listAll().size();
+            active = store.list().size();
         } catch (Exception e) {
-            count = 0;
+            total = 0;
+            active = 0;
         }
         addEntryRow(ctx, "Skills",
-                (count == 0 ? "Aucun skill installé" : count + " installé(s)")
-                        + " · appuie pour importer un ZIP", "+",
-                () -> skillZipPicker.launch(new String[]{"application/zip",
-                        "application/x-zip-compressed", "application/octet-stream"}));
+                total == 0 ? "Aucun skill installé · importer, gérer"
+                        : active + " actif(s) sur " + total + " · gérer, importer",
+                "›",
+                () -> startActivity(new Intent(ctx,
+                        com.pegasuscorp.orbe.skills.SkillsActivity.class)));
     }
 
-    /** Importe le ZIP choisi (un ou plusieurs skills) hors du thread UI. */
-    private void importSkillZip(@Nullable android.net.Uri uri) {
-        if (uri == null || getContext() == null) return;
-        final Context app = requireContext().getApplicationContext();
-        final String fallbackId = SkillStore.idFromFileName(displayName(app, uri));
-        new Thread(() -> {
-            String message;
-            try (java.io.InputStream in = app.getContentResolver().openInputStream(uri)) {
-                if (in == null) throw new java.io.IOException("Fichier illisible.");
-                List<String> ids = new SkillStore(app).importZip(in, fallbackId);
-                message = ids.isEmpty()
-                        ? "Aucun skill valide dans cette archive (SKILL.md avec description requis)."
-                        : "Skills installés : " + String.join(", ", ids);
-            } catch (Exception e) {
-                message = "Import impossible : "
-                        + (e.getMessage() != null ? e.getMessage() : "erreur");
-            }
-            final String toast = message;
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-                Toast.makeText(app, toast, Toast.LENGTH_LONG).show();
-                if (isAdded()) rebuildToolsList();
-            });
-        }, "skill-import").start();
-    }
-
-    private static String displayName(Context ctx, android.net.Uri uri) {
-        try (android.database.Cursor c = ctx.getContentResolver().query(uri,
-                new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (c != null && c.moveToFirst()) return c.getString(0);
-        } catch (Exception ignored) {
-        }
-        return uri.getLastPathSegment();
-    }
 
     private void addMcpEntry(Context ctx) {
         int active = com.pegasuscorp.orbe.mcp.McpStore.enabledTools().size();
