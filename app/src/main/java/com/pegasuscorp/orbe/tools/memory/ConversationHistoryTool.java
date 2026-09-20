@@ -56,7 +56,7 @@ public final class ConversationHistoryTool implements Tool {
     }
 
     /** Recherche par mots-clés (sans accents, insensible à la casse) ; les plus récents d'abord. */
-    static List<String> search(String query, List<SessionSummary> summaries,
+    public static List<String> search(String query, List<SessionSummary> summaries,
             List<ChatBackend.Turn> turns, int limit) {
         List<String> words = new ArrayList<>();
         for (String w : SpeechInputNormalizer.fold(query).split("\\s+")) {

@@ -285,6 +285,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         }
         applyQwenReasoningFormat(root, currentModelId());
         String body = root.toString();
+        PromptStats.note(body.length(), level);
 
         // Si encore trop gros pour Groq : remonter d'un niveau et reconstruire une fois.
         if (LlmProvider.ID_GROQ.equals(provider.id)
@@ -352,7 +353,9 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
             root.put("parallel_tool_calls", PARALLEL_TOOL_CALLS);
         }
         applyQwenReasoningFormat(root, currentModelId());
-        return root.toString();
+        String agenticBody = root.toString();
+        PromptStats.note(agenticBody.length(), level);
+        return agenticBody;
     }
 
     private String currentModelId() {

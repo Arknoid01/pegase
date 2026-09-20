@@ -34,7 +34,7 @@ Capture Eta : bulle utilisateur grise à droite ; sous elle une carte repliable 
 | **Consigne pendant une réponse** | File d'attente de consignes | Texte saisi pendant un tour → consigne (`7140131`) avec une bulle « ↪ Consigne : … » dans le fil | Comblé |
 | **Pièces jointes** | Bouton « + » : fichiers, images | Menu ⋮ → « Analyser une image », « Analyser un PDF », « Joindre / contextes .md » | Orbe couvre autant, mais caché dans un menu |
 | **Choix du modèle** | Dans la barre du chat (modèle, effort de raisonnement) | Réglages (clés API) ; rotation automatique des fournisseurs | Choix d'Orbe : moins de contrôle, moins d'encombrement |
-| **Jauge de contexte** | Utilisation du contexte + action « compacter » | Aucune ; la compaction (`287bd69`) est invisible | Manque |
+| **Jauge de contexte** | Utilisation du contexte + action « compacter » | Jauge « Contexte N % » (+ mention quand la compaction a servi) ; pas d'action manuelle « compacter » | Comblé, sans action manuelle |
 | **Liste des conversations** | Panneau latéral, recherche, export Markdown, suppression | Une discussion en cours, « Nouvelle discussion », export ; résumés de sessions dans Mémoire → Sessions | Écart |
 | **Statut d'un run en cours** | Carte d'état sur l'accueil avec bouton stop, notification | Orbe flottante et bulle copilote | Approches différentes |
 | **Bouton « aller en bas »** | Oui | Non trouvé **[à confirmer]** | Détail |
@@ -51,7 +51,7 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 |---|---|---|
 | **Découvrir les outils** | Cartes avec description | **Phrases à dire** avec lancement en un appui : très adapté à la voix, meilleur qu'Eta sur ce point |
 | **Disponibilité d'un outil** | Prérequis affiché par carte (permission manquante…) | Prérequis affiché sur la ligne de l'outil (ajouté) pour 9 outils ; appui = ouvre le bon réglage. Les autres outils gardent leur message d'erreur au moment de l'échec |
-| **Activer/désactiver** | Par outil ou famille [documenté], par skill (interrupteur) | Pas d'interrupteur d'outil |
+| **Activer/désactiver** | Par outil ou famille [documenté], par skill (interrupteur) | Par outil (menu ⋮) et par skill (interrupteur) |
 | **Skills** | Écran : liste, interrupteurs, suppression, import ZIP, installation GitHub | Écran complet (ajouté) : liste, interrupteur, aperçu, suppression, import ZIP ; pas d'installation depuis GitHub |
 | **MCP** | Écrans liste, ajout, détail, actualisation, états « connexion… » | Un écran d'ajout et d'activation par outil (ajouté) ; boîtes de dialogue |
 | **Permissions** | Écran « santé des permissions » et carte récapitulative | Demandes ponctuelles au moment du besoin (`PermissionFlow`) ; pas de tableau de bord |
@@ -85,8 +85,8 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 | 3 | **Prérequis par outil** avec un appui qui ouvre le bon réglage | **Fait** (`ToolRequirement` : photos, contacts, accès aux données d'usage, accès aux notifications, accessibilité ; message orange dans l'onglet Outils, vérifié aussi avant chaque exécution) |
 | 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md, import ZIP | **Fait** (`SkillsActivity`, `SkillStore.setEnabled/delete`) |
 | 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | **Fait** (bulle « ↪ Consigne : … » provisoire ; remplacée à la fin du tour par la vraie entrée d'historique) |
-| 6 | **Jauge de contexte** et mention « contexte abrégé » | À faire, 0,5 j |
-| 7 | **Liste des conversations + recherche** | À faire, 2-3 j |
+| 6 | **Jauge de contexte** et mention « contexte abrégé » | **Fait** (`PromptStats` : part du budget de la dernière requête, affichée sous la bannière mémoire ; orange dès 70 %, rouge dès 90 %) |
+| 7 | **Liste des conversations + recherche** | **Recherche faite** (menu ⋮ → « Rechercher dans l'historique » : résumés de sessions + derniers échanges). Pas de liste de conversations : Orbe ne conserve qu'un fil courant et des résumés de sessions, la liste demanderait de changer le modèle de données |
 | 8 | Factoriser les entrées de l'onglet Outils | **Fait** (`addEntryRow`, −68 lignes) |
 | 9 | **Interrupteurs d'outils** (désactiver SMS ou l'accès aux fichiers) | À faire, 1 j |
 

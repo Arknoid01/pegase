@@ -16,6 +16,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -89,6 +90,7 @@ public class DiscussionFragment extends Fragment {
     private RecyclerView conversationList;
     private ConversationChatAdapter conversationAdapter;
     private TextView memoryBannerView;
+    private TextView contextGaugeView;
     private EditText chatInput;
     private Button chatSendBtn;
     /** Consignes envoyées pendant le tour en cours : affichées en bulle jusqu'à la fin du tour. */
@@ -151,6 +153,13 @@ public class DiscussionFragment extends Fragment {
         bannerLp.bottomMargin = dp(ctx, 6);
         root.addView(memoryBannerView, bannerLp);
         refreshMemoryBanner();
+
+        contextGaugeView = new TextView(ctx);
+        contextGaugeView.setTextSize(10);
+        contextGaugeView.setTypeface(OrbeTokens.typeLight());
+        contextGaugeView.setPadding(dp(ctx, 10), 0, dp(ctx, 10), dp(ctx, 4));
+        contextGaugeView.setVisibility(View.GONE);
+        root.addView(contextGaugeView, matchWrap());
 
         conversationEmptyView = new TextView(ctx);
         conversationEmptyView.setText("— Aucun message. Écris à Pégase ci-dessous.");
@@ -403,6 +412,7 @@ public class DiscussionFragment extends Fragment {
             return;
         }
         refreshMemoryBanner();
+        refreshContextGauge();
         List<PegaseInterfaceData.ChatMessageUi> messages =
                 withPendingSteering(PegaseInterfaceData.conversationMessages(requireContext()));
         String signature = conversationSignature(messages);
@@ -507,7 +517,8 @@ public class DiscussionFragment extends Fragment {
                 "Analyser une image",
                 "Analyser un PDF",
                 "Exporter la conversation",
-                "Actualiser"
+                "Actualiser",
+                "Rechercher dans l'historique"
         }, which -> {
             if (which == 0) sendTextChatMessage();
             else if (which == 1) confirmStartNewDiscussion();
@@ -518,7 +529,7 @@ public class DiscussionFragment extends Fragment {
             else if (which == 6) {
                 lastConversationText = "";
                 refreshConversationIfNeeded();
-            }
+            } else if (which == 7) showHistorySearch();
         });
     }
 
@@ -574,6 +585,36 @@ public class DiscussionFragment extends Fragment {
                         : "Nouvelle conversation",
                 Toast.LENGTH_SHORT).show();
         if (chatInput != null) chatInput.requestFocus();
+    }
+
+    /** Recherche par mots-clés dans les résumés de sessions et les derniers échanges. */
+    private void showHistorySearch() {
+        Context ctx = requireContext();
+        EditText input = new EditText(ctx);
+        input.setHint("Mot ou sujet (ex. Lisbonne)");
+        input.setSingleLine(true);
+        new AlertDialog.Builder(ctx)
+                .setTitle("Rechercher dans nos conversations")
+                .setView(input)
+                .setPositiveButton("Chercher", (d, w) -> {
+                    String q = input.getText().toString().trim();
+                    if (q.isEmpty()) return;
+                    MemoryRepository repo = MemoryRepository.getInstance(ctx);
+                    List<String> hits = com.pegasuscorp.orbe.tools.memory.ConversationHistoryTool
+                            .search(q, repo.getAllSessionSummaries(), repo.getRecentTurns(), 8);
+                    TextView text = new TextView(ctx);
+                    text.setText(hits.isEmpty() ? "Rien trouvé sur « " + q + " »."
+                            : String.join("\n\n", hits));
+                    text.setTextSize(13);
+                    text.setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 12));
+                    text.setTextIsSelectable(true);
+                    ScrollView sv = new ScrollView(ctx);
+                    sv.addView(text);
+                    new AlertDialog.Builder(ctx).setTitle("« " + q + " »").setView(sv)
+                            .setPositiveButton("Fermer", null).show();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
     }
 
     private void showChatMdAttachMenu() {
@@ -1229,7 +1270,23 @@ public class DiscussionFragment extends Fragment {
         }
     }
 
+    /** Jauge « Contexte » : part du budget du prompt utilisée par la dernière requête. */
+    private void refreshContextGauge() {
+        if (contextGaugeView == null) return;
+        if (!com.pegasuscorp.orbe.chat.PromptStats.hasData()) {
+            contextGaugeView.setVisibility(View.GONE);
+            return;
+        }
+        int pct = com.pegasuscorp.orbe.chat.PromptStats.percent();
+        boolean compacted = com.pegasuscorp.orbe.chat.PromptStats.compactedRecently(120_000L);
+        contextGaugeView.setText(com.pegasuscorp.orbe.chat.PromptStats.formatGauge(pct, compacted));
+        contextGaugeView.setTextColor(Color.parseColor(
+                pct >= 90 ? "#F44336" : pct >= 70 ? "#FFB74D" : "#88FFFFFF"));
+        contextGaugeView.setVisibility(View.VISIBLE);
+    }
+
     private void finishTextChatReply() {
+        refreshContextGauge();
         pendingSteeringNotes.clear();
         if (viewModel != null) viewModel.setChatSending(false);
         if (!isAdded()) return;

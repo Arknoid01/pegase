@@ -42,11 +42,13 @@ final class AgenticContextCompactor {
             if (size(out) <= budgetChars) {
                 Trace.error("agentic", "compaction contexte : anciens résultats plafonnés à "
                         + cap + " car.");
+                PromptStats.noteCompaction();
                 return out;
             }
         }
         // dernier recours : ne garder en entier que la dernière étape
         Trace.error("agentic", "compaction contexte : dernière étape seule conservée");
+        PromptStats.noteCompaction();
         return render(steps, steps.size() - 1, RESULT_CAPS[RESULT_CAPS.length - 1]);
     }
 
