@@ -26,10 +26,10 @@ Capture Eta : bulle utilisateur grise à droite ; sous elle une carte repliable 
 
 | Fonction | Eta | Orbe | Écart |
 |---|---|---|---|
-| **Historique des outils dans le fil** | Carte repliable **conservée** : outils, statut, durée, raisonnement | `ThinkingView` : ligne éphémère (« Pégase réfléchit… » + statut des outils) qui **disparaît quand la réponse arrive** [vérifié dans le code] | **Grand écart** : après coup, on ne voit plus ce que Pégase a fait |
-| **Raisonnement visible** | Affiché, repliable, avec durée | Des `ReasoningCard` sont stockées (`ReasoningStore`) pour le diagnostic ; leur affichage dans le chat n'a pas été vérifié **[à confirmer]** | Probable manque |
-| **Actions sur un message** | Copier la réponse / le code / la commande, modifier, régénérer, supprimer | **Aucune trouvée** (pas d'appui long ni de bouton copier dans le chat) | Grand écart |
-| **Rendu Markdown** | Streaming Markdown, blocs de code copiables | Bulles de texte simple ; Markwon n'est utilisé que dans l'onglet Orion **[à confirmer côté adaptateur]** | Écart |
+| **Historique des outils dans le fil** | Carte repliable **conservée** : outils, statut, durée, raisonnement | Pendant la réponse : `ThinkingView`, ligne éphémère. **Après** : une icône 🔍 sous chaque réponse ouvre un panneau `ReasoningCard` (outils ✅/❌ avec paramètres, résultat et durée, souvenirs et contextes utilisés, sources web, fournisseur, alerte de fiabilité) [vérifié : `ConversationChatAdapter`]. Le contenu est **plus riche** que celui d'Eta, mais caché derrière une petite icône ; **corrigé après cet audit** : une ligne de résumé « 🔧 outil ✅ · outil ✅ · 2,1 s » est maintenant visible sous la réponse | Presque comblé. Reste : les cartes sont **volatiles** (48 en mémoire, perdues au redémarrage : le panneau affiche alors « pas encore de carte ») |
+| **Raisonnement du modèle** | Raisonnement du fournisseur affiché, repliable, avec durée | Le panneau montre le cheminement de Pégase (intention, outils, contexte) ; pas le raisonnement brut du modèle | Différent, pas absent |
+| **Actions sur un message** | Copier la réponse / le code / la commande, modifier, régénérer, supprimer | Copier ajouté après cet audit (bouton 📋 et appui long, y compris sur tes messages) ; ni modifier, ni régénérer, ni supprimer | Copier comblé |
+| **Rendu Markdown** | Streaming Markdown, blocs de code copiables | Bulles de texte simple. Les réponses sont nettoyées pour l'oral (`sanitizeForSpeech`) et contiennent donc peu de Markdown : **peu utile pour Orbe**, on ne le fait pas | Écart assumé |
 | **Arrêter une réponse** | La flèche d'envoi devient « stop » | Idem depuis `7140131` (⏹) | Comblé |
 | **Consigne pendant une réponse** | File d'attente de consignes | Texte saisi pendant un tour → consigne (`7140131`), mais **pas de bulle** dans le fil | Comblé côté moteur, incomplet côté affichage |
 | **Pièces jointes** | Bouton « + » : fichiers, images | Menu ⋮ → « Analyser une image », « Analyser un PDF », « Joindre / contextes .md » | Orbe couvre autant, mais caché dans un menu |
@@ -78,17 +78,17 @@ Capture Orbe (30 juillet) : fond sombre ; en tête « État : ✓ Spotify · ✓
 
 ## 5. Ce qu'Orbe devrait reprendre, par ordre d'intérêt
 
-| # | Amélioration | Effort | Pourquoi |
-|---|---|---|---|
-| 1 | **Carte « N outils utilisés » repliable dans le fil**, conservée après la réponse (outils, statut, durée) | 1 j | Les événements `onToolStart/onToolEnd` existent déjà ; avec les lots et l'enchaînement de 8 outils, on ne voit plus rien de ce que fait Pégase |
-| 2 | **Copier sur les réponses** (bouton et appui long) + rendu Markdown des bulles (Markwon est déjà en dépendance) | 1 j | Manque le plus concret au quotidien |
-| 3 | **Prérequis par outil** (« autorise l'accès aux photos », « accès données d'usage ») avec un appui qui ouvre le bon réglage | 1-2 j | Les erreurs d'outil renvoient déjà ces messages au modèle ; l'utilisateur ne les voit qu'au moment de l'échec |
-| 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md | 0,5 j | Seul le compteur est visible aujourd'hui |
-| 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | 2 h | Sinon on ne sait pas si elle a été prise en compte |
-| 6 | **Jauge de contexte** et mention discrète « contexte abrégé » | 0,5 j | Rend visible la compaction |
-| 7 | **Liste des conversations + recherche** | 2-3 j | Les résumés de sessions existent déjà en mémoire |
-| 8 | **Factoriser les entrées de l'onglet Outils** (une seule fonction `addEntryRow`) | 1 h | Supprime la duplication que j'ai introduite |
-| 9 | **Interrupteurs d'outils** (désactiver SMS ou l'accès aux fichiers) | 1 j | Reprend le contrôle utilisateur d'Eta |
+| # | Amélioration | État |
+|---|---|---|
+| 1 | Résumé des outils visible sous la réponse | **Fait** (`ConversationChatAdapter.toolsSummary`) ; reste à **persister** les cartes de raisonnement au-delà du redémarrage |
+| 2 | Copier une réponse | **Fait** (📋 et appui long). Rendu Markdown écarté (réponses nettoyées pour l'oral) |
+| 3 | **Prérequis par outil** (« autorise l'accès aux photos », « accès données d'usage ») avec un appui qui ouvre le bon réglage | À faire, 1-2 j : les erreurs d'outil renvoient déjà ces messages au modèle, l'utilisateur ne les voit qu'au moment de l'échec |
+| 4 | **Écran Skills complet** : liste, activer/désactiver, supprimer, aperçu du SKILL.md | À faire, 0,5 j : seul le compteur est visible |
+| 5 | **Bulle de consigne** dans le fil quand on l'envoie en cours de réponse | À faire, 2 h |
+| 6 | **Jauge de contexte** et mention « contexte abrégé » | À faire, 0,5 j |
+| 7 | **Liste des conversations + recherche** | À faire, 2-3 j |
+| 8 | Factoriser les entrées de l'onglet Outils | **Fait** (`addEntryRow`, −68 lignes) |
+| 9 | **Interrupteurs d'outils** (désactiver SMS ou l'accès aux fichiers) | À faire, 1 j |
 
 ## 6. Ce qu'il ne faut pas copier
 - Le design Miuix : l'identité d'Orbe (orbe, fond Fluid, thèmes) est ce qui la distingue.

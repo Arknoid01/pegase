@@ -504,149 +504,27 @@ public class ToolsFragment extends Fragment {
     }
 
     private void addPcShellEntry(Context ctx) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(C_CARD));
-        bg.setCornerRadius(dp(ctx, 8));
-        bg.setStroke(dp(ctx, 1), Color.parseColor(C_SEP));
-        row.setBackground(bg);
-        LinearLayout.LayoutParams rowLp = matchWrap();
-        rowLp.bottomMargin = dp(ctx, 8);
-        row.setLayoutParams(rowLp);
-
-        LinearLayout textCol = new LinearLayout(ctx);
-        textCol.setOrientation(LinearLayout.VERTICAL);
-        row.addView(textCol, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView label = new TextView(ctx);
-        label.setText("Terminal PC");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(14);
-        label.setTypeface(null, Typeface.BOLD);
-        textCol.addView(label);
-
-        TextView sub = new TextView(ctx);
-        sub.setText("SSH · commandes enregistrées · Tailscale");
-        sub.setTextColor(Color.parseColor(C_MUTED));
-        sub.setTextSize(11);
-        sub.setPadding(0, dp(ctx, 2), 0, 0);
-        textCol.addView(sub);
-
-        TextView chev = new TextView(ctx);
-        chev.setText("›");
-        chev.setTextColor(Color.parseColor(C_CYAN));
-        chev.setTextSize(18);
-        row.addView(chev);
-
-        row.setOnClickListener(v -> {
-            PegaseSheets.haptic(v);
-            startActivity(new Intent(ctx, PcTerminalActivity.class));
-        });
-        toolsRoot.addView(row, rowLp);
+        addEntryRow(ctx, "Terminal PC", "SSH · commandes enregistrées · Tailscale", "›",
+                () -> startActivity(new Intent(ctx, PcTerminalActivity.class)));
     }
 
     private void addDriveSyncEntry(Context ctx) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(C_CARD));
-        bg.setCornerRadius(dp(ctx, 8));
-        bg.setStroke(dp(ctx, 1), Color.parseColor(C_SEP));
-        row.setBackground(bg);
-        LinearLayout.LayoutParams rowLp = matchWrap();
-        rowLp.bottomMargin = dp(ctx, 8);
-        row.setLayoutParams(rowLp);
-
-        LinearLayout textCol = new LinearLayout(ctx);
-        textCol.setOrientation(LinearLayout.VERTICAL);
-        row.addView(textCol, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView label = new TextView(ctx);
-        label.setText("Sync bloc-notes · Drive");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(14);
-        label.setTypeface(null, Typeface.BOLD);
-        textCol.addView(label);
-
-        TextView sub = new TextView(ctx);
-        sub.setText("Google Drive · sans API · dossier JSON");
-        sub.setTextColor(Color.parseColor(C_MUTED));
-        sub.setTextSize(11);
-        sub.setPadding(0, dp(ctx, 2), 0, 0);
-        textCol.addView(sub);
-
-        TextView chev = new TextView(ctx);
-        chev.setText("›");
-        chev.setTextColor(Color.parseColor(C_CYAN));
-        chev.setTextSize(18);
-        row.addView(chev);
-
-        row.setOnClickListener(v -> {
-            PegaseSheets.haptic(v);
-            startActivity(new Intent(ctx, DriveSyncSettingsActivity.class));
-        });
-        toolsRoot.addView(row, rowLp);
+        addEntryRow(ctx, "Sync bloc-notes · Drive", "Google Drive · sans API · dossier JSON", "›",
+                () -> startActivity(new Intent(ctx, DriveSyncSettingsActivity.class)));
     }
 
     private void addSkillsEntry(Context ctx) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(C_CARD));
-        bg.setCornerRadius(dp(ctx, 8));
-        bg.setStroke(dp(ctx, 1), Color.parseColor(C_SEP));
-        row.setBackground(bg);
-        LinearLayout.LayoutParams rowLp = matchWrap();
-        rowLp.bottomMargin = dp(ctx, 8);
-        row.setLayoutParams(rowLp);
-
-        LinearLayout textCol = new LinearLayout(ctx);
-        textCol.setOrientation(LinearLayout.VERTICAL);
-        row.addView(textCol, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView label = new TextView(ctx);
-        label.setText("Skills");
-        label.setTextColor(Color.WHITE);
-        label.setTextSize(14);
-        label.setTypeface(null, Typeface.BOLD);
-        textCol.addView(label);
-
         int count;
         try {
             count = new SkillStore(ctx).list().size();
         } catch (Exception e) {
             count = 0;
         }
-        TextView sub = new TextView(ctx);
-        sub.setText((count == 0 ? "Aucun skill installé" : count + " installé(s)")
-                + " · appuie pour importer un ZIP");
-        sub.setTextColor(Color.parseColor(C_MUTED));
-        sub.setTextSize(11);
-        sub.setPadding(0, dp(ctx, 2), 0, 0);
-        textCol.addView(sub);
-
-        TextView chev = new TextView(ctx);
-        chev.setText("+");
-        chev.setTextColor(Color.parseColor(C_CYAN));
-        chev.setTextSize(18);
-        row.addView(chev);
-
-        row.setOnClickListener(v -> {
-            PegaseSheets.haptic(v);
-            skillZipPicker.launch(new String[]{"application/zip",
-                    "application/x-zip-compressed", "application/octet-stream"});
-        });
-        toolsRoot.addView(row, rowLp);
+        addEntryRow(ctx, "Skills",
+                (count == 0 ? "Aucun skill installé" : count + " installé(s)")
+                        + " · appuie pour importer un ZIP", "+",
+                () -> skillZipPicker.launch(new String[]{"application/zip",
+                        "application/x-zip-compressed", "application/octet-stream"}));
     }
 
     /** Importe le ZIP choisi (un ou plusieurs skills) hors du thread UI. */
@@ -684,6 +562,17 @@ public class ToolsFragment extends Fragment {
     }
 
     private void addMcpEntry(Context ctx) {
+        int active = com.pegasuscorp.orbe.mcp.McpStore.enabledTools().size();
+        addEntryRow(ctx, "Serveurs MCP",
+                active == 0 ? "Outils distants · aucun activé"
+                        : "Outils distants · " + active + " activé(s)", "›",
+                () -> startActivity(new Intent(ctx,
+                        com.pegasuscorp.orbe.mcp.McpSettingsActivity.class)));
+    }
+
+    /** Ligne de l'onglet Outils : titre, sous-titre, chevron et action (un appui = haptique + action). */
+    private void addEntryRow(Context ctx, String title, String subtitle, String chevron,
+            Runnable onClick) {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -703,30 +592,28 @@ public class ToolsFragment extends Fragment {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView label = new TextView(ctx);
-        label.setText("Serveurs MCP");
+        label.setText(title);
         label.setTextColor(Color.WHITE);
         label.setTextSize(14);
         label.setTypeface(null, Typeface.BOLD);
         textCol.addView(label);
 
-        int active = com.pegasuscorp.orbe.mcp.McpStore.enabledTools().size();
         TextView sub = new TextView(ctx);
-        sub.setText(active == 0 ? "Outils distants · aucun activé"
-                : "Outils distants · " + active + " activé(s)");
+        sub.setText(subtitle);
         sub.setTextColor(Color.parseColor(C_MUTED));
         sub.setTextSize(11);
         sub.setPadding(0, dp(ctx, 2), 0, 0);
         textCol.addView(sub);
 
         TextView chev = new TextView(ctx);
-        chev.setText("›");
+        chev.setText(chevron);
         chev.setTextColor(Color.parseColor(C_CYAN));
         chev.setTextSize(18);
         row.addView(chev);
 
         row.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
-            startActivity(new Intent(ctx, com.pegasuscorp.orbe.mcp.McpSettingsActivity.class));
+            onClick.run();
         });
         toolsRoot.addView(row, rowLp);
     }

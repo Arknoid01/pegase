@@ -1,9 +1,13 @@
 package com.pegasuscorp.orbe;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
@@ -77,6 +81,37 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
         return items.size();
     }
 
+    /** Copie un texte dans le presse-papiers avec un retour visuel. */
+    static void copyToClipboard(Context ctx, String text) {
+        if (text == null || text.isEmpty()) return;
+        ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null) return;
+        cm.setPrimaryClip(ClipData.newPlainText("Pégase", text));
+        Toast.makeText(ctx, "Copié", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Résumé d'une ligne des outils d'un tour : « 🔧 météo ✅ · agenda ✅ · 2,1 s ».
+     * Vide s'il n'y a pas d'outil.
+     */
+    static String toolsSummary(ReasoningCard card) {
+        if (card == null || card.toolsUsed.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("🔧 ");
+        long total = 0;
+        int shown = 0;
+        for (ReasoningCard.ToolStep step : card.toolsUsed) {
+            total += step.latencyMs;
+            if (shown++ >= 4) continue;
+            if (shown > 1) sb.append(" · ");
+            sb.append(step.name).append(step.ok ? " ✅" : " ❌");
+        }
+        if (card.toolsUsed.size() > 4) sb.append(" · +").append(card.toolsUsed.size() - 4);
+        if (total > 0) {
+            sb.append(" · ").append(String.format(java.util.Locale.FRANCE, "%.1f s", total / 1000.0));
+        }
+        return sb.toString();
+    }
+
     static final class UserHolder extends RecyclerView.ViewHolder {
         final TextView body;
         final TextView time;
@@ -89,6 +124,10 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
 
         void bind(PegaseInterfaceData.ChatMessageUi msg) {
             body.setText(msg.text);
+            body.setOnLongClickListener(v -> {
+                copyToClipboard(v.getContext(), msg.text);
+                return true;
+            });
             time.setText(msg.timeLabel);
             time.setVisibility(msg.timeLabel == null || msg.timeLabel.isEmpty()
                     ? View.GONE : View.VISIBLE);
@@ -102,6 +141,8 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
         final TextView warn;
         final TextView toggle;
         final TextView panel;
+        final TextView toolsSummary;
+        final TextView copy;
 
         PegaseHolder(View itemView) {
             super(itemView);
@@ -111,6 +152,8 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
             warn = itemView.findViewById(R.id.reasoning_warn);
             toggle = itemView.findViewById(R.id.reasoning_toggle);
             panel = itemView.findViewById(R.id.reasoning_panel);
+            toolsSummary = itemView.findViewById(R.id.tools_summary);
+            copy = itemView.findViewById(R.id.message_copy);
         }
 
         void bind(PegaseInterfaceData.ChatMessageUi msg, int position, boolean isExpanded,
@@ -126,6 +169,15 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
             if (card == null && msg.text != null && !msg.text.isEmpty()) {
                 card = ReasoningStore.findForReply(msg.text);
             }
+            copy.setOnClickListener(v -> copyToClipboard(v.getContext(), msg.text));
+            body.setOnLongClickListener(v -> {
+                copyToClipboard(v.getContext(), msg.text);
+                return true;
+            });
+            String summary = toolsSummary(card);
+            toolsSummary.setVisibility(summary.isEmpty() ? View.GONE : View.VISIBLE);
+            toolsSummary.setText(summary);
+            toolsSummary.setOnClickListener(v -> onToggle.run());
             boolean hallu = card != null && card.potentialHallucination;
             warn.setVisibility(hallu ? View.VISIBLE : View.GONE);
             toggle.setText(isExpanded ? "🔍 ▲" : "🔍");
