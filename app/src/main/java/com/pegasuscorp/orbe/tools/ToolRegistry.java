@@ -128,6 +128,9 @@ public class ToolRegistry {
         for (Tool t : tools) {
             if (t.id().equals(id)) return t;
         }
+        for (Tool t : com.pegasuscorp.orbe.mcp.McpStore.enabledTools()) {
+            if (t.id().equals(id)) return t;
+        }
         return null;
     }
 
@@ -202,6 +205,9 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.COMPOSITE)) {
             out.add(compositeTool);
         }
+        if (tags.contains(ToolTag.MCP)) {
+            out.addAll(com.pegasuscorp.orbe.mcp.McpStore.enabledTools());
+        }
         return out;
     }
 
@@ -242,6 +248,11 @@ public class ToolRegistry {
         }
         if (tags.contains(ToolTag.COMPOSITE)) {
             sb.append("  • ").append(compositeTool.description()).append("\n");
+        }
+        if (tags.contains(ToolTag.MCP)) {
+            for (Tool t : com.pegasuscorp.orbe.mcp.McpStore.enabledTools()) {
+                sb.append("  • ").append(t.description()).append("\n");
+            }
         }
         appendExamples(sb, tags);
         return sb.toString();

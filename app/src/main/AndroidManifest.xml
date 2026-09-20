@@ -319,6 +319,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".mcp.McpSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".sync.DriveSyncSettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe"

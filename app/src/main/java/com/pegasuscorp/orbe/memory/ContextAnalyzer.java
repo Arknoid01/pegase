@@ -72,10 +72,14 @@ public final class ContextAnalyzer {
             allowedTools = toolsFor(intent, fold);
         }
 
-        // Skills : outil exposé (et index injecté) seulement si au moins un skill est installé.
-        if (!allowedTools.isEmpty() && hasSkills(context)) {
+        // Skills / MCP : exposés seulement si au moins un skill est installé / un outil MCP activé.
+        boolean skills = !allowedTools.isEmpty() && hasSkills(context);
+        boolean mcp = !allowedTools.isEmpty()
+                && !com.pegasuscorp.orbe.mcp.McpStore.enabledTools().isEmpty();
+        if (skills || mcp) {
             allowedTools = EnumSet.copyOf(allowedTools);
-            allowedTools.add(ToolTag.SKILLS);
+            if (skills) allowedTools.add(ToolTag.SKILLS);
+            if (mcp) allowedTools.add(ToolTag.MCP);
         }
 
         EnumSet<ProfileSection> sections = sectionsFor(intent, entities);

@@ -53,5 +53,7 @@ public enum ToolTag {
     PC_SHELL,
     COMPOSITE,
     /** Skills : procédures chargées à la demande. */
-    SKILLS
+    SKILLS,
+    /** Outils de serveurs MCP distants activés par l'utilisateur. */
+    MCP
 }

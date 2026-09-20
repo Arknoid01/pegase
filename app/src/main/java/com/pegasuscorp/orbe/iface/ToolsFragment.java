@@ -129,6 +129,7 @@ public class ToolsFragment extends Fragment {
         addPcShellEntry(ctx);
         addDriveSyncEntry(ctx);
         addSkillsEntry(ctx);
+        addMcpEntry(ctx);
 
         Set<String> pinnedKeys = new HashSet<>(ToolFavoritesStore.getPinnedKeys(ctx));
         List<PegaseInterfaceData.ToolHint> pinned = PegaseInterfaceData.pinnedHints(ctx);
@@ -680,5 +681,53 @@ public class ToolsFragment extends Fragment {
         } catch (Exception ignored) {
         }
         return uri.getLastPathSegment();
+    }
+
+    private void addMcpEntry(Context ctx) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor(C_CARD));
+        bg.setCornerRadius(dp(ctx, 8));
+        bg.setStroke(dp(ctx, 1), Color.parseColor(C_SEP));
+        row.setBackground(bg);
+        LinearLayout.LayoutParams rowLp = matchWrap();
+        rowLp.bottomMargin = dp(ctx, 8);
+        row.setLayoutParams(rowLp);
+
+        LinearLayout textCol = new LinearLayout(ctx);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        row.addView(textCol, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView label = new TextView(ctx);
+        label.setText("Serveurs MCP");
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(14);
+        label.setTypeface(null, Typeface.BOLD);
+        textCol.addView(label);
+
+        int active = com.pegasuscorp.orbe.mcp.McpStore.enabledTools().size();
+        TextView sub = new TextView(ctx);
+        sub.setText(active == 0 ? "Outils distants · aucun activé"
+                : "Outils distants · " + active + " activé(s)");
+        sub.setTextColor(Color.parseColor(C_MUTED));
+        sub.setTextSize(11);
+        sub.setPadding(0, dp(ctx, 2), 0, 0);
+        textCol.addView(sub);
+
+        TextView chev = new TextView(ctx);
+        chev.setText("›");
+        chev.setTextColor(Color.parseColor(C_CYAN));
+        chev.setTextSize(18);
+        row.addView(chev);
+
+        row.setOnClickListener(v -> {
+            PegaseSheets.haptic(v);
+            startActivity(new Intent(ctx, com.pegasuscorp.orbe.mcp.McpSettingsActivity.class));
+        });
+        toolsRoot.addView(row, rowLp);
     }
 }
