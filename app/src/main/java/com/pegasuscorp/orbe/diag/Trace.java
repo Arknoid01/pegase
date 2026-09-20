@@ -614,9 +614,9 @@ public final class Trace {
         write(o);
     }
 
-    /** Outils dont les données viennent d'un tiers (MCP) : ni arguments ni résultats dans la trace. */
+    /** Outils sensibles (voir SensitiveTools) : ni arguments ni résultats dans la trace. */
     static boolean isExternalTool(String toolId) {
-        return toolId != null && toolId.startsWith("mcp_");
+        return com.pegasuscorp.orbe.tools.SensitiveTools.isSensitive(toolId);
     }
 
     /** Noms des paramètres seulement — jamais leurs valeurs. */

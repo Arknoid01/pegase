@@ -286,6 +286,10 @@ public class ConversationManager {
 
     /** @return texte à afficher / parler (peut différer du brut si filtre anti-fantôme). */
     private String recordAssistantReply(String text) {
+        return recordAssistantReply(text, true);
+    }
+
+    private String recordAssistantReply(String text, boolean persist) {
         consumeProviderTrace();
         boolean toolCall = ToolDispatcher.isToolCall(text);
         noteLlmMeta(backend.traceBackendLabel(), System.currentTimeMillis() - lastSendAtMs);
@@ -306,7 +310,7 @@ public class ConversationManager {
             }
             return text;
         }
-        addTurn(false, text);
+        addTurn(false, text, persist);
         userTurnPending = false;
         return text;
     }
@@ -449,6 +453,11 @@ public class ConversationManager {
     }
 
     private void addTurn(boolean fromUser, String text) {
+        addTurn(fromUser, text, true);
+    }
+
+    /** @param persist false : reste dans l'historique de la session en cours, ni résumé ni disque */
+    private void addTurn(boolean fromUser, String text, boolean persist) {
         String stored = ConversationHistorySanitizer.forStorage(fromUser, text);
         if (stored.isEmpty()) return;
         ChatBackend.Turn turn = new ChatBackend.Turn(fromUser, stored);
@@ -463,9 +472,9 @@ public class ConversationManager {
             return;
         }
         history.add(turn);
-        sessionTurns.add(turn);
+        if (persist) sessionTurns.add(turn);
         trimHistory(history);
-        memory.addTurn(fromUser, stored);
+        if (persist) memory.addTurn(fromUser, stored);
     }
 
     private void replaceLastUserTurn(String text) {
@@ -569,13 +578,13 @@ public class ConversationManager {
                 String text = reply.content != null && !reply.content.isEmpty()
                         ? reply.content
                         : chain.lastToolDisplayText();
-                callback.onReply(recordAssistantReply(text));
+                callback.onReply(recordAssistantReply(text, !chain.usedSensitiveTool()));
             }
 
             @Override
             public void onReply(String text) {
                 if (isStaleCallback(callbackGeneration)) return;
-                callback.onReply(recordAssistantReply(text));
+                callback.onReply(recordAssistantReply(text, !chain.usedSensitiveTool()));
             }
 
             @Override

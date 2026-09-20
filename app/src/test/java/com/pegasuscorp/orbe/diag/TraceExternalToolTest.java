@@ -15,6 +15,8 @@ public class TraceExternalToolTest {
     @Test
     public void outilsMcp_sontExternes_pasLesAutres() {
         assertTrue(Trace.isExternalTool("mcp_notes_chercher"));
+        assertTrue(Trace.isExternalTool("sms"));
+        assertTrue(Trace.isExternalTool("notifications"));
         assertFalse(Trace.isExternalTool("weather"));
         assertFalse(Trace.isExternalTool(null));
     }

@@ -1705,7 +1705,8 @@ public class PegaseSession {
         }
 
         conv.recordToolReply(result.text,
-                !EphemeralMemoryFilter.isUiToolId(toolId));
+                !EphemeralMemoryFilter.isUiToolId(toolId)
+                        && !com.pegasuscorp.orbe.tools.SensitiveTools.isSensitive(toolId));
         publishReasoningForReply(result.text);
         if (exit) {
             notifyToolExit(obs, result);
@@ -2002,6 +2003,7 @@ public class PegaseSession {
             Trace.error("agentic", "suppressed already-open claim → " + replaced);
             out = replaced;
         }
+        boolean persist = activeAgenticChain == null || !activeAgenticChain.usedSensitiveTool();
         List<String> steeringNotes = activeAgenticChain != null
                 ? new ArrayList<>(activeAgenticChain.steering()) : java.util.Collections.emptyList();
         clearAgenticState();
@@ -2010,7 +2012,7 @@ public class PegaseSession {
             return;
         }
         for (String note : steeringNotes) conv.recordUserMessage(note);
-        conv.recordToolReply(out);
+        conv.recordToolReply(out, persist);
         markTurnLlmSynthesis(conv);
         publishReasoningForReply(out);
         notifyReply(obs, out, false);

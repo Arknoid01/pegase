@@ -612,6 +612,25 @@ public class PegaseSessionTest {
     }
 
     @Test
+    public void text_sensitiveTool_replyNotPersistedInRecentTurns() throws Exception {
+        backend.nextNativeToolCalls = java.util.Collections.singletonList(
+                new com.pegasuscorp.orbe.chat.NativeToolCall(
+                        "call_1", "sms", new JSONObject()));
+        backend.nextSynthesisReply = "Marie dit : rendez-vous à 18h.";
+        session.init(new SessionContext(Channel.TEXT, false));
+        session.send("Lis mes sms", new SessionObserver() {
+            @Override public void onReply(String text, boolean fired) {}
+            @Override public void onToolResult(ToolResult result) {}
+            @Override public void onError(String message) {}
+        });
+        drainMainThread();
+
+        for (com.pegasuscorp.orbe.chat.ChatBackend.Turn t : memory.getRecentTurns()) {
+            assertFalse(t.text.contains("rendez-vous à 18h"));
+        }
+    }
+
+    @Test
     public void steer_withoutTurn_returnsFalse() {
         assertFalse(session.steer("bonjour"));
     }
@@ -926,6 +945,7 @@ public class PegaseSessionTest {
             if ("stub2".equals(id)) return new StubTool(false, "stub2");
             if ("stub_image".equals(id)) return new StubTool(true, "stub_image");
             if ("stub_fail".equals(id)) return new StubTool(false, "stub_fail");
+            if ("sms".equals(id)) return new StubTool(false, "sms");
             if ("search".equals(id)) return new StubTool(false, "search");
             return super.findById(id);
         }

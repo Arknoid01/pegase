@@ -133,6 +133,16 @@ public final class AgenticChain {
         return n;
     }
 
+    /** Un outil sensible a servi dans ce tour : la réponse finale ne doit pas être persistée. */
+    public boolean usedSensitiveTool() {
+        for (Step step : steps) {
+            if (com.pegasuscorp.orbe.tools.SensitiveTools.isSensitive(step.toolCall.name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean usedTool(String toolName) {
         if (toolName == null || toolName.trim().isEmpty()) return false;
         String want = toolName.trim().toLowerCase(java.util.Locale.ROOT);
