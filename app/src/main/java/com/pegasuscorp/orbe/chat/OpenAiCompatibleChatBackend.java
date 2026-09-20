@@ -326,15 +326,11 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
                 messages.put(message(turn.fromUser ? "user" : "assistant", turn.text));
             }
         }
-        for (AgenticChain.Step step : chain.steps()) {
-            messages.put(assistantToolCallMessage(step.assistantReply, step.toolCall));
-            messages.put(toolResultMessage(step.toolCall, step.toolResultContent));
-            if (step.rejected) continue; // pas de « succès » à confirmer : le modèle doit corriger
-            // Hint adapté : search/wiki → synthèse ; notepad/spotify → confirmation courte
-            String toolName = step.toolCall != null ? step.toolCall.name : "outil";
-            String result = step.toolDisplayText != null && !step.toolDisplayText.isEmpty()
-                    ? step.toolDisplayText : step.toolResultContent;
-            messages.put(message("system", ToolSuccessHint.build(toolName, result)));
+        int fixedChars = messages.toString().length();
+        int stepsBudget = Math.max(2_000,
+                AgenticContextCompactor.maxPromptChars(level) - fixedChars);
+        for (JSONObject m : AgenticContextCompactor.stepMessages(chain.steps(), stepsBudget)) {
+            messages.put(m);
         }
         for (String note : chain.steering()) {
             messages.put(message("user", note));
@@ -363,7 +359,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         return modelOverride != null ? modelOverride : provider.modelId;
     }
 
-    private static JSONObject message(String role, String content) throws Exception {
+    static JSONObject message(String role, String content) throws Exception {
         return new JSONObject().put("role", role).put("content", content);
     }
 
@@ -418,7 +414,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         return sb.toString();
     }
 
-    private static JSONObject assistantToolCallMessage(LlmReply assistantReply,
+    static JSONObject assistantToolCallMessage(LlmReply assistantReply,
             NativeToolCall call) throws Exception {
         JSONObject msg = new JSONObject();
         msg.put("role", "assistant");
@@ -442,7 +438,7 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         return msg;
     }
 
-    private static JSONObject toolResultMessage(NativeToolCall call, String content)
+    static JSONObject toolResultMessage(NativeToolCall call, String content)
             throws Exception {
         JSONObject msg = new JSONObject();
         msg.put("role", "tool");
