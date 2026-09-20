@@ -587,7 +587,8 @@ public final class Trace {
     public static void toolStart(String toolId, JSONObject params, boolean fromLocalRouter) {
         JSONObject o = base("tool_start");
         put(o, "tool", toolId);
-        put(o, "params", params != null ? params.toString() : "{}");
+        put(o, "params", isExternalTool(toolId) ? paramKeysOnly(params)
+                : (params != null ? params.toString() : "{}"));
         put(o, "local_router", fromLocalRouter);   // court-circuit VoiceIntentRouter ?
         write(o);
     }
@@ -599,9 +600,28 @@ public final class Trace {
         put(o, "tool", toolId);
         put(o, "ok", ok);
         put(o, "duration_ms", durationMs);
-        put(o, "reply", truncateForTrace(spokenReply));
-        put(o, "error", error);
+        put(o, "reply", isExternalTool(toolId)
+                ? "[" + (spokenReply != null ? spokenReply.length() : 0) + " car.]"
+                : truncateForTrace(spokenReply));
+        put(o, "error", isExternalTool(toolId) && error != null ? "[erreur externe]" : error);
         write(o);
+    }
+
+    /** Outils dont les données viennent d'un tiers (MCP) : ni arguments ni résultats dans la trace. */
+    static boolean isExternalTool(String toolId) {
+        return toolId != null && toolId.startsWith("mcp_");
+    }
+
+    /** Noms des paramètres seulement — jamais leurs valeurs. */
+    static String paramKeysOnly(JSONObject params) {
+        if (params == null) return "{}";
+        java.util.Iterator<String> keys = params.keys();
+        StringBuilder sb = new StringBuilder("{");
+        while (keys.hasNext()) {
+            if (sb.length() > 1) sb.append(",");
+            sb.append(keys.next());
+        }
+        return sb.append("}").toString();
     }
 
     /**

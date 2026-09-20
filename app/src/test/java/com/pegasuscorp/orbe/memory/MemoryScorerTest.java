@@ -45,7 +45,9 @@ public class MemoryScorerTest {
 
     @Test
     public void recencyBoost_recentMemoryScoresHigher() {
-        MemoryEntry recent = new MemoryEntry("general", "test", 0.5, "2026-07-28");
+        // Dates relatives : le boost décroît avec l'âge, un test à date fixe finit par périmer.
+        String yesterday = java.time.LocalDate.now().minusDays(1).toString();
+        MemoryEntry recent = new MemoryEntry("general", "test", 0.5, yesterday);
         MemoryEntry old = new MemoryEntry("general", "test", 0.5, "2020-01-01");
         assertTrue(MemoryScorer.recencyBoost(recent.createdAt) > MemoryScorer.recencyBoost(old.createdAt));
     }
