@@ -28,4 +28,22 @@ public class TraceExternalToolTest {
         assertTrue(out.contains("query") && out.contains("token"));
         assertEquals("{}", Trace.paramKeysOnly(null));
     }
+
+    @Test
+    public void champsTexte_couvrentMessagesEtParametres() {
+        for (String k : new String[]{"text", "reply", "params", "user_msg", "raw_preview", "target"}) {
+            assertTrue(k, Trace.isTextFieldName(k));
+        }
+        assertFalse(Trace.isTextFieldName("tool"));
+        assertFalse(Trace.isTextFieldName("duration_ms"));
+    }
+
+    @Test
+    public void init_releaseCensure_debugNon() {
+        android.content.Context ctx = org.robolectric.RuntimeEnvironment.getApplication();
+        // les tests Robolectric tournent en mode debuggable : pas de censure par défaut
+        Trace.init(ctx);
+        assertTrue((ctx.getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
+    }
 }

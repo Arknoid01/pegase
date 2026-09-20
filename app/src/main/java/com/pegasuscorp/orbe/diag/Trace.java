@@ -44,6 +44,7 @@ public final class Trace {
     private static boolean stress = false;
     /** Si true, les textes sont hachés au lieu d'être stockés (si tu veux partager le fichier). */
     private static boolean redact = false;
+    private static boolean redactExplicit = false;
 
     private Trace() {}
 
@@ -52,10 +53,16 @@ public final class Trace {
         if (!dir.exists()) dir.mkdirs();
         file = new File(dir, "trace.jsonl");
         enabled = true;
+        // Release : les textes (messages, paramètres, réponses d'outils) ne sont pas écrits en clair.
+        // Un réglage explicite (setRedact) posé avant init prévaut.
+        if (!redactExplicit) {
+            redact = (ctx.getApplicationInfo().flags
+                    & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0;
+        }
     }
 
     public static void setEnabled(boolean on) { enabled = on; }
-    public static void setRedact(boolean on) { redact = on; }
+    public static void setRedact(boolean on) { redact = on; redactExplicit = true; }
     public static void setStressTest(boolean on) { stress = on; }
     public static boolean isStressTest() { return stress; }
     public static File file() { return file; }
@@ -884,7 +891,12 @@ public final class Trace {
     }
 
     private static boolean isTextField(String key) {
-        return "text".equals(key) || "reply".equals(key) || "params".equals(key);
+        return isTextFieldName(key);
+    }
+
+    static boolean isTextFieldName(String key) {
+        return "text".equals(key) || "reply".equals(key) || "params".equals(key)
+                || "user_msg".equals(key) || "raw_preview".equals(key) || "target".equals(key);
     }
 
     private static void write(JSONObject o) {
