@@ -165,4 +165,7 @@ Le runtime en processus séparé (coût d'IPC, complexité), les hooks par ROM, 
 | S5 politique d'outils sensibles (trace, historique, Drive, mémoire) | fait | `e7dff0b` |
 | S3 liens `pegase://pc-shell` sans `BROWSABLE` | fait, **à vérifier** avec la notification ntfy de mise à jour Arch | `fbd86ed` |
 | Retry général | non nécessaire dans l'état (rotation), voir §3 | — |
-| Q2 découpage de `PegaseSession`, R8, `targetSdk`, reprise après arrêt du processus | non fait | — |
+| Q2 découpage de `PegaseSession` : trois blocs autonomes extraits (`AgenticTurnQueues`, `LlmErrorAnalysis`, `DiagTraceAnswers`) ; 2 281 → 2 196 lignes | **partiel** : le vrai découpage (`AgenticTurnRunner`, `ToolExecutionCoordinator`) reste un chantier de plusieurs jours | `886148d` |
+| R8 en release | non fait : ne se valide qu'en lançant un APK release (JNI llama.cpp, ONNX, réflexion) | — |
+| `targetSdk` 35/36 | non fait : change le comportement à l'exécution (edge-to-edge, services de premier plan), à valider sur l'appareil | — |
+| Reprise après arrêt du processus | non fait : conception à valider avec des tours réels | — |
