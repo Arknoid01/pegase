@@ -210,13 +210,22 @@ public final class OrbUiController {
 
     public void applyFluidBackground(OrbThemes.Palette palette) {
         boolean enabled = PersonalizationStore.isFluidEnabled(context);
+        boolean animated = PersonalizationStore.isFluidAnimated(context);
+        boolean wallpaperCovers = isHomeWallpaperOverlayVisible();
+
         if (fluidBackground != null) {
-            fluidBackground.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            boolean showFluid = enabled && !wallpaperCovers;
+            fluidBackground.setVisibility(showFluid ? View.VISIBLE : View.GONE);
             fluidBackground.setPalette(palette);
-            if (enabled) fluidBackground.start();
-            else fluidBackground.stop();
+            fluidBackground.setAnimateDrift(animated);
+            if (showFluid) {
+                if (animated) fluidBackground.start();
+                else fluidBackground.startStatic();
+            } else {
+                fluidBackground.stop();
+            }
         }
-        if (homeVeil != null && fluidBackground != null && enabled) {
+        if (homeVeil != null && fluidBackground != null && enabled && !wallpaperCovers) {
             homeVeil.setAccentColor(fluidBackground.getPhase().veilAccent);
         } else if (homeVeil != null) {
             homeVeil.setAccentColor(Color.parseColor("#220B7D8F"));
@@ -224,11 +233,26 @@ public final class OrbUiController {
         FluidLockWallpaperSync.syncNow(context);
     }
 
+    private boolean isHomeWallpaperOverlayVisible() {
+        return homeWallpaper != null && homeWallpaper.getVisibility() == View.VISIBLE;
+    }
+
     public void startFluidIfEnabled() {
-        if (fluidBackground != null && PersonalizationStore.isFluidEnabled(context)
-                && fluidBackground.getVisibility() == View.VISIBLE) {
-            fluidBackground.start();
+        if (fluidBackground == null || !PersonalizationStore.isFluidEnabled(context)) {
+            return;
         }
+        if (isHomeWallpaperOverlayVisible()) {
+            fluidBackground.stop();
+            fluidBackground.setVisibility(View.GONE);
+            return;
+        }
+        if (fluidBackground.getVisibility() != View.VISIBLE) {
+            fluidBackground.setVisibility(View.VISIBLE);
+        }
+        boolean animated = PersonalizationStore.isFluidAnimated(context);
+        fluidBackground.setAnimateDrift(animated);
+        if (animated) fluidBackground.start();
+        else fluidBackground.startStatic();
     }
 
     public void stopFluid() {
@@ -236,12 +260,18 @@ public final class OrbUiController {
     }
 
     public void refreshFluidPhaseOnResume() {
-        if (fluidBackground != null && PersonalizationStore.isFluidEnabled(context)) {
-            fluidBackground.refreshPhase();
-            if (homeVeil != null) {
-                homeVeil.setAccentColor(fluidBackground.getPhase().veilAccent);
-            }
-            // sync lock wallpaper reporté (LifecycleBridge deferred) — évite contention GPU.
+        if (fluidBackground == null || !PersonalizationStore.isFluidEnabled(context)) {
+            return;
+        }
+        if (isHomeWallpaperOverlayVisible()) {
+            fluidBackground.stop();
+            fluidBackground.setVisibility(View.GONE);
+            return;
+        }
+        fluidBackground.setVisibility(View.VISIBLE);
+        fluidBackground.refreshPhase();
+        if (homeVeil != null) {
+            homeVeil.setAccentColor(fluidBackground.getPhase().veilAccent);
         }
     }
 

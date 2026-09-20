@@ -173,7 +173,7 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
 
         tabButtons[TAB_CONV] = makeTabButton(tabRow, "💬", TAB_CONV);
         tabButtons[TAB_NOTEPAD] = makeTabButton(tabRow, "📝", TAB_NOTEPAD);
-        tabButtons[TAB_ORION] = makeTabButton(tabRow, "⚡", TAB_ORION);
+        tabButtons[TAB_ORION] = makeTabButton(tabRow, "🖥️", TAB_ORION);
         tabButtons[TAB_TOOLS] = makeTabButton(tabRow, "🔧", TAB_TOOLS);
         tabButtons[TAB_FILES] = makeTabButton(tabRow, "📁", TAB_FILES);
 

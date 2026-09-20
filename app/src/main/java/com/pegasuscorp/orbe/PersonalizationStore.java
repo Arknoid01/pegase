@@ -25,6 +25,7 @@ public final class PersonalizationStore {
     public static final int WALLPAPER_CUSTOM = 1;
 
     private static final String KEY_FLUID_ENABLED = "fluid_enabled";
+    private static final String KEY_FLUID_ANIMATED = "fluid_animated";
     private static final String KEY_FLUID_LOCK_WALLPAPER = "fluid_lock_wallpaper";
 
     private PersonalizationStore() {}
@@ -127,6 +128,19 @@ public final class PersonalizationStore {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_FLUID_ENABLED, enabled)
+                .apply();
+    }
+
+    /** Drift animé du fond Fluid (GPU) — défaut off avec lazy bootstrap. */
+    public static boolean isFluidAnimated(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_FLUID_ANIMATED, false);
+    }
+
+    public static void setFluidAnimated(Context context, boolean animated) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_FLUID_ANIMATED, animated)
                 .apply();
     }
 

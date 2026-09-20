@@ -10,7 +10,7 @@ import android.view.View;
 import android.view.animation.LinearInterpolator;
 
 /**
- * Fond d'accueil « Fluid » — dégradés vivants qui évoluent selon l'heure.
+ * Fond d'accueil « Fluid » — dégradés selon l'heure ; drift animé optionnel.
  */
 public class FluidBackgroundView extends View {
 
@@ -24,12 +24,15 @@ public class FluidBackgroundView extends View {
     private FluidPhase.State phase = FluidPhase.current();
     private OrbThemes.Palette palette = OrbThemes.get(0);
     private boolean running;
+    private boolean animateDrift;
 
     private final Runnable phaseTick = new Runnable() {
         @Override
         public void run() {
             refreshPhase();
-            if (running) main.postDelayed(this, PHASE_TICK_MS);
+            if (running && animateDrift) {
+                main.postDelayed(this, PHASE_TICK_MS);
+            }
         }
     };
 
@@ -47,6 +50,17 @@ public class FluidBackgroundView extends View {
         setWillNotDraw(false);
     }
 
+    public void setAnimateDrift(boolean animateDrift) {
+        this.animateDrift = animateDrift;
+        if (running && !animateDrift) {
+            stopDrift();
+            drift = 0f;
+            invalidate();
+        } else if (running && animateDrift) {
+            startDrift();
+        }
+    }
+
     public void setPalette(OrbThemes.Palette palette) {
         this.palette = palette != null ? palette : OrbThemes.get(0);
         refreshPhase();
@@ -61,13 +75,35 @@ public class FluidBackgroundView extends View {
         invalidate();
     }
 
+    /** Affiche la phase courante — sans animation GPU continue. */
+    public void startStatic() {
+        animateDrift = false;
+        if (running) {
+            stopDrift();
+            drift = 0f;
+            refreshPhase();
+            return;
+        }
+        running = true;
+        drift = 0f;
+        refreshPhase();
+    }
+
     public void start() {
-        if (running) return;
+        if (running) {
+            if (animateDrift) startDrift();
+            else startStatic();
+            return;
+        }
         running = true;
         refreshPhase();
-        startDrift();
-        main.removeCallbacks(phaseTick);
-        main.postDelayed(phaseTick, PHASE_TICK_MS);
+        if (animateDrift) {
+            startDrift();
+            main.removeCallbacks(phaseTick);
+            main.postDelayed(phaseTick, PHASE_TICK_MS);
+        } else {
+            drift = 0f;
+        }
     }
 
     public void stop() {
@@ -77,7 +113,7 @@ public class FluidBackgroundView extends View {
     }
 
     private void startDrift() {
-        if (driftAnimator != null) return;
+        if (!animateDrift || driftAnimator != null) return;
         driftAnimator = ValueAnimator.ofFloat(0f, (float) (Math.PI * 2));
         driftAnimator.setDuration(DRIFT_MS);
         driftAnimator.setRepeatCount(ValueAnimator.INFINITE);
@@ -97,22 +133,9 @@ public class FluidBackgroundView extends View {
     }
 
     @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        if (getVisibility() == VISIBLE) start();
-    }
-
-    @Override
     protected void onDetachedFromWindow() {
         stop();
         super.onDetachedFromWindow();
-    }
-
-    @Override
-    protected void onWindowVisibilityChanged(int visibility) {
-        super.onWindowVisibilityChanged(visibility);
-        if (visibility == VISIBLE) start();
-        else stop();
     }
 
     @Override

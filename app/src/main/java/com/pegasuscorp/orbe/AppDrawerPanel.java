@@ -504,6 +504,14 @@ public class AppDrawerPanel extends FrameLayout {
         this.personalizationListener = listener;
     }
 
+    /** Ouvre le tiroir puis le panneau de personnalisation (raccourci depuis un autre écran). */
+    public void openPersonalizationPanel() {
+        show();
+        if (personalizationPanel != null && !personalizationPanel.isVisiblePanel()) {
+            personalizationPanel.show();
+        }
+    }
+
     public void refreshPiperStatus() {
         if (personalizationPanel != null) {
             personalizationPanel.refreshPiperStatus();
@@ -580,9 +588,10 @@ public class AppDrawerPanel extends FrameLayout {
         open = true;
         setVisibility(VISIBLE);
         bringToFront();
-        if (allApps.isEmpty()) {
-            AppListCache.loadAsync(getContext(), apps -> post(() -> bindApps(apps)));
-        }
+        // Toujours redemander la liste : AppListCache peut avoir été invalidé
+        // (install/désinstall d'app) depuis le dernier show() — loadAsync renvoie
+        // le cache instantanément s'il est encore valide, donc pas de coût perçu.
+        AppListCache.loadAsync(getContext(), apps -> post(() -> bindApps(apps)));
         clearFilters();
         if (letter != null && !letter.isEmpty()) filterByLetter(letter);
 

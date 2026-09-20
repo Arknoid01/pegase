@@ -192,6 +192,16 @@ public class PersonalizationPanel extends FrameLayout {
         });
         body.addView(fluidSwitch, wrapLp());
 
+        android.widget.Switch fluidAnimSwitch = new android.widget.Switch(context);
+        fluidAnimSwitch.setText("Animation Fluid (GPU)");
+        fluidAnimSwitch.setTextColor(Color.WHITE);
+        fluidAnimSwitch.setChecked(PersonalizationStore.isFluidAnimated(context));
+        fluidAnimSwitch.setOnCheckedChangeListener((btn, checked) -> {
+            PersonalizationStore.setFluidAnimated(context, checked);
+            notifyChanged();
+        });
+        body.addView(fluidAnimSwitch, wrapLp());
+
         android.widget.Switch fluidLockSwitch = new android.widget.Switch(context);
         fluidLockSwitch.setText("Appliquer aussi à l'écran de verrouillage");
         fluidLockSwitch.setTextColor(Color.WHITE);

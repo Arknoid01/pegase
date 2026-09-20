@@ -39,6 +39,8 @@
 
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
     <!-- Pour lister / lancer les apps du tiroir. Sur Android 11+ (API 30),
          il faut declarer les intents qu'on veut "voir". -->
     <queries>
@@ -91,6 +93,7 @@
         <package android:name="com.spotify.music" />
         <package android:name="com.google.android.apps.maps" />
         <package android:name="com.waze" />
+        <package android:name="com.termux" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
@@ -129,6 +132,13 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <activity
+            android:name=".PegaseMenuActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe.Pegase"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".InPlaceVoiceActivity"

@@ -18,6 +18,8 @@
     <color name="orbe_cyan_edge">#FF0B7D8F</color>
     <!-- Cyan ~12 % d'opacité (fond messages Pégase) -->
     <color name="orbe_cyan_12">#1F35D0DD</color>
+    <!-- Cyan ~35 % d'opacité (contour des bulles de chat) -->
+    <color name="orbe_cyan_35">#5935D0DD</color>
     <color name="orbe_text_muted">#88FFFFFF</color>
     <color name="orbe_text_muted_on_light">#FF888888</color>
     <color name="orbe_muted">#FF8A8A8A</color>
