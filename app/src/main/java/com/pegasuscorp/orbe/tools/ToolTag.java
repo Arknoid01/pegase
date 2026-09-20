@@ -55,5 +55,13 @@ public enum ToolTag {
     /** Skills : procédures chargées à la demande. */
     SKILLS,
     /** Outils de serveurs MCP distants activés par l'utilisateur. */
-    MCP
+    MCP,
+    /** Analyse d'image (vision). */
+    IMAGE,
+    /** Recherche dans les conversations passées. */
+    HISTORY,
+    /** Temps d'écran par appli. */
+    APP_USAGE,
+    /** Lecture du texte d'une page web. */
+    WEB_READ
 }

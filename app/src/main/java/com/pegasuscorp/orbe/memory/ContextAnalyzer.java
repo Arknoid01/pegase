@@ -94,6 +94,32 @@ public final class ContextAnalyzer {
                 allowedTools);
     }
 
+    static boolean looksLikeImage(String fold) {
+        return fold != null && (fold.contains("photo") || fold.contains("image")
+                || fold.contains("screenshot") || fold.contains("capture d ecran")
+                || fold.contains("dans ma galerie"));
+    }
+
+    static boolean looksLikeHistory(String fold) {
+        return fold != null && (fold.contains("on a parle") || fold.contains("tu te souviens")
+                || fold.contains("on avait dit") || fold.contains("l autre jour")
+                || fold.contains("on a dit") || fold.contains("dans nos conversations")
+                || fold.contains("de quoi on a") || fold.contains("qu est ce que je t avais"));
+    }
+
+    static boolean looksLikeAppUsage(String fold) {
+        return fold != null && (fold.contains("temps d ecran") || fold.contains("applis les plus")
+                || fold.contains("applications les plus") || fold.contains("combien de temps sur")
+                || fold.contains("combien de temps j ai passe")
+                || fold.contains("utilisation de mon telephone"));
+    }
+
+    static boolean looksLikeWebPage(String fold) {
+        return fold != null && (fold.contains("http://") || fold.contains("https://")
+                || fold.contains("ce lien") || fold.contains("cette page")
+                || fold.contains("cet article") || fold.contains("ce site"));
+    }
+
     private static boolean hasSkills(Context context) {
         try {
             return context != null
@@ -316,6 +342,11 @@ public final class ContextAnalyzer {
             t.add(ToolTag.GIT_COMMIT);
             t.add(ToolTag.ORION_CODE);
         }
+
+        if (looksLikeImage(fold)) t.add(ToolTag.IMAGE);
+        if (looksLikeHistory(fold)) t.add(ToolTag.HISTORY);
+        if (looksLikeAppUsage(fold)) t.add(ToolTag.APP_USAGE);
+        if (looksLikeWebPage(fold)) t.add(ToolTag.WEB_READ);
 
         // Intention ambiguë : set « daily » (pas tout le registre — gonfle Groq).
         if (t.equals(BASE_TOOLS) && ("general".equals(intent)

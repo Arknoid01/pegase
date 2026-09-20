@@ -114,7 +114,11 @@ public class ToolRegistry {
             new UiSearchTool(),
             new ContactsTool(),
             new FilesTool(),
-            new com.pegasuscorp.orbe.tools.skills.SkillsTool()
+            new com.pegasuscorp.orbe.tools.skills.SkillsTool(),
+            new com.pegasuscorp.orbe.tools.media.ReadImageTool(),
+            new com.pegasuscorp.orbe.tools.memory.ConversationHistoryTool(),
+            new com.pegasuscorp.orbe.tools.device.AppUsageTool(),
+            new com.pegasuscorp.orbe.tools.knowledge.WebReadTool()
     );
 
     private final CompositeTool compositeTool;
