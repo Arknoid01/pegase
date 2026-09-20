@@ -19,9 +19,9 @@ public final class PegaseWakeStore {
     private static final String KEY_HFP_MAC = "hfp_mac";
     /**
      * Seuil OWW — modèle v2 hard-neg.
-     * 0.50 = défaut upstream openWakeWord (sensible) ; 0.65 = départ Pégase (moins de FP).
+     * 0.50 = défaut upstream openWakeWord (sensible) ; 0.80 = réglage Pégase (encore moins de FP).
      */
-    public static final float DEFAULT_OWW_THRESHOLD = 0.65f;
+    public static final float DEFAULT_OWW_THRESHOLD = 0.80f;
 
     private PegaseWakeStore() {}
 
