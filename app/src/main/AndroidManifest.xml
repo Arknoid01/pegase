@@ -536,14 +536,5 @@
             </intent-filter>
         </service>
 
-        <receiver
-            android:name=".diag.DiagSuiteReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="com.pegasuscorp.orbe.action.RUN_DIAG_SUITE" />
-            </intent-filter>
-        </receiver>
-
     </application>
 </manifest>
