@@ -10,6 +10,7 @@ import com.pegasuscorp.orbe.tools.ToolCallback;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.provider.Telephony;
 
 import org.json.JSONObject;
 
@@ -44,6 +45,10 @@ public final class SmsTool implements Tool {
         Intent intent = new Intent(Intent.ACTION_SENDTO, uri)
                 .putExtra("sms_body", message)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        // Pégase déclare lui-même SENDTO (exigé pour le ménage SMS) : on vise l'app SMS
+        // par défaut pour ne pas tomber sur notre écran factice.
+        String smsApp = Telephony.Sms.getDefaultSmsPackage(ctx);
+        if (smsApp != null && !smsApp.equals(ctx.getPackageName())) intent.setPackage(smsApp);
 
         if (intent.resolveActivity(ctx.getPackageManager()) != null) {
             ctx.startActivity(intent);

@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.pegasuscorp.orbe.memory.UserProfileStore;
 import com.pegasuscorp.orbe.routines.CustomRoutineStore;
+import com.pegasuscorp.orbe.sms.SmsCleanerActivity;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 import org.json.JSONObject;
@@ -57,6 +58,7 @@ import java.util.concurrent.Executors;
 public class PegaseMenuActivity extends AppCompatActivity {
 
     private static final int REQ_LOCATION = 4821;
+    private static final String PEGASE_SMS_PACKAGE = "com.pegasuscorp.sms";
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -261,12 +263,20 @@ public class PegaseMenuActivity extends AppCompatActivity {
         final String title;
         final String subtitle;
         final Runnable action;
+        /** Appui long — optionnel. */
+        final Runnable longAction;
 
         MenuItem(String emoji, String title, String subtitle, Runnable action) {
+            this(emoji, title, subtitle, action, null);
+        }
+
+        MenuItem(String emoji, String title, String subtitle, Runnable action,
+                Runnable longAction) {
             this.emoji = emoji;
             this.title = title;
             this.subtitle = subtitle;
             this.action = action;
+            this.longAction = longAction;
         }
     }
 
@@ -282,8 +292,8 @@ public class PegaseMenuActivity extends AppCompatActivity {
                         openTextDiscussionWithPhrase("Propose-moi un petit jeu ou une devinette.")),
                 new MenuItem("🧠", "Mémoire", "Tes infos essentielles", () ->
                         startActivity(new Intent(this, MemorySettingsActivity.class))),
-                new MenuItem("🌐", "Explorer", "Rechercher sur le web", () ->
-                        PegaseInterfaceState.openOrBringToFront(this, PegaseInterfaceState.TAB_TOOLS)),
+                new MenuItem("💬", "Messages", "Appui long : ménage", this::openPegaseSms,
+                        () -> startActivity(new Intent(this, SmsCleanerActivity.class))),
                 new MenuItem("🔧", "Outils", "Des solutions au quotidien", () ->
                         PegaseInterfaceState.openOrBringToFront(this, PegaseInterfaceState.TAB_TOOLS)),
                 new MenuItem("⋯", "Plus", "Encore plus de possibilités", () ->
@@ -314,6 +324,12 @@ public class PegaseMenuActivity extends AppCompatActivity {
         cell.setPadding(dp(12), dp(12), dp(12), dp(12));
         cell.setBackground(card(0x14FFFFFF));
         cell.setOnClickListener(v -> item.action.run());
+        if (item.longAction != null) {
+            cell.setOnLongClickListener(v -> {
+                item.longAction.run();
+                return true;
+            });
+        }
 
         TextView emoji = new TextView(this);
         emoji.setText(item.emoji);
@@ -336,6 +352,18 @@ public class PegaseMenuActivity extends AppCompatActivity {
         cell.addView(subtitle);
 
         return cell;
+    }
+
+    /** Ouvre Pégase SMS (fork QUIK) ; à défaut, l'écran de ménage SMS. */
+    private void openPegaseSms() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage(PEGASE_SMS_PACKAGE);
+        if (launch != null) {
+            startActivity(launch);
+        } else {
+            android.widget.Toast.makeText(this, "Pégase SMS n'est pas installé : ménage SMS.",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(this, SmsCleanerActivity.class));
+        }
     }
 
     // ── Aujourd'hui ──────────────────────────────────────────────────────
