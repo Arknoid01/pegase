@@ -58,6 +58,9 @@ public class PegaseNotificationListenerService extends NotificationListenerServi
             NotificationItem item = toItem(0, sbn, getPackageManager());
             com.pegasuscorp.orbe.copilot.CopilotNotificationBridge.onPosted(this, sbn, item);
         } catch (Exception ignored) {}
+        try {
+            com.pegasuscorp.orbe.inbox.MessagingNotificationHandler.onPosted(this, sbn);
+        } catch (Exception ignored) {}
     }
 
     @Override

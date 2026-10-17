@@ -176,6 +176,14 @@
         </activity>
 
         <activity
+            android:name=".inbox.InboxOpenActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
             android:name=".webmsg.WebMessagingActivity"
             android:exported="false"
             android:theme="@style/Theme.Orbe.Pegase"

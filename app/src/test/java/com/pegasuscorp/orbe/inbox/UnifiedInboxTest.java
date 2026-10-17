@@ -23,7 +23,7 @@ public class UnifiedInboxTest {
                 Arrays.asList(new WebMsgSnapshotStore.Chat("Louise", "2 h", "Coucou", 1, false),
                         new WebMsgSnapshotStore.Chat("Kevin", "12 min", "Ok", 0, false)));
         java.util.List<InboxItem> out = UnifiedInbox.merge(
-                Collections.singletonList(sms), wa, ms);
+                Collections.singletonList(sms), wa, ms, null);
         assertEquals(4, out.size());
         assertEquals("Maman", out.get(0).name);
         assertEquals("Kevin", out.get(1).name);

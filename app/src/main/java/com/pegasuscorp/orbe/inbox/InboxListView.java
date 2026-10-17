@@ -93,6 +93,7 @@ public final class InboxListView extends ScrollView {
         if (!SmsThreads.canRead(getContext())) head += " · SMS non autorisés";
         status.setText(head);
         column.addView(status);
+        column.addView(buildTakeOverRow());
         int n = 0;
         for (InboxItem it : items) {
             if (n++ >= MAX_ROWS) break;
@@ -108,6 +109,26 @@ public final class InboxListView extends ScrollView {
             empty.setTextSize(13f);
             column.addView(empty);
         }
+    }
+
+    /** Interrupteur : Pégase remplace les notifications WhatsApp / Messenger. */
+    private View buildTakeOverRow() {
+        Context ctx = getContext();
+        android.widget.Switch sw = new android.widget.Switch(ctx);
+        sw.setText("Notifications WhatsApp et Messenger par Pégase");
+        sw.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
+        sw.setTextSize(12f);
+        sw.setPadding(dp(4), 0, dp(4), dp(6));
+        sw.setChecked(MessagingNotificationHandler.takesOver(ctx));
+        sw.setOnCheckedChangeListener((b, on) -> MessagingNotificationHandler.setTakesOver(ctx, on));
+        if (!com.pegasuscorp.orbe.notifications.NotificationAccess.isEnabled(ctx)) {
+            sw.setText("Autoriser Pégase à lire les notifications ›");
+            sw.setChecked(false);
+            sw.setOnCheckedChangeListener(null);
+            sw.setOnClickListener(v ->
+                    com.pegasuscorp.orbe.notifications.NotificationAccess.openSettings(ctx));
+        }
+        return sw;
     }
 
     private View buildRow(InboxItem it) {
@@ -147,8 +168,9 @@ public final class InboxListView extends ScrollView {
         line1.addView(name, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView when = new TextView(ctx);
-        when.setText(it.source == InboxItem.Source.SMS && it.timeMs > 0
-                ? DateUtils.getRelativeTimeSpanString(it.timeMs) : it.timeLabel);
+        // Libellé du site s'il existe, sinon date exacte (SMS, notifications).
+        when.setText(!it.timeLabel.isEmpty() || it.timeMs == 0 ? it.timeLabel
+                : DateUtils.getRelativeTimeSpanString(it.timeMs));
         when.setTextColor(it.isUnread() ? OrbeTokens.COLOR_CYAN : OrbeTokens.COLOR_MUTED);
         when.setTextSize(11f);
         when.setPadding(dp(8), 0, 0, 0);
@@ -202,11 +224,13 @@ public final class InboxListView extends ScrollView {
             return;
         }
         String pkg = it.source == InboxItem.Source.WHATSAPP ? "com.whatsapp" : "com.facebook.orca";
-        Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(pkg);
-        if (launch != null) {
-            ctx.startActivity(launch);
-        } else if (openWebTab != null) {
-            openWebTab.accept(it.source);
+        if (ctx.getPackageManager().getLaunchIntentForPackage(pkg) == null) {
+            if (openWebTab != null) openWebTab.accept(it.source);
+            return;
+        }
+        if (ctx instanceof android.app.Activity) {
+            InboxOpenActivity.open((android.app.Activity) ctx, it.source, it.name);
+            reload();
         }
     }
 

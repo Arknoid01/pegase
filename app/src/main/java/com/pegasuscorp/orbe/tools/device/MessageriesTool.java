@@ -3,28 +3,32 @@ package com.pegasuscorp.orbe.tools.device;
 import android.content.Context;
 import android.content.Intent;
 
+import com.pegasuscorp.orbe.inbox.InboxItem;
+import com.pegasuscorp.orbe.inbox.SmsThreads;
+import com.pegasuscorp.orbe.inbox.UnifiedInbox;
 import com.pegasuscorp.orbe.tools.Tool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.tools.ToolTag;
-import com.pegasuscorp.orbe.inbox.InboxItem;
-import com.pegasuscorp.orbe.inbox.SmsThreads;
 import com.pegasuscorp.orbe.webmsg.WebMessagingActivity;
 import com.pegasuscorp.orbe.webmsg.WebMsgSnapshotStore;
 
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Messages WhatsApp / Messenger relevés par le mini navigateur de messageries.
- * Lit le dernier relevé (pas de connexion directe aux services).
+ * Messages SMS / WhatsApp / Messenger de la Messagerie unifiée : SMS lus sur le téléphone,
+ * WhatsApp et Messenger par notifications (en direct) et relevés de l'écran Messagerie.
  */
 public final class MessageriesTool implements Tool {
 
     private static final int MAX_CHATS = 12;
-    /** Au-delà, le relevé est signalé comme ancien. */
+    /** Au-delà, le relevé web est signalé comme ancien. */
     private static final long STALE_MS = 15 * 60_000L;
 
     @Override
@@ -55,28 +59,38 @@ public final class MessageriesTool implements Tool {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             if (service.startsWith("mess")) {
                 i.putExtra(WebMessagingActivity.EXTRA_SERVICE, WebMsgSnapshotStore.MESSENGER);
+            } else if (service.startsWith("wh")) {
+                i.putExtra(WebMessagingActivity.EXTRA_SERVICE, WebMsgSnapshotStore.WHATSAPP);
             }
             ctx.startActivity(i);
-            cb.onSuccessAndExit(ToolResult.text("J'ouvre tes messageries."));
+            cb.onSuccessAndExit(ToolResult.text("J'ouvre ta messagerie."));
             return;
         }
         boolean unreadOnly = !action.equals("list");
         boolean all = !service.startsWith("wh") && !service.startsWith("mess")
                 && !service.startsWith("sms");
-        List<String> services = new ArrayList<>();
-        if (all || service.startsWith("wh")) services.add(WebMsgSnapshotStore.WHATSAPP);
-        if (all || service.startsWith("mess")) services.add(WebMsgSnapshotStore.MESSENGER);
-
+        List<InboxItem> items = UnifiedInbox.load(ctx);
         long now = System.currentTimeMillis();
         StringBuilder spoken = new StringBuilder();
         StringBuilder llm = new StringBuilder();
-        for (String s : services) {
-            WebMsgSnapshotStore.Snapshot snap = WebMsgSnapshotStore.load(ctx, s);
-            describe(label(s), snap, unreadOnly, now, spoken, llm);
+        if (all || service.startsWith("wh")) {
+            describe("WhatsApp", only(items, InboxItem.Source.WHATSAPP),
+                    webNote(WebMsgSnapshotStore.load(ctx, WebMsgSnapshotStore.WHATSAPP), now),
+                    unreadOnly, spoken, llm);
+        }
+        if (all || service.startsWith("mess")) {
+            describe("Messenger", only(items, InboxItem.Source.MESSENGER),
+                    webNote(WebMsgSnapshotStore.load(ctx, WebMsgSnapshotStore.MESSENGER), now),
+                    unreadOnly, spoken, llm);
         }
         if (all || service.startsWith("sms")) {
-            describeSms(SmsThreads.canRead(ctx) ? SmsThreads.latest(ctx, 40) : null,
-                    unreadOnly, spoken, llm);
+            if (SmsThreads.canRead(ctx)) {
+                describe("SMS", only(items, InboxItem.Source.SMS), "à jour", unreadOnly,
+                        spoken, llm);
+            } else {
+                spoken.append("SMS : accès non autorisé. ");
+                llm.append("SMS : lecture non autorisée (ouvrir l'écran Messagerie pour l'accorder).\n");
+            }
         }
         String guide = unreadOnly
                 ? "Consigne de réponse : même pour une question oui/non, cite chaque discussion "
@@ -87,85 +101,58 @@ public final class MessageriesTool implements Tool {
         cb.onSuccess(ToolResult.text(spoken.toString().trim(), guide + llm.toString().trim()));
     }
 
-    /** Résumé parlé court + détail pour le LLM. Pur, testable. */
-    static void describe(String label, WebMsgSnapshotStore.Snapshot snap, boolean unreadOnly,
-            long now, StringBuilder spoken, StringBuilder llm) {
-        if (snap == null) {
-            spoken.append(label).append(" : pas encore relevé, ouvre l'écran Messageries. ");
-            llm.append(label).append(" : aucun relevé (l'utilisateur doit ouvrir l'écran "
-                    + "Messageries et se connecter).\n");
-            return;
-        }
+    private static List<InboxItem> only(List<InboxItem> items, InboxItem.Source source) {
+        List<InboxItem> out = new ArrayList<>();
+        for (InboxItem it : items) if (it.source == source) out.add(it);
+        return out;
+    }
+
+    /** Fraîcheur : notifications en direct + âge du dernier relevé web. */
+    static String webNote(WebMsgSnapshotStore.Snapshot snap, long now) {
+        if (snap == null) return "notifications en direct ; jamais relevé sur le web";
         long ageMin = Math.max(0, (now - snap.takenAtMs) / 60_000L);
-        String age = ageMin < 1 ? "à l'instant" : "il y a " + formatAge(ageMin);
-        int unreadChats = snap.unreadChats();
-        // Messenger n'affiche pas de compteur : seulement lu / non lu.
-        boolean countsKnown = !WebMsgSnapshotStore.MESSENGER.equals(snap.service);
-        if (unreadOnly) {
-            spoken.append(label).append(" : ").append(unreadChats == 0 ? "rien de non lu"
-                    : unreadChats + (unreadChats > 1 ? " discussions non lues" : " discussion non lue"))
-                    .append(" (relevé ").append(age).append("). ");
-        } else {
-            spoken.append(label).append(" : ").append(snap.chats.size())
-                    .append(" discussions (relevé ").append(age).append("). ");
-        }
-        llm.append(label).append(" — relevé ").append(age);
+        String note = "notifications en direct ; relevé web "
+                + (ageMin < 1 ? "à l'instant" : "il y a " + formatAge(ageMin));
         if (now - snap.takenAtMs > STALE_MS) {
-            llm.append(" (ancien : proposer d'ouvrir l'écran Messageries pour actualiser)");
+            note += " (un message lu ailleurs peut encore apparaître non lu)";
         }
-        llm.append('\n');
+        return note;
+    }
+
+    /** Résumé parlé court + détail pour le LLM. Pur, testable. */
+    static void describe(String label, List<InboxItem> items, String freshness,
+            boolean unreadOnly, StringBuilder spoken, StringBuilder llm) {
+        int unreadChats = 0;
+        for (InboxItem it : items) if (it.isUnread()) unreadChats++;
+        spoken.append(label).append(" : ").append(unreadOnly
+                ? (unreadChats == 0 ? "rien de non lu" : unreadChats
+                        + (unreadChats > 1 ? " discussions non lues" : " discussion non lue"))
+                : items.size() + " discussions").append(". ");
+        llm.append(label).append(" — ").append(freshness).append('\n');
         int n = 0;
-        for (WebMsgSnapshotStore.Chat c : snap.chats) {
-            if (unreadOnly && c.unread == 0) continue;
+        for (InboxItem c : items) {
+            if (unreadOnly && !c.isUnread()) continue;
             if (n++ >= MAX_CHATS) break;
             llm.append("- ").append(c.group ? "groupe « " + c.name + " »" : c.name);
-            if (c.unread > 0 && !countsKnown) {
+            if (c.unread == InboxItem.UNREAD_UNKNOWN_COUNT) {
                 llm.append(" [non lu]");
             } else if (c.unread > 0) {
                 llm.append(" [").append(c.unread).append(" non lu")
                         .append(c.unread > 1 ? "s" : "").append(']');
             }
-            if (!c.time.isEmpty()) llm.append(" (").append(c.time).append(')');
-            if (!c.last.isEmpty()) {
+            if (!c.timeLabel.isEmpty()) {
+                llm.append(" (").append(c.timeLabel).append(')');
+            } else if (c.timeMs > 0) {
+                llm.append(" (").append(new SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+                        .format(new Date(c.timeMs))).append(')');
+            }
+            if (!c.preview.isEmpty()) {
                 llm.append(c.group ? " — dernier message (expéditeur : texte) : " : " : ")
-                        .append(c.last);
+                        .append(c.preview, 0, Math.min(c.preview.length(), 200));
             }
             llm.append('\n');
         }
         if (n == 0) llm.append(unreadOnly ? "(aucune discussion non lue)\n" : "(liste vide)\n");
-    }
-
-    /** SMS lus directement sur le téléphone (toujours à jour). Pur, testable. */
-    static void describeSms(List<InboxItem> threads, boolean unreadOnly,
-            StringBuilder spoken, StringBuilder llm) {
-        if (threads == null) {
-            spoken.append("SMS : accès non autorisé. ");
-            llm.append("SMS : lecture non autorisée (ouvrir l'écran Messagerie pour l'accorder).\n");
-            return;
-        }
-        int unreadThreads = 0;
-        for (InboxItem t : threads) if (t.isUnread()) unreadThreads++;
-        spoken.append("SMS : ").append(unreadOnly
-                ? (unreadThreads == 0 ? "rien de non lu" : unreadThreads
-                        + (unreadThreads > 1 ? " conversations non lues" : " conversation non lue"))
-                : threads.size() + " conversations").append(". ");
-        llm.append("SMS — à jour\n");
-        int n = 0;
-        for (InboxItem t : threads) {
-            if (unreadOnly && !t.isUnread()) continue;
-            if (n++ >= MAX_CHATS) break;
-            llm.append("- ").append(t.name);
-            if (t.unread > 0) llm.append(" [").append(t.unread).append(" non lu")
-                    .append(t.unread > 1 ? "s" : "").append(']');
-            if (t.timeMs > 0) {
-                llm.append(" (").append(new java.text.SimpleDateFormat("dd/MM HH:mm",
-                        java.util.Locale.FRANCE).format(new java.util.Date(t.timeMs))).append(')');
-            }
-            if (!t.preview.isEmpty()) llm.append(" : ").append(t.preview, 0,
-                    Math.min(t.preview.length(), 200));
-            llm.append('\n');
-        }
-        if (n == 0) llm.append(unreadOnly ? "(aucun SMS non lu)\n" : "(aucun SMS)\n");
     }
 
     private static String formatAge(long min) {
@@ -173,9 +160,5 @@ public final class MessageriesTool implements Tool {
         long h = min / 60;
         if (h < 48) return h + " h";
         return (h / 24) + " jours";
-    }
-
-    private static String label(String service) {
-        return WebMsgSnapshotStore.MESSENGER.equals(service) ? "Messenger" : "WhatsApp";
     }
 }
