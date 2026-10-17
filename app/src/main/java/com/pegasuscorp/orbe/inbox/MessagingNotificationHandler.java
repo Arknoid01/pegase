@@ -57,6 +57,7 @@ public final class MessagingNotificationHandler {
     /** Appelé par le service d'écoute pour chaque notification postée. */
     public static void onPosted(NotificationListenerService listener, StatusBarNotification sbn) {
         InboxItem.Source source = sourceOf(sbn.getPackageName());
+        if (source == null) source = debugTestSource(listener, sbn);
         if (source == null) return;
         Notification n = sbn.getNotification();
         if (n == null) return;
@@ -90,6 +91,21 @@ public final class MessagingNotificationHandler {
         cancel(listener, sbn);
     }
 
+    /**
+     * Version de développement seulement : une notification postée par ADB
+     * ({@code cmd notification post}, paquet com.android.shell) avec l'étiquette
+     * {@code pegase-test-wa…} / {@code pegase-test-ms…} est traitée comme WhatsApp / Messenger.
+     */
+    private static InboxItem.Source debugTestSource(Context ctx, StatusBarNotification sbn) {
+        boolean debuggable = (ctx.getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (!debuggable || !"com.android.shell".equals(sbn.getPackageName())) return null;
+        String tag = sbn.getTag() != null ? sbn.getTag() : "";
+        if (tag.startsWith("pegase-test-wa")) return InboxItem.Source.WHATSAPP;
+        if (tag.startsWith("pegase-test-ms")) return InboxItem.Source.MESSENGER;
+        return null;
+    }
+
     // ── Lecture de la notification ───────────────────────────────────────
 
     static final class Parsed {
@@ -108,8 +124,10 @@ public final class MessagingNotificationHandler {
         NotificationCompat.MessagingStyle style =
                 NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n);
         if (style != null && !style.getMessages().isEmpty()) {
-            boolean group = style.isGroupConversation();
             CharSequence conv = style.getConversationTitle();
+            // Une discussion à deux n'a pas de titre de conversation : un titre = un groupe.
+            boolean group = style.isGroupConversation()
+                    || (conv != null && conv.toString().trim().length() > 0);
             List<NotificationInboxStore.Message> out = new ArrayList<>();
             String firstSender = null;
             for (NotificationCompat.MessagingStyle.Message m : style.getMessages()) {
@@ -163,7 +181,7 @@ public final class MessagingNotificationHandler {
         Person me = new Person.Builder().setName("Moi").build();
         NotificationCompat.MessagingStyle style = new NotificationCompat.MessagingStyle(me);
         style.setGroupConversation(c.group);
-        if (c.group) style.setConversationTitle(c.name);
+        style.setConversationTitle(c.group ? c.name + " · " + app : app);
         int shown = 0;
         List<NotificationInboxStore.Message> msgs = c.messages;
         int from = Math.max(0, msgs.size() - Math.max(1, Math.min(c.unread, 6)));
