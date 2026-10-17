@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.tools.device;
 import android.content.Context;
 import android.content.Intent;
 
+import com.pegasuscorp.orbe.inbox.InboxCategoryStore;
 import com.pegasuscorp.orbe.inbox.InboxItem;
 import com.pegasuscorp.orbe.inbox.SmsThreads;
 import com.pegasuscorp.orbe.inbox.UnifiedInbox;
@@ -44,8 +45,9 @@ public final class MessageriesTool implements Tool {
     @Override
     public String description() {
         return "messageries(action:\"unread\"|\"list\"|\"open\", "
-                + "service?:\"sms\"|\"whatsapp\"|\"messenger\") — "
-                + "messages SMS / WhatsApp / Messenger (tous si service absent). "
+                + "service?:\"sms\"|\"whatsapp\"|\"messenger\", categorie?:\"pro\"|\"perso\") — "
+                + "messages SMS / WhatsApp / Messenger (tous si service absent ; "
+                + "categorie = conversations rangées en Pro ou Perso). "
                 + "unread=discussions non lues ; list=dernières discussions ; "
                 + "open=ouvrir l'écran Messagerie (actualise WhatsApp/Messenger).";
     }
@@ -70,6 +72,16 @@ public final class MessageriesTool implements Tool {
         boolean all = !service.startsWith("wh") && !service.startsWith("mess")
                 && !service.startsWith("sms");
         List<InboxItem> items = UnifiedInbox.load(ctx);
+        String categorie = params != null ? params.optString("categorie", "").trim().toLowerCase() : "";
+        if (categorie.startsWith("pro") || categorie.startsWith("perso")) {
+            InboxCategoryStore.Category wanted = categorie.startsWith("pro")
+                    ? InboxCategoryStore.Category.PRO : InboxCategoryStore.Category.PERSO;
+            List<InboxItem> kept = new ArrayList<>();
+            for (InboxItem it : items) {
+                if (InboxCategoryStore.get(ctx, it) == wanted) kept.add(it);
+            }
+            items = kept;
+        }
         long now = System.currentTimeMillis();
         StringBuilder spoken = new StringBuilder();
         StringBuilder llm = new StringBuilder();

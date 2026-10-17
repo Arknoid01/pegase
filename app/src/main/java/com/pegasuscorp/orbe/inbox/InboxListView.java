@@ -42,6 +42,9 @@ public final class InboxListView extends ScrollView {
     /** Repli quand l'appli WhatsApp / Messenger n'est pas installée : onglet web. */
     private final Consumer<InboxItem.Source> openWebTab;
     private boolean loading;
+    /** Onglet affiché : {@code null} = Tout. */
+    private InboxCategoryStore.Category filter;
+    private List<InboxItem> lastItems = new java.util.ArrayList<>();
 
     public InboxListView(Context ctx, Consumer<InboxItem.Source> openWebTab) {
         super(ctx);
@@ -84,14 +87,28 @@ public final class InboxListView extends ScrollView {
         io.shutdownNow();
     }
 
-    private void render(List<InboxItem> items) {
+    private void render(List<InboxItem> all) {
+        lastItems = all;
         column.removeAllViews();
-        int unread = 0;
-        for (InboxItem it : items) if (it.isUnread()) unread++;
+        Context ctx = getContext();
+        java.util.Map<InboxItem, InboxCategoryStore.Category> cat = new java.util.IdentityHashMap<>();
+        int[] unreadBy = new int[3]; // Tout, Perso, Pro
+        for (InboxItem it : all) {
+            InboxCategoryStore.Category c = InboxCategoryStore.get(ctx, it);
+            cat.put(it, c);
+            if (!it.isUnread()) continue;
+            unreadBy[0]++;
+            unreadBy[c == InboxCategoryStore.Category.PRO ? 2 : 1]++;
+        }
+        column.addView(buildFilterRow(unreadBy));
+        List<InboxItem> items = new java.util.ArrayList<>();
+        for (InboxItem it : all) if (filter == null || cat.get(it) == filter) items.add(it);
+        int unread = filter == null ? unreadBy[0]
+                : unreadBy[filter == InboxCategoryStore.Category.PRO ? 2 : 1];
         String head = unread == 0 ? "Tout est lu."
                 : unread + (unread > 1 ? " conversations non lues" : " conversation non lue");
-        if (!SmsThreads.canRead(getContext())) head += " · SMS non autorisés";
-        status.setText(head);
+        if (!SmsThreads.canRead(ctx)) head += " · SMS non autorisés";
+        status.setText(head + " · appui long : ranger en Pro / Perso");
         column.addView(status);
         column.addView(buildTakeOverRow());
         int n = 0;
@@ -104,11 +121,63 @@ public final class InboxListView extends ScrollView {
         }
         if (items.isEmpty()) {
             TextView empty = new TextView(getContext());
-            empty.setText("Aucune conversation. Connecte-toi dans les onglets WhatsApp et Messenger.");
+            empty.setText(filter == InboxCategoryStore.Category.PRO
+                    ? "Aucune conversation pro. Appui long sur une conversation pour la ranger ici."
+                    : "Aucune conversation. Connecte-toi dans les onglets WhatsApp et Messenger.");
             empty.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
             empty.setTextSize(13f);
             column.addView(empty);
         }
+    }
+
+    /** Onglets Tout · Perso · Pro, avec leurs non-lus. */
+    private View buildFilterRow(int[] unreadBy) {
+        LinearLayout bar = new LinearLayout(getContext());
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(0, dp(2), 0, dp(8));
+        InboxCategoryStore.Category[] tabs = {null, InboxCategoryStore.Category.PERSO,
+                InboxCategoryStore.Category.PRO};
+        String[] labels = {"Tout", "Perso", "Pro"};
+        for (int i = 0; i < tabs.length; i++) {
+            InboxCategoryStore.Category tab = tabs[i];
+            TextView t = new TextView(getContext());
+            t.setText(unreadBy[i] > 0 ? labels[i] + "  " + unreadBy[i] : labels[i]);
+            boolean active = tab == filter;
+            t.setTextColor(active ? Color.BLACK : Color.WHITE);
+            t.setTypeface(OrbeTokens.typeMedium());
+            t.setTextSize(13f);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(dp(14), dp(7), dp(14), dp(7));
+            GradientDrawable d = new GradientDrawable();
+            d.setCornerRadius(dp(16));
+            d.setColor(active ? OrbeTokens.COLOR_CYAN : OrbeTokens.COLOR_CHIP_BG);
+            d.setStroke(dp(1), OrbeTokens.COLOR_CHIP_STROKE);
+            t.setBackground(d);
+            t.setOnClickListener(v -> {
+                filter = tab;
+                render(lastItems);
+                scrollTo(0, 0);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) lp.leftMargin = dp(8);
+            bar.addView(t, lp);
+        }
+        return bar;
+    }
+
+    private void askCategory(InboxItem it) {
+        Context ctx = getContext();
+        boolean pro = InboxCategoryStore.get(ctx, it) == InboxCategoryStore.Category.PRO;
+        new android.app.AlertDialog.Builder(ctx)
+                .setTitle(it.name)
+                .setItems(new String[]{pro ? "Ranger dans Perso" : "Ranger dans Pro"}, (d, w) -> {
+                    InboxCategoryStore.set(ctx, it, pro ? InboxCategoryStore.Category.PERSO
+                            : InboxCategoryStore.Category.PRO);
+                    render(lastItems);
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
     }
 
     /** Interrupteur : Pégase remplace les notifications WhatsApp / Messenger. */
@@ -139,6 +208,10 @@ public final class InboxListView extends ScrollView {
         row.setPadding(dp(10), dp(10), dp(12), dp(10));
         row.setBackground(card(it.isUnread() ? 0x1A35D0DD : 0x0FFFFFFF));
         row.setOnClickListener(v -> open(it));
+        row.setOnLongClickListener(v -> {
+            askCategory(it);
+            return true;
+        });
 
         TextView badge = new TextView(ctx);
         badge.setText(sourceLetter(it.source));
