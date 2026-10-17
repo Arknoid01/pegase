@@ -732,8 +732,9 @@ public final class PegaseInterfaceData {
     /** Messages structurés pour le RecyclerView Discussion. */
     public static List<ChatMessageUi> conversationMessages(Context ctx) {
         List<ChatMessageUi> out = new ArrayList<>();
-        List<ChatBackend.Turn> turns =
-                com.pegasuscorp.orbe.memory.MemoryRepository.getInstance(ctx).getRecentTurns();
+        List<ChatBackend.Turn> turns = fillMissingReplies(
+                com.pegasuscorp.orbe.memory.MemoryRepository.getInstance(ctx).getRecentTurns(),
+                com.pegasuscorp.orbe.chat.ChatSessionRegistry.get(ctx).historySnapshot());
         String userLabel = com.pegasuscorp.orbe.memory.UserProfileStore
                 .getInstance(ctx).getUserName();
         if (userLabel == null || userLabel.trim().isEmpty()) userLabel = "Yannick";
@@ -754,6 +755,49 @@ public final class PegaseInterfaceData {
                         com.pegasuscorp.orbe.diag.ReasoningStore.findForReply(cleaned);
                 out.add(new ChatMessageUi(false, "Pégase", cleaned, time, card));
             }
+        }
+        return out;
+    }
+
+    /**
+     * Les réponses issues d'outils sensibles (messageries, notifications, SMS…) ne sont pas
+     * écrites dans {@code recent_turns} (synchronisé sur Drive) : sans ce complément, la bulle
+     * de réponse n'apparaissait jamais. On reprend la réponse depuis l'historique en mémoire
+     * de la discussion en cours, pour l'affichage seulement.
+     *
+     * @param stored tours persistés (source de l'affichage)
+     * @param live   historique de la discussion en cours (non persisté)
+     */
+    static List<ChatBackend.Turn> fillMissingReplies(List<ChatBackend.Turn> stored,
+            List<ChatBackend.Turn> live) {
+        if (stored == null || stored.isEmpty() || live == null || live.isEmpty()) {
+            return stored != null ? stored : new ArrayList<>();
+        }
+        java.util.Map<String, String> replyByUser = new java.util.HashMap<>();
+        String lastUser = null;
+        for (ChatBackend.Turn t : live) {
+            if (t.system) continue;
+            if (t.fromUser) {
+                lastUser = t.text.trim();
+            } else if (lastUser != null && !t.text.trim().isEmpty()) {
+                replyByUser.put(lastUser, t.text);
+            }
+        }
+        List<ChatBackend.Turn> out = new ArrayList<>(stored.size() + 2);
+        for (int i = 0; i < stored.size(); i++) {
+            ChatBackend.Turn t = stored.get(i);
+            out.add(t);
+            if (!t.fromUser || t.system) continue;
+            boolean answered = false;
+            for (int j = i + 1; j < stored.size(); j++) {
+                ChatBackend.Turn next = stored.get(j);
+                if (next.system) continue;
+                answered = !next.fromUser;
+                break;
+            }
+            if (answered) continue;
+            String reply = replyByUser.get(t.text.trim());
+            if (reply != null) out.add(new ChatBackend.Turn(false, reply));
         }
         return out;
     }

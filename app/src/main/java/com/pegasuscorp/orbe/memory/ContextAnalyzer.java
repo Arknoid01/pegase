@@ -243,7 +243,8 @@ public final class ContextAnalyzer {
         if (fold.contains("youtube") || fold.contains("video")) {
             t.add(ToolTag.YOUTUBE);
         }
-        if (fold.contains("notif") || fold.contains("message") || fold.contains("recu")) {
+        if (fold.contains("notif") || fold.contains("message") || fold.contains("recu")
+                || fold.contains("whatsapp") || fold.contains("messenger")) {
             t.add(ToolTag.NOTIFICATIONS);
         }
         if (IntentDetector.looksLikeAgenda(fold)) {

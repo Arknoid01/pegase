@@ -118,7 +118,8 @@ public class ToolRegistry {
             new com.pegasuscorp.orbe.tools.media.ReadImageTool(),
             new com.pegasuscorp.orbe.tools.memory.ConversationHistoryTool(),
             new com.pegasuscorp.orbe.tools.device.AppUsageTool(),
-            new com.pegasuscorp.orbe.tools.knowledge.WebReadTool()
+            new com.pegasuscorp.orbe.tools.knowledge.WebReadTool(),
+            new com.pegasuscorp.orbe.tools.device.MessageriesTool()
     );
 
     private final CompositeTool compositeTool;
@@ -307,6 +308,8 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.NOTIFICATIONS)) {
             sb.append("  Notifs    → {\"tool\":\"notifications\",\"params\":{\"action\":\"list\"}} "
                     + "ou action:\"open\", index:1 ou app:\"WhatsApp\" ; dismiss / dismiss_all\n");
+            sb.append("  WhatsApp/Messenger → {\"tool\":\"messageries\",\"params\":{\"action\":\"unread\"}} "
+                    + "(messages relevés par l'écran Messageries ; action:\"open\" pour l'ouvrir)\n");
         }
         if (tags.contains(ToolTag.YOUTUBE)) {
             sb.append("  YouTube   → {\"tool\":\"youtube\",\"params\":{\"action\":\"search\",\"query\":\"tutos Python\"}}\n");

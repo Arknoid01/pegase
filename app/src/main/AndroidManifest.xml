@@ -175,10 +175,9 @@
             </intent-filter>
         </activity>
 
-        <!-- TEST mini navigateur messageries : exported le temps du test ADB (aucune donnée lue de l'intent). -->
         <activity
             android:name=".webmsg.WebMessagingActivity"
-            android:exported="true"
+            android:exported="false"
             android:theme="@style/Theme.Orbe.Pegase"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize" />
