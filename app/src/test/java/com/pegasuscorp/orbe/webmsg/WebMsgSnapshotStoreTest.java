@@ -15,10 +15,11 @@ public class WebMsgSnapshotStoreTest {
     @Test
     public void parseChats_listeValide() {
         List<WebMsgSnapshotStore.Chat> c = WebMsgSnapshotStore.parseChats(
-                "[{\"name\":\"Sarah\",\"time\":\"20:42\",\"last\":\"Ouii\",\"unread\":9},"
+                "[{\"name\":\"On the road\",\"time\":\"20:42\",\"last\":\"Sarah: Ouii\",\"unread\":9,\"group\":true},"
                         + "{\"name\":\"\",\"unread\":1}]");
         assertEquals(1, c.size());
         assertEquals(9, c.get(0).unread);
+        org.junit.Assert.assertTrue(c.get(0).group);
     }
 
     @Test

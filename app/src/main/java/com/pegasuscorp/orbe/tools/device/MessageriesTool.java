@@ -100,11 +100,14 @@ public final class MessageriesTool implements Tool {
         for (WebMsgSnapshotStore.Chat c : snap.chats) {
             if (unreadOnly && c.unread == 0) continue;
             if (n++ >= MAX_CHATS) break;
-            llm.append("- ").append(c.name);
+            llm.append("- ").append(c.group ? "groupe « " + c.name + " »" : c.name);
             if (c.unread > 0) llm.append(" [").append(c.unread).append(" non lu")
                     .append(c.unread > 1 ? "s" : "").append(']');
             if (!c.time.isEmpty()) llm.append(" (").append(c.time).append(')');
-            if (!c.last.isEmpty()) llm.append(" : ").append(c.last);
+            if (!c.last.isEmpty()) {
+                llm.append(c.group ? " — dernier message (expéditeur : texte) : " : " : ")
+                        .append(c.last);
+            }
             llm.append('\n');
         }
         if (n == 0) llm.append(unreadOnly ? "(aucune discussion non lue)\n" : "(liste vide)\n");

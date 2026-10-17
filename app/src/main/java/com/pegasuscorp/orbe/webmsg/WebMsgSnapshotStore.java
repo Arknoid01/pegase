@@ -29,12 +29,15 @@ public final class WebMsgSnapshotStore {
         public final String time;
         public final String last;
         public final int unread;
+        /** Discussion de groupe : {@link #last} commence par « Expéditeur : ». */
+        public final boolean group;
 
-        public Chat(String name, String time, String last, int unread) {
+        public Chat(String name, String time, String last, int unread, boolean group) {
             this.name = name != null ? name : "";
             this.time = time != null ? time : "";
             this.last = last != null ? last : "";
             this.unread = Math.max(0, unread);
+            this.group = group;
         }
     }
 
@@ -76,7 +79,8 @@ public final class WebMsgSnapshotStore {
                 String name = o.optString("name", "").trim();
                 if (name.isEmpty()) continue;
                 out.add(new Chat(name, o.optString("time", "").trim(),
-                        o.optString("last", "").trim(), o.optInt("unread", 0)));
+                        o.optString("last", "").trim(), o.optInt("unread", 0),
+                        o.optBoolean("group", false)));
             }
             return out;
         } catch (Exception e) {
@@ -89,7 +93,7 @@ public final class WebMsgSnapshotStore {
             JSONArray arr = new JSONArray();
             for (Chat c : chats) {
                 arr.put(new JSONObject().put("name", c.name).put("time", c.time)
-                        .put("last", c.last).put("unread", c.unread));
+                        .put("last", c.last).put("unread", c.unread).put("group", c.group));
             }
             JSONObject root = new JSONObject().put("taken_at", nowMs).put("chats", arr);
             File f = file(ctx, service);

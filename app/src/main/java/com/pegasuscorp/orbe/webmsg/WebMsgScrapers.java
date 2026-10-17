@@ -27,8 +27,12 @@ final class WebMsgScrapers {
             + "var b=r.querySelector('[data-testid=icon-unread-count]');"
             + "var unread=b?(parseInt((b.getAttribute('aria-label')||b.innerText)"
             + ".replace(/\\D+/g,''),10)||1):0;"
+            // Groupe : dans le dernier message, l'expéditeur est suivi d'un élément « : ».
+            + "var group=false,st=r.querySelector('[data-testid=last-msg-status]');"
+            + "if(st){[].slice.call(st.children).forEach(function(c){"
+            + "if(c.previousElementSibling&&/^:\\s*$/.test(c.textContent))group=true;});}"
             + "out.push({name:t.getAttribute('title'),time:time?time.innerText.trim():'',"
-            + "last:(last||'').replace(/\\s+/g,' ').trim().slice(0,200),unread:unread});});"
+            + "last:(last||'').replace(/\\s+/g,' ').trim().slice(0,200),unread:unread,group:group});});"
             + "return JSON.stringify(out);})()";
 
     /** Messenger : pas encore relevé (structure à examiner une fois connecté). */
