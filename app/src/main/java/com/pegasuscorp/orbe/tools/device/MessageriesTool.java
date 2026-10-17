@@ -68,7 +68,13 @@ public final class MessageriesTool implements Tool {
             WebMsgSnapshotStore.Snapshot snap = WebMsgSnapshotStore.load(ctx, s);
             describe(label(s), snap, unreadOnly, now, spoken, llm);
         }
-        cb.onSuccess(ToolResult.text(spoken.toString().trim(), llm.toString().trim()));
+        String guide = unreadOnly
+                ? "Consigne de réponse : même pour une question oui/non, cite chaque discussion "
+                + "non lue (nom, ou groupe + expéditeur) avec l'idée de son dernier message, "
+                + "en une phrase courte chacune. Ne dis pas seulement qu'il y a des messages.\n"
+                : "Consigne de réponse : résume les discussions les plus récentes "
+                + "(nom + idée du dernier message).\n";
+        cb.onSuccess(ToolResult.text(spoken.toString().trim(), guide + llm.toString().trim()));
     }
 
     /** Résumé parlé court + détail pour le LLM. Pur, testable. */
