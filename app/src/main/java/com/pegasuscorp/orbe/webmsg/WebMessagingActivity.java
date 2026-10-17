@@ -37,6 +37,19 @@ public class WebMessagingActivity extends AppCompatActivity {
             + "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
     private static final String MESSENGER = "https://www.messenger.com/";
     private static final String WHATSAPP = "https://web.whatsapp.com/";
+    /** Largeur CSS de bureau imposée aux sites, puis réduite pour tenir dans l'écran. */
+    private static final int DESKTOP_WIDTH_CSS = 1100;
+    /**
+     * Les sites de bureau ignorent la largeur du téléphone et débordent : on réécrit
+     * leur viewport en largeur fixe, à l'échelle de l'écran.
+     */
+    private static final String FIT_VIEWPORT_JS = "(function(){"
+            + "var w=" + DESKTOP_WIDTH_CSS + ",s=Math.min(1,screen.width/w);"
+            + "var c='width='+w+',initial-scale='+s+',minimum-scale='+s+',user-scalable=yes';"
+            + "var m=document.querySelector('meta[name=viewport]');"
+            + "if(!m){m=document.createElement('meta');m.name='viewport';"
+            + "(document.head||document.documentElement).appendChild(m);}"
+            + "if(m.content!==c)m.content=c;})();";
 
     private WebView web;
 
@@ -74,6 +87,16 @@ public class WebMessagingActivity extends AppCompatActivity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                view.evaluateJavascript(FIT_VIEWPORT_JS, null);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                view.evaluateJavascript(FIT_VIEWPORT_JS, null);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 String host = req.getUrl().getHost();
