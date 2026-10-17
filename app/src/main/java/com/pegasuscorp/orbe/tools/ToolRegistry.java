@@ -119,7 +119,8 @@ public class ToolRegistry {
             new com.pegasuscorp.orbe.tools.memory.ConversationHistoryTool(),
             new com.pegasuscorp.orbe.tools.device.AppUsageTool(),
             new com.pegasuscorp.orbe.tools.knowledge.WebReadTool(),
-            new com.pegasuscorp.orbe.tools.device.MessageriesTool()
+            new com.pegasuscorp.orbe.tools.device.MessageriesTool(),
+            new com.pegasuscorp.orbe.tools.device.MailsTool()
     );
 
     private final CompositeTool compositeTool;
@@ -429,6 +430,8 @@ public class ToolRegistry {
         }
         if (tags.contains(ToolTag.EMAIL)) {
             sb.append("  E-mail    → {\"tool\":\"email\",\"params\":{\"to\":\"a@b.fr\",\"subject\":\"Salut\",\"body\":\"…\"}}\n");
+            sb.append("  Mails reçus → {\"tool\":\"mails\",\"params\":{\"action\":\"unread\"}} "
+                    + "(lire / résumer la boîte Gmail ; email = seulement pour écrire)\n");
         }
         if (tags.contains(ToolTag.SHARE)) {
             sb.append("  Partage   → {\"tool\":\"share\",\"params\":{\"text\":\"Voici le récap.\"}}\n");

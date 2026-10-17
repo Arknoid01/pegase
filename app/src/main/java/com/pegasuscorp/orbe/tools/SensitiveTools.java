@@ -15,7 +15,7 @@ public final class SensitiveTools {
 
     private static final Set<String> IDS = new HashSet<>(Arrays.asList(
             "notifications", "sms", "contacts", "clipboard", "call", "app_usage", "read_image",
-            "screen_capture", "files", "pc_shell", "web_read", "messageries"));
+            "screen_capture", "files", "pc_shell", "web_read", "messageries", "mails"));
 
     private SensitiveTools() {}
 

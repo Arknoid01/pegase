@@ -297,6 +297,9 @@ public class PegaseMenuActivity extends AppCompatActivity {
                 new MenuItem("🌐", "Messagerie", "SMS, WhatsApp, Messenger", () ->
                         startActivity(new Intent(this,
                                 com.pegasuscorp.orbe.webmsg.WebMessagingActivity.class))),
+                new MenuItem("✉️", "Mails", "Toutes tes boîtes Gmail", () ->
+                        startActivity(new Intent(this,
+                                com.pegasuscorp.orbe.mail.MailActivity.class))),
                 new MenuItem("🔧", "Outils", "Des solutions au quotidien", () ->
                         PegaseInterfaceState.openOrBringToFront(this, PegaseInterfaceState.TAB_TOOLS)),
                 new MenuItem("⋯", "Plus", "Encore plus de possibilités", () ->

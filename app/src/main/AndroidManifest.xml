@@ -176,6 +176,12 @@
         </activity>
 
         <activity
+            android:name=".mail.MailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Orbe.Pegase"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".inbox.InboxOpenActivity"
             android:exported="false"
             android:excludeFromRecents="true"

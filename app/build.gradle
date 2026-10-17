@@ -42,6 +42,13 @@ android {
         aidl true
     }
 
+    // android-mail / android-activation embarquent les mêmes fichiers de licence.
+    packaging {
+        resources {
+            excludes += ['META-INF/LICENSE.md', 'META-INF/NOTICE.md']
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
@@ -115,6 +122,10 @@ configurations.configureEach { config ->
     implementation 'androidx.biometric:biometric:1.1.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.documentfile:documentfile:1.0.1'
+
+    // Mails — IMAP Gmail (mot de passe d'application), lecture seule
+    implementation 'com.sun.mail:android-mail:1.6.7'
+    implementation 'com.sun.mail:android-activation:1.6.7'
     testImplementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     // --- PHASE 2 (assistant LLM embarque, quand tu voudras) ---
