@@ -409,22 +409,16 @@ public class PersonalizationPanel extends FrameLayout {
                         + "Seuil actuel : "
                         + String.format(java.util.Locale.US, "%.2f",
                         com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context))
-                        + " (défaut 0,65 — plus haut = moins de faux positifs)."));
+                        + " (défaut 0,80 — plus haut = moins de faux positifs)."));
         TextView owwStatus = new TextView(context);
         owwStatus.setTextColor(Color.parseColor("#88FFFFFF"));
         owwStatus.setTextSize(12);
         owwStatus.setText(com.pegasuscorp.orbe.voice.WakeOwwStore.statusLabel(context));
         body.addView(owwStatus, wrapLp());
-        addActionRow("Seuil OWW un peu plus strict (0,70)", () -> {
-            VoiceWakeClient.get().setOwwThreshold(context, 0.70f);
-            android.widget.Toast.makeText(context, "Seuil wake → 0,70",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow("Seuil OWW recommandé (0,65)", () -> {
-            VoiceWakeClient.get().setOwwThreshold(context, 0.65f);
-            android.widget.Toast.makeText(context, "Seuil wake → 0,65",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
+        addOwwThresholdRow(context, "Wake moins sensible (0,88)", 0.88f);
+        addOwwThresholdRow(context, "Wake recommandé (0,80)",
+                com.pegasuscorp.orbe.voice.PegaseWakeStore.DEFAULT_OWW_THRESHOLD);
+        addOwwThresholdRow(context, "Wake plus sensible (0,70)", 0.70f);
         addActionRow("Enregistrer mon wake word", () ->
                 getContext().startActivity(
                         new android.content.Intent(getContext(),
@@ -1088,6 +1082,15 @@ public class PersonalizationPanel extends FrameLayout {
         bg.setColor(selected ? Color.parseColor("#2835D0DD") : Color.parseColor("#14FFFFFF"));
         if (selected) bg.setStroke((int) (1.5f * density), accentMiddle);
         row.setBackground(bg);
+    }
+
+    private void addOwwThresholdRow(Context context, String label, float threshold) {
+        addActionRow(label, () -> {
+            VoiceWakeClient.get().setOwwThreshold(context, threshold);
+            android.widget.Toast.makeText(context,
+                    String.format(java.util.Locale.FRANCE, "Seuil wake → %.2f", threshold),
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
     }
 
     private TextView addActionRow(String label, Runnable action) {

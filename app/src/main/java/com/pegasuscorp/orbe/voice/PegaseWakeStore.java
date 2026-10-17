@@ -15,6 +15,11 @@ public final class PegaseWakeStore {
     private static final String KEY_OWW_THRESHOLD = "oww_threshold";
     /** Une fois : anciens seuils v1 (≥0.80) ramenés au défaut hard-neg. */
     private static final String KEY_OWW_THR_MIG_V2 = "oww_thr_mig_v2";
+    /**
+     * Une fois : l'ancien bouton « un peu plus strict (0,70) » baissait en fait le seuil
+     * sous le défaut 0.80 → seuils &lt; défaut ramenés au défaut.
+     */
+    private static final String KEY_OWW_THR_MIG_V4 = "oww_thr_mig_v4";
     /** Adresse MAC du casque visé — vide = n'importe quel HFP connecté. */
     private static final String KEY_HFP_MAC = "hfp_mac";
     /**
@@ -64,6 +69,7 @@ public final class PegaseWakeStore {
     public static float getOwwThreshold(Context context) {
         SharedPreferences p = prefs(context);
         migrateLegacyHighThresholdOnce(p);
+        migrateMislabeledLowThresholdOnce(p);
         if (!p.contains(KEY_OWW_THRESHOLD)) {
             return DEFAULT_OWW_THRESHOLD;
         }
@@ -76,6 +82,7 @@ public final class PegaseWakeStore {
         prefs(context).edit()
                 .putFloat(KEY_OWW_THRESHOLD, t)
                 .putBoolean(KEY_OWW_THR_MIG_V2, true)
+                .putBoolean(KEY_OWW_THR_MIG_V4, true)
                 .apply();
     }
 
@@ -83,6 +90,15 @@ public final class PegaseWakeStore {
      * Une seule fois : si une pref v1 (0.86–0.92) est encore là, la ramener au défaut
      * hard-neg. Ensuite l'utilisateur peut choisir librement (y compris ≥0.80).
      */
+    private static void migrateMislabeledLowThresholdOnce(SharedPreferences p) {
+        if (p.getBoolean(KEY_OWW_THR_MIG_V4, false)) return;
+        SharedPreferences.Editor ed = p.edit().putBoolean(KEY_OWW_THR_MIG_V4, true);
+        if (p.getFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD) < DEFAULT_OWW_THRESHOLD) {
+            ed.putFloat(KEY_OWW_THRESHOLD, DEFAULT_OWW_THRESHOLD);
+        }
+        ed.apply();
+    }
+
     private static void migrateLegacyHighThresholdOnce(SharedPreferences p) {
         if (p.getBoolean(KEY_OWW_THR_MIG_V2, false)) return;
         SharedPreferences.Editor ed = p.edit().putBoolean(KEY_OWW_THR_MIG_V2, true);

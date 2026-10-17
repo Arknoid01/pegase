@@ -376,6 +376,8 @@ public class VoiceService extends Service {
                 owwEngine = new OpenWakeWordEngine(this, new OpenWakeWordEngine.Listener() {
                     @Override
                     public void onKeywordDetected(String keyword, float score) {
+                        diag("oww_hit", null, String.format(java.util.Locale.US, "score=%.3f thr=%.2f",
+                                score, PegaseWakeStore.getOwwThreshold(VoiceService.this)));
                         main.post(() -> onWakeDetected(""));
                     }
 
