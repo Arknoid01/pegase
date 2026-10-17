@@ -83,6 +83,8 @@ public final class MessageriesTool implements Tool {
         long ageMin = Math.max(0, (now - snap.takenAtMs) / 60_000L);
         String age = ageMin < 1 ? "à l'instant" : "il y a " + formatAge(ageMin);
         int unreadChats = snap.unreadChats();
+        // Messenger n'affiche pas de compteur : seulement lu / non lu.
+        boolean countsKnown = !WebMsgSnapshotStore.MESSENGER.equals(snap.service);
         if (unreadOnly) {
             spoken.append(label).append(" : ").append(unreadChats == 0 ? "rien de non lu"
                     : unreadChats + (unreadChats > 1 ? " discussions non lues" : " discussion non lue"))
@@ -101,8 +103,12 @@ public final class MessageriesTool implements Tool {
             if (unreadOnly && c.unread == 0) continue;
             if (n++ >= MAX_CHATS) break;
             llm.append("- ").append(c.group ? "groupe « " + c.name + " »" : c.name);
-            if (c.unread > 0) llm.append(" [").append(c.unread).append(" non lu")
-                    .append(c.unread > 1 ? "s" : "").append(']');
+            if (c.unread > 0 && !countsKnown) {
+                llm.append(" [non lu]");
+            } else if (c.unread > 0) {
+                llm.append(" [").append(c.unread).append(" non lu")
+                        .append(c.unread > 1 ? "s" : "").append(']');
+            }
             if (!c.time.isEmpty()) llm.append(" (").append(c.time).append(')');
             if (!c.last.isEmpty()) {
                 llm.append(c.group ? " — dernier message (expéditeur : texte) : " : " : ")

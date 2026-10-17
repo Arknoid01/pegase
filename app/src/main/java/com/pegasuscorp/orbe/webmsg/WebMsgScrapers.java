@@ -35,8 +35,32 @@ final class WebMsgScrapers {
             + "last:(last||'').replace(/\\s+/g,' ').trim().slice(0,200),unread:unread,group:group});});"
             + "return JSON.stringify(out);})()";
 
-    /** Messenger : pas encore relevé (structure à examiner une fois connecté). */
-    static final String MESSENGER_JS = null;
+    /**
+     * Messenger (relevé 2026-10-17) : lignes de {@code [role=grid][aria-label=Discussions]}.
+     * Pas de compteur : une discussion non lue a son nom en gras → {@code unread=1}.
+     * Groupes repérés par le libellé du lien « Discussion de groupe : … ».
+     */
+    static final String MESSENGER_JS = "(function(){"
+            + "var g=document.querySelector('[role=grid][aria-label=Discussions]');"
+            + "if(!g)return 'NO_LIST';"
+            + "var out=[];"
+            + "[].slice.call(g.querySelectorAll('[role=row]')).forEach(function(r){"
+            + "var a=r.querySelector('a[role=link]');if(!a)return;"
+            + "var n=a.querySelector('span[dir=auto]');if(!n)return;"
+            + "var name=n.innerText.replace(/\\s+/g,' ').trim();if(!name)return;"
+            + "var w=function(e){return parseInt(getComputedStyle(e).fontWeight,10)||400;};"
+            + "var bold=w(n)>=600||[].slice.call(n.querySelectorAll('span')).some(function(e){return w(e)>=600;});"
+            + "var lines=a.innerText.split('\\n').map(function(s){return s.trim();}).filter(Boolean);"
+            + "var nl=n.innerText.split('\\n').filter(function(s){return s.trim();}).length;"
+            + "var rest=lines.slice(nl);"
+            + "var dot=rest.lastIndexOf('·');"
+            + "var time=dot>=0?rest.slice(dot+1).join(' '):'';"
+            + "var last=(dot>=0?rest.slice(0,dot):rest).join(' ');"
+            + "out.push({name:name,time:time,last:last.slice(0,200),unread:bold?1:0,"
+            + "group:/^Discussion de groupe/.test(a.getAttribute('aria-label')||'')});"
+            + "});"
+            + "return JSON.stringify(out);"
+            + "})()";
 
     private WebMsgScrapers() {}
 
