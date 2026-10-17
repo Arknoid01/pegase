@@ -244,7 +244,8 @@ public final class ContextAnalyzer {
             t.add(ToolTag.YOUTUBE);
         }
         if (fold.contains("notif") || fold.contains("message") || fold.contains("recu")
-                || fold.contains("whatsapp") || fold.contains("messenger")) {
+                || fold.contains("whatsapp") || fold.contains("messenger")
+                || fold.contains("sms") || fold.contains("messagerie")) {
             t.add(ToolTag.NOTIFICATIONS);
         }
         if (IntentDetector.looksLikeAgenda(fold)) {

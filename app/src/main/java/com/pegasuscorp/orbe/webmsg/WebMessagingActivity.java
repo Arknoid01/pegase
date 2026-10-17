@@ -22,12 +22,17 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.pegasuscorp.orbe.inbox.InboxItem;
+import com.pegasuscorp.orbe.inbox.InboxListView;
+import com.pegasuscorp.orbe.inbox.SmsThreads;
 import com.pegasuscorp.orbe.ui.OrbeTokens;
 
 /**
- * Mini navigateur de messageries web (WhatsApp Web, Messenger).
+ * Messagerie : onglet « Tout » (SMS + WhatsApp + Messenger, {@link InboxListView}) et un
+ * onglet par site web (WhatsApp Web, Messenger).
  *
- * Une WebView par site, gardées en vie pour passer de l'une à l'autre sans recharger.
+ * Les deux WebViews sont créées à l'ouverture et restent chargées sous la liste, pour que
+ * les relevés soient à jour même sans passer par leur onglet.
  * Tant que l'écran est ouvert, la liste des discussions est relevée régulièrement
  * ({@link WebMsgScrapers}) et rangée dans {@link WebMsgSnapshotStore} pour l'outil
  * {@code messageries}. Aucun pont JavaScript n'est exposé aux sites : on lit seulement
@@ -56,6 +61,8 @@ public class WebMessagingActivity extends AppCompatActivity {
 
     /** Extra optionnel : onglet à ouvrir ({@link WebMsgSnapshotStore#WHATSAPP} ou MESSENGER). */
     public static final String EXTRA_SERVICE = "service";
+    private static final String TAB_ALL = "tout";
+    private static final int REQ_SMS = 7321;
     private static final long SCRAPE_EVERY_MS = 20_000L;
     private static final long SCRAPE_AFTER_LOAD_MS = 4_000L;
 
@@ -64,6 +71,8 @@ public class WebMessagingActivity extends AppCompatActivity {
     private WebView whatsapp;
     private WebView messenger;
     private WebView web;
+    private InboxListView inbox;
+    private TextView allChip;
     private TextView whatsappChip;
     private TextView messengerChip;
     private final Runnable scrapeTick = new Runnable() {
@@ -86,24 +95,35 @@ public class WebMessagingActivity extends AppCompatActivity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setPadding(dp(12), dp(8), dp(12), dp(8));
+        allChip = chip("Tout", TAB_ALL);
         whatsappChip = chip("WhatsApp", WebMsgSnapshotStore.WHATSAPP);
         messengerChip = chip("Messenger", WebMsgSnapshotStore.MESSENGER);
-        bar.addView(whatsappChip);
-        LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        gap.leftMargin = dp(8);
-        bar.addView(messengerChip, gap);
+        bar.addView(allChip);
+        for (TextView c : new TextView[]{whatsappChip, messengerChip}) {
+            LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            gap.leftMargin = dp(8);
+            bar.addView(c, gap);
+        }
         page.addView(bar);
 
         stack = new android.widget.FrameLayout(this);
         page.addView(stack, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        whatsapp = newWebView(WHATSAPP);
+        messenger = newWebView(MESSENGER);
+        // Au-dessus des WebViews : elles continuent de se charger (et d'être relevées) dessous.
+        inbox = new InboxListView(this, source -> show(source == InboxItem.Source.MESSENGER
+                ? WebMsgSnapshotStore.MESSENGER : WebMsgSnapshotStore.WHATSAPP));
+        stack.addView(inbox, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (web != null && web.canGoBack()) web.goBack();
-                else finish();
+                if (web == null) finish();
+                else if (web.canGoBack()) web.goBack();
+                else show(TAB_ALL);
             }
         });
 
@@ -114,20 +134,40 @@ public class WebMessagingActivity extends AppCompatActivity {
         });
         setContentView(page);
         String wanted = getIntent() != null ? getIntent().getStringExtra(EXTRA_SERVICE) : null;
-        show(WebMsgSnapshotStore.MESSENGER.equals(wanted)
-                ? WebMsgSnapshotStore.MESSENGER : WebMsgSnapshotStore.WHATSAPP);
+        show(wanted != null ? wanted : TAB_ALL);
+        if (!SmsThreads.canRead(this)) {
+            androidx.core.app.ActivityCompat.requestPermissions(this, new String[]{
+                    android.Manifest.permission.READ_SMS,
+                    android.Manifest.permission.READ_CONTACTS}, REQ_SMS);
+        }
     }
 
-    /** Affiche l'onglet demandé ; crée et charge sa WebView à la première ouverture. */
-    private void show(String service) {
-        boolean wa = WebMsgSnapshotStore.WHATSAPP.equals(service);
-        if (wa && whatsapp == null) whatsapp = newWebView(WHATSAPP);
-        if (!wa && messenger == null) messenger = newWebView(MESSENGER);
-        web = wa ? whatsapp : messenger;
-        if (whatsapp != null) whatsapp.setVisibility(wa ? android.view.View.VISIBLE : android.view.View.GONE);
-        if (messenger != null) messenger.setVisibility(wa ? android.view.View.GONE : android.view.View.VISIBLE);
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_SMS) inbox.reload();
+    }
+
+    /**
+     * Affiche l'onglet demandé. Les WebViews cachées restent INVISIBLE (pas GONE) : elles
+     * gardent leur taille, sinon les listes virtualisées des sites ne se dessinent pas.
+     */
+    private void show(String tab) {
+        boolean all = !WebMsgSnapshotStore.WHATSAPP.equals(tab)
+                && !WebMsgSnapshotStore.MESSENGER.equals(tab);
+        boolean wa = WebMsgSnapshotStore.WHATSAPP.equals(tab);
+        web = all ? null : wa ? whatsapp : messenger;
+        inbox.setVisibility(all ? android.view.View.VISIBLE : android.view.View.GONE);
+        whatsapp.setVisibility(all || wa ? android.view.View.VISIBLE : android.view.View.INVISIBLE);
+        messenger.setVisibility(all || !wa ? android.view.View.VISIBLE : android.view.View.INVISIBLE);
+        if (!wa && !all) messenger.bringToFront();
+        if (wa) whatsapp.bringToFront();
+        if (all) inbox.bringToFront();
+        styleChip(allChip, all);
         styleChip(whatsappChip, wa);
-        styleChip(messengerChip, !wa);
+        styleChip(messengerChip, !all && !wa);
+        if (all) inbox.reload();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -189,6 +229,7 @@ public class WebMessagingActivity extends AppCompatActivity {
             if (chats == null || chats.isEmpty()) return;
             WebMsgSnapshotStore.save(getApplicationContext(), service, chats,
                     System.currentTimeMillis());
+            if (web == null) inbox.reload();
         });
     }
 
@@ -224,6 +265,7 @@ public class WebMessagingActivity extends AppCompatActivity {
         super.onResume();
         main.removeCallbacks(scrapeTick);
         main.postDelayed(scrapeTick, SCRAPE_AFTER_LOAD_MS);
+        if (web == null) inbox.reload();
     }
 
     @Override
@@ -237,6 +279,7 @@ public class WebMessagingActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         main.removeCallbacksAndMessages(null);
+        if (inbox != null) inbox.release();
         if (whatsapp != null) whatsapp.destroy();
         if (messenger != null) messenger.destroy();
         super.onDestroy();

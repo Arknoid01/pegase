@@ -7,6 +7,8 @@ import com.pegasuscorp.orbe.tools.Tool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
 import com.pegasuscorp.orbe.tools.ToolResult;
 import com.pegasuscorp.orbe.tools.ToolTag;
+import com.pegasuscorp.orbe.inbox.InboxItem;
+import com.pegasuscorp.orbe.inbox.SmsThreads;
 import com.pegasuscorp.orbe.webmsg.WebMessagingActivity;
 import com.pegasuscorp.orbe.webmsg.WebMsgSnapshotStore;
 
@@ -37,9 +39,11 @@ public final class MessageriesTool implements Tool {
 
     @Override
     public String description() {
-        return "messageries(action:\"unread\"|\"list\"|\"open\", service?:\"whatsapp\"|\"messenger\") — "
-                + "messages WhatsApp / Messenger. unread=discussions non lues ; "
-                + "list=dernières discussions ; open=ouvrir l'écran Messageries (actualise).";
+        return "messageries(action:\"unread\"|\"list\"|\"open\", "
+                + "service?:\"sms\"|\"whatsapp\"|\"messenger\") — "
+                + "messages SMS / WhatsApp / Messenger (tous si service absent). "
+                + "unread=discussions non lues ; list=dernières discussions ; "
+                + "open=ouvrir l'écran Messagerie (actualise WhatsApp/Messenger).";
     }
 
     @Override
@@ -57,9 +61,11 @@ public final class MessageriesTool implements Tool {
             return;
         }
         boolean unreadOnly = !action.equals("list");
+        boolean all = !service.startsWith("wh") && !service.startsWith("mess")
+                && !service.startsWith("sms");
         List<String> services = new ArrayList<>();
-        if (!service.startsWith("mess")) services.add(WebMsgSnapshotStore.WHATSAPP);
-        if (!service.startsWith("wh")) services.add(WebMsgSnapshotStore.MESSENGER);
+        if (all || service.startsWith("wh")) services.add(WebMsgSnapshotStore.WHATSAPP);
+        if (all || service.startsWith("mess")) services.add(WebMsgSnapshotStore.MESSENGER);
 
         long now = System.currentTimeMillis();
         StringBuilder spoken = new StringBuilder();
@@ -67,6 +73,10 @@ public final class MessageriesTool implements Tool {
         for (String s : services) {
             WebMsgSnapshotStore.Snapshot snap = WebMsgSnapshotStore.load(ctx, s);
             describe(label(s), snap, unreadOnly, now, spoken, llm);
+        }
+        if (all || service.startsWith("sms")) {
+            describeSms(SmsThreads.canRead(ctx) ? SmsThreads.latest(ctx, 40) : null,
+                    unreadOnly, spoken, llm);
         }
         String guide = unreadOnly
                 ? "Consigne de réponse : même pour une question oui/non, cite chaque discussion "
@@ -123,6 +133,39 @@ public final class MessageriesTool implements Tool {
             llm.append('\n');
         }
         if (n == 0) llm.append(unreadOnly ? "(aucune discussion non lue)\n" : "(liste vide)\n");
+    }
+
+    /** SMS lus directement sur le téléphone (toujours à jour). Pur, testable. */
+    static void describeSms(List<InboxItem> threads, boolean unreadOnly,
+            StringBuilder spoken, StringBuilder llm) {
+        if (threads == null) {
+            spoken.append("SMS : accès non autorisé. ");
+            llm.append("SMS : lecture non autorisée (ouvrir l'écran Messagerie pour l'accorder).\n");
+            return;
+        }
+        int unreadThreads = 0;
+        for (InboxItem t : threads) if (t.isUnread()) unreadThreads++;
+        spoken.append("SMS : ").append(unreadOnly
+                ? (unreadThreads == 0 ? "rien de non lu" : unreadThreads
+                        + (unreadThreads > 1 ? " conversations non lues" : " conversation non lue"))
+                : threads.size() + " conversations").append(". ");
+        llm.append("SMS — à jour\n");
+        int n = 0;
+        for (InboxItem t : threads) {
+            if (unreadOnly && !t.isUnread()) continue;
+            if (n++ >= MAX_CHATS) break;
+            llm.append("- ").append(t.name);
+            if (t.unread > 0) llm.append(" [").append(t.unread).append(" non lu")
+                    .append(t.unread > 1 ? "s" : "").append(']');
+            if (t.timeMs > 0) {
+                llm.append(" (").append(new java.text.SimpleDateFormat("dd/MM HH:mm",
+                        java.util.Locale.FRANCE).format(new java.util.Date(t.timeMs))).append(')');
+            }
+            if (!t.preview.isEmpty()) llm.append(" : ").append(t.preview, 0,
+                    Math.min(t.preview.length(), 200));
+            llm.append('\n');
+        }
+        if (n == 0) llm.append(unreadOnly ? "(aucun SMS non lu)\n" : "(aucun SMS)\n");
     }
 
     private static String formatAge(long min) {

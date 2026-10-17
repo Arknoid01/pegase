@@ -294,7 +294,7 @@ public class PegaseMenuActivity extends AppCompatActivity {
                         startActivity(new Intent(this, MemorySettingsActivity.class))),
                 new MenuItem("💬", "Messages", "Appui long : ménage", this::openPegaseSms,
                         () -> startActivity(new Intent(this, SmsCleanerActivity.class))),
-                new MenuItem("🌐", "Messageries", "WhatsApp, Messenger", () ->
+                new MenuItem("🌐", "Messagerie", "SMS, WhatsApp, Messenger", () ->
                         startActivity(new Intent(this,
                                 com.pegasuscorp.orbe.webmsg.WebMessagingActivity.class))),
                 new MenuItem("🔧", "Outils", "Des solutions au quotidien", () ->

@@ -308,8 +308,8 @@ public class ToolRegistry {
         if (tags.contains(ToolTag.NOTIFICATIONS)) {
             sb.append("  Notifs    → {\"tool\":\"notifications\",\"params\":{\"action\":\"list\"}} "
                     + "ou action:\"open\", index:1 ou app:\"WhatsApp\" ; dismiss / dismiss_all\n");
-            sb.append("  WhatsApp/Messenger → {\"tool\":\"messageries\",\"params\":{\"action\":\"unread\"}} "
-                    + "(messages relevés par l'écran Messageries ; action:\"open\" pour l'ouvrir)\n");
+            sb.append("  SMS/WhatsApp/Messenger → {\"tool\":\"messageries\",\"params\":{\"action\":\"unread\"}} "
+                    + "(lire / résumer les messages reçus ; action:\"open\" ouvre l'écran Messagerie)\n");
         }
         if (tags.contains(ToolTag.YOUTUBE)) {
             sb.append("  YouTube   → {\"tool\":\"youtube\",\"params\":{\"action\":\"search\",\"query\":\"tutos Python\"}}\n");
