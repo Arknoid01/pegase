@@ -110,6 +110,8 @@ public final class VoiceInputHandler {
     /** Délai croissant entre deux reprises (× le rang de l'échec). */
     private static final long LISTEN_RETRY_BASE_MS = 600L;
     private int listenFailureStreak;
+    /** Session ouverte par le mot d'éveil, aucune transcription reçue depuis. */
+    private boolean awaitingFirstUtteranceAfterWake;
     private int chatRequestId = 0;
     private Runnable resumeChatListeningRunnable;
 
@@ -200,6 +202,11 @@ public final class VoiceInputHandler {
         int maxFailures = LockSessionPolicy.isDeviceLocked(activity)
                 ? MAX_LISTEN_FAILURES * 2
                 : MAX_LISTEN_FAILURES;
+        // Réveil sans rien entendu ensuite = très probablement un faux réveil (radio) :
+        // une seule reprise, puis on se rendort sans rien dire — au lieu de ~40 s de
+        // micro rouvert en boucle.
+        boolean silentSinceWake = awaitingFirstUtteranceAfterWake;
+        if (silentSinceWake) maxFailures = Math.min(maxFailures, 1);
         if (recoverable && listenFailureStreak < maxFailures) {
             listenFailureStreak++;
             long delay = LISTEN_RETRY_BASE_MS * listenFailureStreak;
@@ -207,9 +214,11 @@ public final class VoiceInputHandler {
             return;
         }
         Log.i(TAG, "écoute abandonnée (error=" + error
-                + " streak=" + listenFailureStreak + ") — fin de session");
+                + " streak=" + listenFailureStreak
+                + (silentSinceWake ? " rien depuis le réveil" : "") + ") — fin de session");
         listenFailureStreak = 0;
-        finalizeChatSession(true);
+        awaitingFirstUtteranceAfterWake = false;
+        finalizeChatSession(!silentSinceWake);
     }
 
     /** Entrée micro unique (launcher ou interface). */
@@ -218,6 +227,7 @@ public final class VoiceInputHandler {
         // reset, deux « rien compris » espacés dans une longue conversation finiraient
         // par la clore alors que le micro fonctionne.
         listenFailureStreak = 0;
+        awaitingFirstUtteranceAfterWake = false;
         if (conversation != null && conversation.isActive()) {
             handleChatInput(transcript);
             return;
@@ -750,7 +760,8 @@ public final class VoiceInputHandler {
         }
 
         final String toHandle = command;
-        String ack = InteractionStateStore.getInstance(activity).pickWakeAck(lockedChatMode);
+        awaitingFirstUtteranceAfterWake = toHandle.isEmpty();
+        String ack =InteractionStateStore.getInstance(activity).pickWakeAck(lockedChatMode);
         if (LearnModeStore.shouldSpeakIntro(activity)) {
             LearnModeStore.markIntroSpoken(activity);
             ack = LearnModeStore.introMessage() + " " + ack;

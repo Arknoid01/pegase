@@ -419,6 +419,12 @@ public class PersonalizationPanel extends FrameLayout {
         addOwwThresholdRow(context, "Wake recommandé (0,80)",
                 com.pegasuscorp.orbe.voice.PegaseWakeStore.DEFAULT_OWW_THRESHOLD);
         addOwwThresholdRow(context, "Wake plus sensible (0,70)", 0.70f);
+        body.addView(hintLabel(context, wakeVoiceHint(context)));
+        addWakeVoiceRow(context, "Vérifier ma voix au réveil : strict (0,72)", true, 0.72f);
+        addWakeVoiceRow(context, "Vérifier ma voix au réveil : normal (0,65)", true,
+                com.pegasuscorp.orbe.voice.WakeVoiceGate.DEFAULT_THRESHOLD);
+        addWakeVoiceRow(context, "Vérifier ma voix au réveil : souple (0,55)", true, 0.55f);
+        addWakeVoiceRow(context, "Ne pas vérifier ma voix au réveil", false, 0f);
         addActionRow("Enregistrer mon wake word", () ->
                 getContext().startActivity(
                         new android.content.Intent(getContext(),
@@ -1089,6 +1095,27 @@ public class PersonalizationPanel extends FrameLayout {
             VoiceWakeClient.get().setOwwThreshold(context, threshold);
             android.widget.Toast.makeText(context,
                     String.format(java.util.Locale.FRANCE, "Seuil wake → %.2f", threshold),
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private static String wakeVoiceHint(Context context) {
+        boolean on = com.pegasuscorp.orbe.voice.WakeVoiceGate.isEnabled(context);
+        return "Après « Hey Pégase », Pégase compare la voix à tes enregistrements du "
+                + "wake word et ignore les autres voix (radio, télé). Actuellement : "
+                + (on ? String.format(java.util.Locale.FRANCE, "activé, seuil %.2f",
+                com.pegasuscorp.orbe.voice.WakeVoiceGate.getThreshold(context)) : "désactivé")
+                + ". S'il ne te répond plus, choisis « souple ».";
+    }
+
+    private void addWakeVoiceRow(Context context, String label, boolean enabled, float threshold) {
+        addActionRow(label, () -> {
+            com.pegasuscorp.orbe.voice.WakeVoiceGate.setEnabled(context, enabled);
+            if (enabled) com.pegasuscorp.orbe.voice.WakeVoiceGate.setThreshold(context, threshold);
+            android.widget.Toast.makeText(context,
+                    enabled ? String.format(java.util.Locale.FRANCE,
+                            "Vérification de la voix → %.2f", threshold)
+                            : "Vérification de la voix désactivée",
                     android.widget.Toast.LENGTH_SHORT).show();
         });
     }

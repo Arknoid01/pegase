@@ -120,6 +120,16 @@ public final class SpeakerVerifierEngine {
         });
     }
 
+    /** Empreinte brute sur le thread appelant (wake word) ; {@code null} si indisponible. */
+    public synchronized float[] embedBlocking(Context context, float[] samples) {
+        try {
+            if (!ensureReady(context)) return null;
+            return computeEmbedding(samples);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private float[] computeEmbedding(float[] samples) {
         if (extractor == null || samples == null || samples.length < SAMPLE_RATE / 4) {
             return null;

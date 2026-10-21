@@ -64,6 +64,8 @@ public final class OpenWakeWordEngine {
     private static final float SUSPECT_MAX_PEAK = 120f;
     private static final float SUSPECT_MAX_RMS = 60f;
     private static final float LOW_SCORE_RESET = 0.35f;
+    /** Audio passé à {@link WakeVoiceGate} : la phrase « Hey Pégase » dure ~1,8 s. */
+    private static final int VOICE_CHECK_SECONDS = 2;
 
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -83,6 +85,7 @@ public final class OpenWakeWordEngine {
     /** prepareCapture / releaseCapture uniquement depuis le thread OWW. */
     private final Object captureLock = new Object();
     private float threshold = DEFAULT_THRESHOLD;
+    private final RollingAudioBuffer wakeAudio = new RollingAudioBuffer(3);
 
     public OpenWakeWordEngine(Context context, Listener listener) {
         this.app = context.getApplicationContext();
@@ -217,6 +220,9 @@ public final class OpenWakeWordEngine {
         java.util.Arrays.fill(recentRms, 0f);
         int recentRmsIdx = 0;
         try {
+            // Premier lancement : construit l'empreinte « Hey Pégase » (quelques secondes).
+            WakeVoiceGate.warmUp(app);
+            wakeAudio.clear();
             if (!openMic()) {
                 Log.w(TAG, "mic open failed route=" + routeDescription());
                 return;
@@ -244,6 +250,7 @@ public final class OpenWakeWordEngine {
                     melBuffer.clear();
                     embedBuffer.clear();
                     rawPcm.clear();
+                    wakeAudio.clear();
                     consecutive = 0;
                     sawLowScore = true;
                     continue;
@@ -274,6 +281,7 @@ public final class OpenWakeWordEngine {
                     continue;
                 }
                 emptyStreak = 0;
+                wakeAudio.write(pcm, read);
                 for (int i = 0; i < read; i++) {
                     chunkFloat[i] = pcm[i];
                     rawPcm.addLast(chunkFloat[i]);
@@ -371,6 +379,20 @@ public final class OpenWakeWordEngine {
                     consecutive = 0;
                     continue;
                 }
+                float[] clip = wakeAudio.snapshotSeconds(VOICE_CHECK_SECONDS);
+                WakeVoiceGate.Verdict verdict = WakeVoiceGate.check(app, clip);
+                WakeVoiceGate.saveHit(app, clip, score, verdict);
+                logVoiceVerdict(score, verdict);
+                if (!verdict.accepted) {
+                    // Pas la voix du propriétaire (radio, télé…) : on se tait et on
+                    // continue d'écouter, sans re-tester la même phrase.
+                    Log.i(TAG, String.format(Locale.US,
+                            "hit_rejected_voice score=%.3f spk=%.3f", score, verdict.similarity));
+                    lastFireMs = now;
+                    consecutive = 0;
+                    sawLowScore = false;
+                    continue;
+                }
                 lastFireMs = now;
                 sLastFireElapsedMs = elapsed;
                 consecutive = 0;
@@ -391,6 +413,18 @@ public final class OpenWakeWordEngine {
             closeMic();
             running = false;
         }
+    }
+
+    private void logVoiceVerdict(float score, WakeVoiceGate.Verdict v) {
+        try {
+            org.json.JSONObject f = new org.json.JSONObject();
+            f.put("oww_score", (double) score);
+            if (!Float.isNaN(v.similarity)) f.put("spk", (double) v.similarity);
+            f.put("spk_thr", (double) WakeVoiceGate.getThreshold(app));
+            f.put("accepted", v.accepted);
+            f.put("reason", v.reason);
+            com.pegasuscorp.orbe.diag.PegaseDiagLog.kws(app, "oww_voice", f);
+        } catch (Exception ignored) {}
     }
 
     private boolean openMic() {
