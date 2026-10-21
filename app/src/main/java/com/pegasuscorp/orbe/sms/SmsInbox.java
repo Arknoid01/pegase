@@ -116,6 +116,39 @@ public final class SmsInbox {
         return deleted;
     }
 
+    private static final String PEGASE_SMS_PKG = "com.pegasuscorp.sms";
+    private static final Uri PEGASE_SMS_DELETE = Uri.parse("content://com.pegasuscorp.sms.delete");
+
+    /**
+     * Pégase SMS est l'app SMS par défaut et accepte nos demandes de suppression :
+     * le ménage se fait sans changer d'app par défaut.
+     */
+    public static boolean canDeleteViaPegaseSms(Context ctx) {
+        if (!PEGASE_SMS_PKG.equals(Telephony.Sms.getDefaultSmsPackage(ctx))) return false;
+        if (ctx.checkSelfPermission("com.pegasuscorp.sms.permission.DELETE_THREADS")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+        return ctx.getPackageManager().resolveContentProvider(
+                PEGASE_SMS_DELETE.getAuthority(), 0) != null;
+    }
+
+    /** Suppression faite par Pégase SMS (base Android + sa propre liste) ; -1 si refusée. */
+    public static int deleteThreadsViaPegaseSms(Context ctx, List<Long> threadIds) {
+        long[] ids = new long[threadIds.size()];
+        for (int i = 0; i < ids.length; i++) ids[i] = threadIds.get(i);
+        android.os.Bundle extras = new android.os.Bundle();
+        extras.putLongArray("thread_ids", ids);
+        try {
+            android.os.Bundle out = ctx.getContentResolver().call(
+                    PEGASE_SMS_DELETE, "delete_threads", null, extras);
+            int n = out != null ? out.getInt("deleted", -1) : -1;
+            Log.i(TAG, "Pégase SMS delete " + ids.length + " -> " + n);
+            return n;
+        } catch (Exception e) {
+            Log.w(TAG, "Pégase SMS delete failed", e);
+            return -1;
+        }
+    }
+
     public static boolean isDefaultSmsApp(Context ctx) {
         // Android 10+ : le rôle fait foi. getDefaultSmsPackage() peut rester sur
         // l'ancienne valeur (vu sur Nothing Phone : réglage secure à null).

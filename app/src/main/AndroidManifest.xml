@@ -17,6 +17,8 @@
     <permission
         android:name="com.pegasuscorp.orbe.permission.SPAM_CHECK"
         android:protectionLevel="signature" />
+    <!-- Supprimer des conversations via Pégase SMS (app SMS par défaut, même clé) -->
+    <uses-permission android:name="com.pegasuscorp.sms.permission.DELETE_THREADS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_MMS" />
@@ -55,6 +57,7 @@
          il faut declarer les intents qu'on veut "voir". -->
     <queries>
         <package android:name="com.pegasuscorp.sms" />
+        <provider android:authorities="com.pegasuscorp.sms.delete" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

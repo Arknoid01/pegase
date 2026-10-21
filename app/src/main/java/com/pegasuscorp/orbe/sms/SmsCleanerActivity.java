@@ -260,7 +260,8 @@ public class SmsCleanerActivity extends AppCompatActivity {
         int n = checkedThreads().size();
         if (n == 0) return;
         String msg = "Supprimer définitivement " + n + " conversation" + (n > 1 ? "s" : "") + " ?";
-        if (!SmsInbox.isDefaultSmsApp(this)) {
+        boolean viaPegaseSms = SmsInbox.canDeleteViaPegaseSms(this);
+        if (!viaPegaseSms && !SmsInbox.isDefaultSmsApp(this)) {
             msg += "\n\nAndroid réserve la suppression à l'app SMS par défaut : Pégase va "
                     + "te demander de le devenir le temps du ménage, puis tu rendras la main "
                     + "à Messages.";
@@ -269,7 +270,7 @@ public class SmsCleanerActivity extends AppCompatActivity {
                 .setTitle("Ménage")
                 .setMessage(msg)
                 .setPositiveButton("Supprimer", (d, w) -> {
-                    if (SmsInbox.isDefaultSmsApp(this)) {
+                    if (viaPegaseSms || SmsInbox.isDefaultSmsApp(this)) {
                         deleteChecked();
                     } else {
                         SmsInbox.rememberPreviousDefault(this);
@@ -298,7 +299,11 @@ public class SmsCleanerActivity extends AppCompatActivity {
         status.setText("Suppression de " + ids.size() + " conversations…");
         refreshButtons();
         io.execute(() -> {
-            int deleted = SmsInbox.deleteThreads(getApplicationContext(), ids);
+            boolean viaPegaseSms = SmsInbox.canDeleteViaPegaseSms(getApplicationContext());
+            int result = viaPegaseSms
+                    ? SmsInbox.deleteThreadsViaPegaseSms(getApplicationContext(), ids)
+                    : SmsInbox.deleteThreads(getApplicationContext(), ids);
+            int deleted = Math.max(0, result);
             if (deleted == 0 && !ids.isEmpty()) {
                 main.post(() -> {
                     busy = false;
@@ -314,8 +319,13 @@ public class SmsCleanerActivity extends AppCompatActivity {
                 candidates.clear();
                 candidates.addAll(kept);
                 render();
-                status.setText(deleted + " conversation" + (deleted > 1 ? "s" : "")
-                        + " supprimée" + (deleted > 1 ? "s" : "") + ". Pense à rendre la main à Messages.");
+                String done = deleted + " conversation" + (deleted > 1 ? "s" : "")
+                        + " supprimée" + (deleted > 1 ? "s" : "") + ".";
+                if (viaPegaseSms) {
+                    status.setText(done);
+                    return;
+                }
+                status.setText(done + " Pense à rendre la main à Messages.");
                 restoreCard.setVisibility(View.VISIBLE);
                 promptRestore();
             });
