@@ -77,7 +77,16 @@ public final class NotificationInboxStore {
     private NotificationInboxStore() {}
 
     public static String keyOf(InboxItem.Source source, String name) {
-        return source.name() + "|" + (name != null ? name.trim() : "");
+        return source.name() + "|" + stripInvisible(name);
+    }
+
+    /**
+     * WhatsApp préfixe parfois le nom d'un groupe d'une marque de sens (U+200E) :
+     * sans ce nettoyage, le même groupe apparaissait deux fois.
+     */
+    public static String stripInvisible(String name) {
+        if (name == null) return "";
+        return name.replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]", "").trim();
     }
 
     /**

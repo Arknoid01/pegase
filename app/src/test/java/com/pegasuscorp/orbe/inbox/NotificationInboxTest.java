@@ -82,5 +82,18 @@ public class NotificationInboxTest {
         assertEquals("On the road again !",
                 MessagingNotificationHandler.clean("On the road again ! (3 messages)"));
         assertEquals("Sarah", MessagingNotificationHandler.clean("Sarah"));
+        // Marque de sens invisible devant un nom de groupe WhatsApp.
+        assertEquals("On the road again !",
+                MessagingNotificationHandler.clean("\u200eOn the road again !"));
+        assertEquals(NotificationInboxStore.keyOf(InboxItem.Source.WHATSAPP, "Équipe 2026"),
+                NotificationInboxStore.keyOf(InboxItem.Source.WHATSAPP, "\u200eÉquipe 2026"));
+    }
+
+    @Test
+    public void appelManque_nEstPasUnMessage() {
+        assertTrue(MessagingNotificationHandler.isMissedCallText(
+                "Vous avez manqué un appel de Sarah Cornet"));
+        assertTrue(MessagingNotificationHandler.isMissedCallText("Appel manqué"));
+        assertFalse(MessagingNotificationHandler.isMissedCallText("Tu m'appelles ce soir ?"));
     }
 }

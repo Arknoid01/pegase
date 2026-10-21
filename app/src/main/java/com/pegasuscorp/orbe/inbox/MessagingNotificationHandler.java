@@ -36,6 +36,8 @@ public final class MessagingNotificationHandler {
     private static final String KEY_TAKE_OVER = "take_over_notifications";
     private static final String PKG_WHATSAPP = "com.whatsapp";
     private static final String PKG_MESSENGER = "com.facebook.orca";
+    /** {@code Notification.CATEGORY_MISSED_CALL} (API 31). */
+    private static final String CATEGORY_MISSED_CALL = "missed_call";
 
     private MessagingNotificationHandler() {}
 
@@ -62,6 +64,7 @@ public final class MessagingNotificationHandler {
         Notification n = sbn.getNotification();
         if (n == null) return;
         if (Notification.CATEGORY_CALL.equals(n.category)
+                || CATEGORY_MISSED_CALL.equals(n.category)
                 || (n.flags & Notification.FLAG_ONGOING_EVENT) != 0
                 || (n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) {
             return;
@@ -144,6 +147,10 @@ public final class MessagingNotificationHandler {
             if (title == null) title = text(n, Notification.EXTRA_TITLE);
             return out.isEmpty() || title == null ? null : new Parsed(clean(title), group, out);
         }
+        // Sans MessagingStyle, seule une notification marquée « message » en est un :
+        // « Connexion récente », « Sauvegarde impossible », « Appel manqué »… restent à l'appli.
+        if (!Notification.CATEGORY_MESSAGE.equals(n.category)) return null;
+        if (isMissedCallText(text(n, Notification.EXTRA_TEXT))) return null;
         String title = text(n, Notification.EXTRA_TITLE);
         String body = text(n, Notification.EXTRA_TEXT);
         if (title == null || body == null) return null;
@@ -155,7 +162,15 @@ public final class MessagingNotificationHandler {
 
     /** WhatsApp ajoute « (3 messages) » au titre des discussions groupées. */
     static String clean(String title) {
-        return title.replaceAll("\\s*\\(\\d+ (messages?|nouveaux messages)\\)\\s*$", "").trim();
+        return NotificationInboxStore.stripInvisible(title).replaceAll("\\s*\\(\\d+ (messages?|nouveaux messages)\\)\\s*$", "").trim();
+    }
+
+    /** Messenger range parfois l'appel manqué en catégorie « message ». */
+    static boolean isMissedCallText(String body) {
+        if (body == null) return false;
+        String b = body.toLowerCase(java.util.Locale.FRANCE);
+        return b.contains("appel manqué") || b.contains("manqué un appel")
+                || b.contains("missed call") || b.contains("missed a call");
     }
 
     private static String text(Notification n, String key) {
