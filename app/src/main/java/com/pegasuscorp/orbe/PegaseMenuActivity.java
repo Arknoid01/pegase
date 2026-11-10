@@ -300,6 +300,7 @@ public class PegaseMenuActivity extends AppCompatActivity {
                 new MenuItem("✉️", "Mails", "Toutes tes boîtes Gmail", () ->
                         startActivity(new Intent(this,
                                 com.pegasuscorp.orbe.mail.MailActivity.class))),
+                new MenuItem("🔋", "Batterie", batterySubtitle(), this::openJauge),
                 new MenuItem("🔧", "Outils", "Des solutions au quotidien", () ->
                         PegaseInterfaceState.openOrBringToFront(this, PegaseInterfaceState.TAB_TOOLS)),
                 new MenuItem("⋯", "Plus", "Encore plus de possibilités", () ->
@@ -361,6 +362,35 @@ public class PegaseMenuActivity extends AppCompatActivity {
     }
 
     /** Ouvre Pégase SMS (fork QUIK) ; à défaut, l'écran de ménage SMS. */
+    private static final String JAUGE_PACKAGE = "com.pegasuscorp.jauge";
+
+    /** « 62 % · en charge » d'après le dernier état batterie connu (sans permission). */
+    private String batterySubtitle() {
+        try {
+            Intent b = registerReceiver(null,
+                    new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (b == null) return "Conso et historique";
+            int level = b.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+            int scale = b.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100);
+            int plugged = b.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0);
+            if (level < 0 || scale <= 0) return "Conso et historique";
+            int pct = Math.round(100f * level / scale);
+            return pct + " %" + (plugged != 0 ? " · en charge" : " · conso et historique");
+        } catch (Exception e) {
+            return "Conso et historique";
+        }
+    }
+
+    private void openJauge() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage(JAUGE_PACKAGE);
+        if (launch != null) {
+            startActivity(launch);
+        } else {
+            android.widget.Toast.makeText(this, "Jauge n'est pas installée sur ce téléphone.",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void openPegaseSms() {
         Intent launch = getPackageManager().getLaunchIntentForPackage(PEGASE_SMS_PACKAGE);
         if (launch != null) {
