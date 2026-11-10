@@ -706,31 +706,52 @@ public class AppDrawerPanel extends FrameLayout {
 
     private void showAppMenu(AppListCache.AppEntry app) {
         Context ctx = getContext();
-        java.util.List<String> labels = new java.util.ArrayList<>();
-        java.util.List<Runnable> actions = new java.util.ArrayList<>();
-        labels.add("✏️  Renommer");
-        actions.add(() -> renameApp(app));
-        labels.add("🖼️  Changer l'icône");
-        actions.add(() -> changeIcon(app));
-        labels.add("ℹ️  Infos de l'app");
-        actions.add(() -> {
+        java.util.List<com.pegasuscorp.orbe.ui.AppActionSheet.Action> actions = new java.util.ArrayList<>();
+        actions.add(new com.pegasuscorp.orbe.ui.AppActionSheet.Action("✏️", "Renommer", false,
+                () -> renameApp(app)));
+        actions.add(new com.pegasuscorp.orbe.ui.AppActionSheet.Action("🖼️", "Icône", false,
+                () -> changeIcon(app)));
+        actions.add(new com.pegasuscorp.orbe.ui.AppActionSheet.Action("ℹ️", "Infos", false, () -> {
             Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     android.net.Uri.parse("package:" + app.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             ctx.startActivity(i);
-        });
+        }));
         if (isRemovable(ctx, app.pkg)) {
-            labels.add("🗑️  Désinstaller");
-            actions.add(() -> {
-                Intent i = new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg));
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                ctx.startActivity(i);
-            });
+            actions.add(new com.pegasuscorp.orbe.ui.AppActionSheet.Action("🗑️", "Désinstaller", true,
+                    () -> {
+                        Intent i = new Intent(Intent.ACTION_DELETE,
+                                android.net.Uri.parse("package:" + app.pkg));
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        ctx.startActivity(i);
+                    }));
         }
-        new androidx.appcompat.app.AlertDialog.Builder(ctx)
-                .setTitle(app.label != null ? app.label : app.pkg)
-                .setItems(labels.toArray(new String[0]), (d, w) -> actions.get(w).run())
-                .show();
+        com.pegasuscorp.orbe.ui.AppActionSheet.showActions(ctx, sheetIcon(app),
+                app.label != null ? app.label : app.pkg, versionLine(ctx, app.pkg),
+                accentMiddle, actions);
+    }
+
+    private android.graphics.drawable.Drawable sheetIcon(AppListCache.AppEntry app) {
+        Context ctx = getContext();
+        int size = (int) (52 * getResources().getDisplayMetrics().density);
+        try {
+            android.graphics.drawable.Drawable d = IconThemeHelper.resolve(ctx, app, size);
+            return d != null ? d : app.icon(ctx);
+        } catch (RuntimeException | OutOfMemoryError e) {
+            return app.icon(ctx);
+        }
+    }
+
+    private static String versionLine(Context ctx, String pkg) {
+        try {
+            android.content.pm.PackageInfo pi = ctx.getPackageManager().getPackageInfo(pkg, 0);
+            String v = pi.versionName != null ? "Version " + pi.versionName : null;
+            String custom = AppCustomStore.label(ctx, pkg) != null ? "nom personnalisé" : null;
+            if (v != null && custom != null) return v + " · " + custom;
+            return v != null ? v : (custom != null ? custom : pkg);
+        } catch (Exception e) {
+            return pkg;
+        }
     }
 
     private static boolean isRemovable(Context ctx, String pkg) {
@@ -746,75 +767,58 @@ public class AppDrawerPanel extends FrameLayout {
 
     private void renameApp(AppListCache.AppEntry app) {
         Context ctx = getContext();
-        float d = getResources().getDisplayMetrics().density;
-        android.widget.EditText field = new android.widget.EditText(ctx);
-        field.setSingleLine(true);
-        field.setText(app.label);
-        field.setSelection(field.getText().length());
-        FrameLayout box = new FrameLayout(ctx);
-        box.setPadding((int) (20 * d), (int) (8 * d), (int) (20 * d), 0);
-        box.addView(field);
-        androidx.appcompat.app.AlertDialog.Builder b = new androidx.appcompat.app.AlertDialog.Builder(ctx)
-                .setTitle("Renommer")
-                .setView(box)
-                .setPositiveButton("Enregistrer", (dlg, w) -> {
-                    AppCustomStore.setLabel(ctx, app.pkg, field.getText().toString());
+        com.pegasuscorp.orbe.ui.AppActionSheet.showRename(ctx, sheetIcon(app), app.label,
+                AppCustomStore.label(ctx, app.pkg) != null, accentMiddle,
+                name -> {
+                    AppCustomStore.setLabel(ctx, app.pkg, name);
                     refreshAfterCustomization();
-                })
-                .setNegativeButton("Annuler", null);
-        if (AppCustomStore.label(ctx, app.pkg) != null) {
-            b.setNeutralButton("Nom d'origine", (dlg, w) -> {
-                AppCustomStore.setLabel(ctx, app.pkg, null);
-                refreshAfterCustomization();
-            });
-        }
-        b.show();
-        field.requestFocus();
+                },
+                () -> {
+                    AppCustomStore.setLabel(ctx, app.pkg, null);
+                    refreshAfterCustomization();
+                });
     }
 
     private void changeIcon(AppListCache.AppEntry app) {
         Context ctx = getContext();
         java.util.List<String> labels = new java.util.ArrayList<>();
         java.util.List<Runnable> actions = new java.util.ArrayList<>();
-        labels.add("Une image de la galerie");
+        labels.add("🖼️  Une image de la galerie");
         actions.add(() -> {
             if (personalizationListener != null) {
                 personalizationListener.onPickAppIcon(app.pkg, this::refreshAfterCustomization);
             }
         });
-        labels.add("L'icône d'une autre app");
+        labels.add("📱  L'icône d'une autre app");
         actions.add(() -> pickIconFromOtherApp(app));
         if (AppCustomStore.hasIcon(ctx, app.pkg)) {
-            labels.add("Icône d'origine");
+            labels.add("↩️  Revenir à l'icône d'origine");
             actions.add(() -> {
                 AppCustomStore.clearIcon(ctx, app.pkg);
                 refreshAfterCustomization();
             });
         }
-        new androidx.appcompat.app.AlertDialog.Builder(ctx)
-                .setTitle("Icône de " + app.label)
-                .setItems(labels.toArray(new String[0]), (dlg, w) -> actions.get(w).run())
-                .setNegativeButton("Annuler", null)
-                .show();
+        com.pegasuscorp.orbe.ui.AppActionSheet.showList(ctx, sheetIcon(app), "Changer l'icône",
+                app.label, labels.toArray(new String[0]), w -> actions.get(w).run());
     }
 
     private void pickIconFromOtherApp(AppListCache.AppEntry target) {
         Context ctx = getContext();
+        int size = (int) (44 * getResources().getDisplayMetrics().density);
         java.util.List<AppListCache.AppEntry> others = new java.util.ArrayList<>(allApps);
-        String[] names = new String[others.size()];
-        for (int i = 0; i < others.size(); i++) names[i] = others.get(i).label;
-        new androidx.appcompat.app.AlertDialog.Builder(ctx)
-                .setTitle("Prendre l'icône de…")
-                .setItems(names, (dlg, w) -> {
-                    AppListCache.AppEntry src = others.get(w);
-                    android.graphics.drawable.Drawable icon =
-                            IconThemeHelper.resolveForPackage(ctx, src.pkg, src.icon(ctx),
-                                    AppCustomStore.ICON_PX);
-                    if (icon == null) icon = src.icon(ctx);
+        com.pegasuscorp.orbe.ui.AppActionSheet.showAppPicker(ctx, "Prendre l'icône de…", others,
+                a -> a.label,
+                a -> {
+                    android.graphics.drawable.Drawable d = adapter != null
+                            ? adapter.iconCache.get(adapter.iconCacheKey(a)) : null;
+                    return d != null ? d : a.icon(ctx);
+                },
+                src -> {
+                    android.graphics.drawable.Drawable icon = src.icon(ctx);
+                    android.graphics.drawable.Drawable custom = AppCustomStore.icon(ctx, src.pkg);
+                    if (custom != null) icon = custom;
                     if (AppCustomStore.saveIcon(ctx, target.pkg, icon)) refreshAfterCustomization();
-                })
-                .setNegativeButton("Annuler", null)
-                .show();
+                });
     }
 
     /** Recharge la liste (noms) et vide le cache d'icônes. */
