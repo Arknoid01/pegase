@@ -97,6 +97,7 @@ public class PersonalizationPanel extends FrameLayout {
     private TextView scriptRunBtn;
     private TextView scriptStatus;
     private TextView prefetchAlarmBtn;
+    private TextView voiceChoiceSummary;
     private int accentMiddle = Color.parseColor("#35D0DD");
     private int colorSizePx;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -318,190 +319,101 @@ public class PersonalizationPanel extends FrameLayout {
 
         body = newPage("voice", "🎙️", "Voix",
                 "Mot d'éveil, ma voix, synthèse, compréhension");
+
+        // ── Écoute ──
         body.addView(majorSectionTitle(context, "Écoute"));
-        body.addView(addSubHeading(context, "Mot d'éveil « Pégase »"));
-        body.addView(hintLabel(context,
-                "Écoute locale Sherpa (« Pégase ») dans un service dédié. "
-                        + "Activez l'écoute ci-dessous ; le modèle (~17 Mo) se télécharge au premier usage. "
-                        + "Pendant une vidéo ou de la musique, l'écoute se met en pause."));
-        addActionRow(com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context)
-                ? "Désactiver l'écoute « Pégase »"
-                : "Activer l'écoute « Pégase »", () -> {
-            boolean enable = !com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context);
-            com.pegasuscorp.orbe.voice.PegaseWakeStore.setEnabled(context, enable);
-            VoiceWakeClient.get().sync(context);
-            android.widget.Toast.makeText(context,
-                    enable ? "Pégase écoute en arrière-plan" : "Écoute désactivée",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow(com.pegasuscorp.orbe.voice.PegaseWakeStore.isGentleMode(context)
-                ? "Mode doux ON — moins de lag (moins réactif)"
-                : "Mode doux OFF — wake plus réactif (plus de lag)", () -> {
-            boolean gentle = !com.pegasuscorp.orbe.voice.PegaseWakeStore.isGentleMode(context);
-            com.pegasuscorp.orbe.voice.PegaseWakeStore.setGentleMode(context, gentle);
-            com.pegasuscorp.orbe.voice.VoiceWakeClient.get().setGentleMode(context, gentle);
-            VoiceWakeClient.get().sync(context);
-            android.widget.Toast.makeText(context,
-                    gentle ? "Mode doux : sessions micro espacées"
-                            : "Mode réactif : wake plus vif, lag possible",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow(com.pegasuscorp.orbe.voice.VoiceMuteStore.isMuted(context)
-                ? "Réactiver le micro Pégase"
-                : "Couper le micro Pégase (global)", () -> {
-            boolean muted = !com.pegasuscorp.orbe.voice.VoiceMuteStore.isMuted(context);
-            com.pegasuscorp.orbe.voice.VoiceMuteStore.setMuted(context, muted);
-            VoiceWakeClient.get().sync(context);
-            android.widget.Toast.makeText(context,
-                    muted ? "Micro coupé — wake et discussion désactivés"
-                            : "Micro réactivé",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
+        addSwitchRow("Écoute « Hey Pégase »",
+                "En pause pendant une vidéo ou de la musique",
+                com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context), on -> {
+                    com.pegasuscorp.orbe.voice.PegaseWakeStore.setEnabled(context, on);
+                    VoiceWakeClient.get().sync(context);
+                });
+        addSwitchRow("Couper le micro",
+                "Coupe tout : mot d'éveil et discussion",
+                com.pegasuscorp.orbe.voice.VoiceMuteStore.isMuted(context), muted -> {
+                    com.pegasuscorp.orbe.voice.VoiceMuteStore.setMuted(context, muted);
+                    VoiceWakeClient.get().sync(context);
+                });
+        addSwitchRow("Mode doux",
+                "Moins de ralentissements, réveil un peu moins vif",
+                com.pegasuscorp.orbe.voice.PegaseWakeStore.isGentleMode(context), gentle -> {
+                    com.pegasuscorp.orbe.voice.PegaseWakeStore.setGentleMode(context, gentle);
+                    VoiceWakeClient.get().setGentleMode(context, gentle);
+                    VoiceWakeClient.get().sync(context);
+                });
 
-        body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Wake openWakeWord"));
-        body.addView(hintLabel(context,
-                "Enregistre « Hey Pégase » sur le micro du téléphone, entraîne sur PC, "
-                        + "importe hey_pegase.onnx. Prioritaire sur Sherpa si le modèle est prêt. "
-                        + "Seuil actuel : "
-                        + String.format(java.util.Locale.US, "%.2f",
-                        com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context))
-                        + " (défaut 0,80 — plus haut = moins de faux positifs)."));
-        TextView owwStatus = new TextView(context);
-        owwStatus.setTextColor(Color.parseColor("#88FFFFFF"));
-        owwStatus.setTextSize(12);
-        owwStatus.setText(com.pegasuscorp.orbe.voice.WakeOwwStore.statusLabel(context));
-        body.addView(owwStatus, wrapLp());
-        addOwwThresholdRow(context, "Wake moins sensible (0,88)", 0.88f);
-        addOwwThresholdRow(context, "Wake recommandé (0,80)",
-                com.pegasuscorp.orbe.voice.PegaseWakeStore.DEFAULT_OWW_THRESHOLD);
-        addOwwThresholdRow(context, "Wake plus sensible (0,70)", 0.70f);
-        body.addView(hintLabel(context, wakeVoiceHint(context)));
-        addWakeVoiceRow(context, "Vérifier ma voix au réveil : strict (0,72)", true, 0.72f);
-        addWakeVoiceRow(context, "Vérifier ma voix au réveil : normal (0,65)", true,
-                com.pegasuscorp.orbe.voice.WakeVoiceGate.DEFAULT_THRESHOLD);
-        addWakeVoiceRow(context, "Vérifier ma voix au réveil : souple (0,55)", true, 0.55f);
-        addWakeVoiceRow(context, "Ne pas vérifier ma voix au réveil", false, 0f);
-        addActionRow("Enregistrer mon wake word", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(),
-                                com.pegasuscorp.orbe.WakeWordRecordActivity.class)));
+        final String[] owwLabels = {"Moins sensible — moins de faux réveils (0,88)",
+                "Recommandée (0,80)", "Plus sensible — répond plus facilement (0,70)"};
+        final float[] owwValues = {0.88f,
+                com.pegasuscorp.orbe.voice.PegaseWakeStore.DEFAULT_OWW_THRESHOLD, 0.70f};
+        TextView[] owwSummary = new TextView[1];
+        owwSummary[0] = addNavRow("Sensibilité du mot d'éveil",
+                owwLabels[nearest(owwValues,
+                        com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context))],
+                () -> choose("Sensibilité du mot d'éveil", owwLabels,
+                        nearest(owwValues,
+                                com.pegasuscorp.orbe.voice.PegaseWakeStore.getOwwThreshold(context)),
+                        i -> {
+                            VoiceWakeClient.get().setOwwThreshold(context, owwValues[i]);
+                            owwSummary[0].setText(owwLabels[i]);
+                        }));
 
-        body.addView(spacer(context, (int) (12 * density)));
+        final String[] gateLabels = {"Stricte (0,72)", "Normale (0,65)",
+                "Souple — si elle ne te répond plus (0,55)", "Non, tout le monde peut la réveiller"};
+        final float[] gateValues = {0.72f,
+                com.pegasuscorp.orbe.voice.WakeVoiceGate.DEFAULT_THRESHOLD, 0.55f, -1f};
+        TextView[] gateSummary = new TextView[1];
+        gateSummary[0] = addNavRow("Ne répondre qu'à ma voix",
+                gateLabels[currentGateIndex(context, gateValues)],
+                () -> choose("Ne répondre qu'à ma voix", gateLabels,
+                        currentGateIndex(context, gateValues), i -> {
+                            boolean on = gateValues[i] > 0f;
+                            com.pegasuscorp.orbe.voice.WakeVoiceGate.setEnabled(context, on);
+                            if (on) com.pegasuscorp.orbe.voice.WakeVoiceGate
+                                    .setThreshold(context, gateValues[i]);
+                            gateSummary[0].setText(gateLabels[i]);
+                        }));
+        body.addView(hintLabel(context,
+                "Après « Hey Pégase », elle compare la voix à tes enregistrements "
+                        + "et ignore la radio ou la télé."));
+
         body.addView(addSubHeading(context, "Ma voix"));
-        body.addView(hintLabel(context,
-                "Enregistre ta voix pour que seul toi puisses activer Pégase "
-                        + "(mot d'éveil ou discussion)."));
-        TextView speakerStatus = new TextView(context);
-        speakerStatus.setTextColor(Color.parseColor("#88FFFFFF"));
-        speakerStatus.setTextSize(12);
+        addNavRow("Enregistrer mon « Hey Pégase »",
+                com.pegasuscorp.orbe.voice.WakeOwwStore.statusLabel(context), () ->
+                        getContext().startActivity(new android.content.Intent(getContext(),
+                                com.pegasuscorp.orbe.WakeWordRecordActivity.class)));
         int samples = com.pegasuscorp.orbe.voice.SpeakerProfileStore.getInstance(context)
                 .getSampleCount();
-        speakerStatus.setText(com.pegasuscorp.orbe.voice.SpeakerModelStore.statusLabel(context)
-                + " · " + (samples >= 3 ? "empreinte OK" : "empreinte " + samples + "/3"));
-        body.addView(speakerStatus, wrapLp());
-        addActionRow("Enregistrer ma voix", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), SpeakerEnrollmentActivity.class)));
+        addNavRow("Enregistrer mon empreinte vocale",
+                samples >= 3 ? "Empreinte OK" : "Empreinte " + samples + "/3", () ->
+                        getContext().startActivity(new android.content.Intent(getContext(),
+                                SpeakerEnrollmentActivity.class)));
         com.pegasuscorp.orbe.voice.SpeakerProfileStore speakerProfile =
                 com.pegasuscorp.orbe.voice.SpeakerProfileStore.getInstance(context);
-        addActionRow(speakerProfile.isRequireOwnerVoice()
-                ? "Désactiver « Dis Pégase pour confirmer »"
-                : "Activer la vérification vocale", () -> {
-            speakerProfile.setRequireOwnerVoice(!speakerProfile.isRequireOwnerVoice());
-            android.widget.Toast.makeText(context,
-                    speakerProfile.isRequireOwnerVoice()
-                            ? "Vérification vocale activée"
-                            : "Vérification vocale désactivée",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
+        addSwitchRow("Confirmer avec ma voix",
+                "Les actions sensibles demandent « Dis Pégase pour confirmer »",
+                speakerProfile.isRequireOwnerVoice(), speakerProfile::setRequireOwnerVoice);
 
+        // ── Parole ──
         addSectionSeparator(context);
         body.addView(majorSectionTitle(context, "Parole"));
-        body.addView(addSubHeading(context, "Synthèse vocale"));
-        body.addView(hintLabel(context,
-                "Piper (local) ou TTS système Google. La voix système est choisie par "
-                        + "son nom stable (pas un numéro). Repli Piper si la voix manque."));
-        TextView ttsEngineStatus = new TextView(context);
-        ttsEngineStatus.setTextColor(Color.parseColor("#88FFFFFF"));
-        ttsEngineStatus.setTextSize(12);
-        ttsEngineStatus.setTag("tts_engine_status");
-        ttsEngineStatus.setText(com.pegasuscorp.orbe.voice.AndroidTtsStore.statusLabel(context)
-                + "\n" + PiperModelStore.statusLabel(context));
-        body.addView(ttsEngineStatus, wrapLp());
-
-        addActionRow(PiperModelStore.usePiper(context)
-                ? "Moteur actif : Piper — passer au système"
-                : "Moteur actif : Système — passer à Piper", () -> {
-            boolean nextPiper = !PiperModelStore.usePiper(getContext());
-            PiperModelStore.setUsePiper(getContext(), nextPiper);
-            refreshTtsStatus();
-            if (listener != null) listener.onPiperVoiceChanged();
-            android.widget.Toast.makeText(getContext(),
-                    nextPiper ? "Moteur : Piper" : "Moteur : TTS système",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-
-        addActionRow(com.pegasuscorp.orbe.voice.AndroidTtsStore.preferLocalOnly(context)
-                ? "Voix système : local uniquement ✓"
-                : "Voix système : local + réseau ✓", () -> {
-            boolean next = !com.pegasuscorp.orbe.voice.AndroidTtsStore.preferLocalOnly(getContext());
-            com.pegasuscorp.orbe.voice.AndroidTtsStore.setPreferLocalOnly(getContext(), next);
-            refreshTtsStatus();
-            rebuildSystemVoiceRows();
-            if (listener != null) listener.onPiperVoiceChanged();
-        });
-
-        body.addView(hintLabel(context, "Voix système françaises :"));
-        LinearLayout systemVoiceList = new LinearLayout(context);
-        systemVoiceList.setOrientation(LinearLayout.VERTICAL);
-        systemVoiceList.setTag("system_voice_list");
-        body.addView(systemVoiceList, wrapLp());
-        rebuildSystemVoiceRows();
-
-        body.addView(spacer(context, (int) (8 * density)));
-        body.addView(addSubHeading(context, "Voix Piper"));
-        TextView piperStatus = new TextView(context);
-        piperStatus.setTextColor(Color.parseColor("#88FFFFFF"));
-        piperStatus.setTextSize(12);
-        piperStatus.setTag("piper_status");
-        piperStatus.setText(PiperModelStore.statusLabel(context));
-        body.addView(piperStatus, wrapLp());
-        PiperModelStore.Voice selectedVoice = PiperModelStore.getSelectedVoice(context);
-        for (PiperModelStore.Voice voice : PiperModelStore.ALL_VOICES) {
-            boolean active = voice.id.equals(selectedVoice.id);
-            boolean ready = PiperModelStore.isVoiceReady(context, voice);
-            String label = (active ? "✓ " : "") + voice.label
-                    + (ready ? " (installée)" : " (non installée)");
-            addActionRow(label, () -> {
-                PiperModelStore.setSelectedVoice(getContext(), voice);
-                PiperModelStore.setUsePiper(getContext(), true);
-                if (!PiperModelStore.isVoiceReady(getContext(), voice)) {
-                    if (listener != null) listener.onDownloadPiperVoice(voice);
-                } else {
+        ensureAndroidVoiceCache();
+        voiceChoiceSummary = addNavRow("Voix de Pégase", currentVoiceLabel(context),
+                this::chooseVoice);
+        addSwitchRow("Voix hors ligne uniquement",
+                "Cache les voix système qui ont besoin d'Internet",
+                com.pegasuscorp.orbe.voice.AndroidTtsStore.preferLocalOnly(context), on -> {
+                    com.pegasuscorp.orbe.voice.AndroidTtsStore.setPreferLocalOnly(getContext(), on);
+                    refreshTtsStatus();
                     if (listener != null) listener.onPiperVoiceChanged();
-                }
-                refreshTtsStatus();
-                refreshPiperStatus();
-            });
-        }
-        addActionRow("Importer modèle Piper (ZIP)", () -> {
-            if (listener != null) listener.onImportPiperZip();
-        });
-        addActionRow("Importer dossier Piper", () -> {
-            if (listener != null) listener.onImportPiperFolder();
-        });
-        body.addView(hintLabel(context,
-                PiperModelDownloader.isDownloading()
-                        ? "Téléchargement en cours…"
-                        : "Voix Piper : " + PiperModelStore.getSelectedVoice(context).label));
+                });
 
         piperSpeedLabel = new TextView(context);
         piperSpeedLabel.setTextColor(Color.WHITE);
         piperSpeedLabel.setTextSize(14);
+        piperSpeedLabel.setPadding(0, (int) (12 * density), 0, 0);
         updatePiperSpeedLabel(PiperModelStore.getSpeechSpeed(context));
         body.addView(piperSpeedLabel, wrapLp());
-
         SeekBar piperSpeedSeek = new SeekBar(context);
         piperSpeedSeek.setMax(30);
         piperSpeedSeek.setProgress(speedToProgress(PiperModelStore.getSpeechSpeed(context)));
@@ -517,51 +429,38 @@ public class PersonalizationPanel extends FrameLayout {
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
         body.addView(piperSpeedSeek, wrapLp());
-        body.addView(hintLabel(context,
-                "Vitesse plus lente = articulation plus claire (tirets, fin de mots)."));
+        body.addView(hintLabel(context, "Plus lent = articulation plus claire."));
 
-        body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Dictionnaire vocal"));
-        body.addView(hintLabel(context,
-                "Prononciation Piper/TTS — modifiable aussi à la voix "
-                        + "(« dis Qwen comme Couène », « vitesse à 85 % »)."));
-        addActionRow("Voir et modifier la prononciation", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), SpeechRulesSettingsActivity.class)));
+        addNavRow("Prononciation",
+                "Ex. « dis Qwen comme Couène » — modifiable aussi à la voix", () ->
+                        getContext().startActivity(new android.content.Intent(getContext(),
+                                SpeechRulesSettingsActivity.class)));
+        addNavRow("Importer une voix Piper…", "Depuis un ZIP ou un dossier", () ->
+                choose("Importer une voix Piper",
+                        new String[]{"Fichier ZIP", "Dossier"}, -1, i -> {
+                            if (listener == null) return;
+                            if (i == 0) listener.onImportPiperZip();
+                            else listener.onImportPiperFolder();
+                        }));
 
+        // ── Compréhension ──
         addSectionSeparator(context);
         body.addView(majorSectionTitle(context, "Compréhension"));
-        body.addView(addSubHeading(context, "Compréhension vocale"));
-        body.addView(hintLabel(context,
-                "Corrections STT apprises — modifiables aussi à la voix "
-                        + "(« non, je voulais dire… »)."));
-        addActionRow("Voir et modifier les corrections vocales", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), VoiceCorrectionsSettingsActivity.class)));
-        body.addView(hintLabel(context,
-                "Apprends à me connaître — le routeur mémorise tes formulations confirmées "
-                        + "(pas le LLM)."));
-        addActionRow(com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context)
-                ? "Désactiver « Apprends à me connaître »"
-                : "Activer « Apprends à me connaître »", () -> {
-            boolean enable = !com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context);
-            com.pegasuscorp.orbe.voice.LearnModeStore.setEnabled(context, enable);
-            android.widget.Toast.makeText(context,
-                    enable
-                            ? "Pégase va apprendre ta façon de parler"
-                            : "Apprentissage du routeur désactivé",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow("Voir mon corpus personnel", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), KnowMeSettingsActivity.class)));
-        body.addView(hintLabel(context,
-                "Routing UserExamples — importe une conversation, valide phrase → outil "
-                        + "(tous les outils du registre). Matching sémantique avant les règles "
-                        + "hardcodées (~30 j d'usage)."));
-        addActionRow("Apprentissage du routing", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), RoutingLearningActivity.class)));
+        addNavRow("Corrections vocales",
+                "Mots mal compris qu'elle a appris à corriger (« non, je voulais dire… »)", () ->
+                        getContext().startActivity(new android.content.Intent(getContext(),
+                                VoiceCorrectionsSettingsActivity.class)));
+        addSwitchRow("Apprendre ma façon de parler",
+                "Retient tes formulations confirmées pour choisir le bon outil",
+                com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context),
+                on -> com.pegasuscorp.orbe.voice.LearnModeStore.setEnabled(context, on));
+        addNavRow("Mon corpus personnel", "Les phrases qu'elle a retenues", () ->
+                getContext().startActivity(new android.content.Intent(getContext(),
+                        KnowMeSettingsActivity.class)));
+        addNavRow("Apprentissage des outils",
+                "Importer une conversation et associer phrases → outils", () ->
+                        getContext().startActivity(new android.content.Intent(getContext(),
+                                RoutingLearningActivity.class)));
 
         body = newPage("memory", "💾", "Mémoire",
                 "Portrait, atlas, souvenirs");
@@ -922,6 +821,7 @@ public class PersonalizationPanel extends FrameLayout {
     }
 
     private void refreshTtsStatus() {
+        if (voiceChoiceSummary != null) voiceChoiceSummary.setText(currentVoiceLabel(getContext()));
         if (pages.isEmpty()) return;
         for (View child : allRows()) {
             if ("tts_engine_status".equals(child.getTag())) {
@@ -941,7 +841,10 @@ public class PersonalizationPanel extends FrameLayout {
                 break;
             }
         }
-        if (list == null) return;
+        if (list == null) {
+            refreshTtsStatus();
+            return;
+        }
         list.removeAllViews();
         Context context = getContext();
         boolean localOnly = com.pegasuscorp.orbe.voice.AndroidTtsStore.preferLocalOnly(context);
@@ -1276,34 +1179,157 @@ public class PersonalizationPanel extends FrameLayout {
         row.setBackground(bg);
     }
 
-    private void addOwwThresholdRow(Context context, String label, float threshold) {
-        addActionRow(label, () -> {
-            VoiceWakeClient.get().setOwwThreshold(context, threshold);
-            android.widget.Toast.makeText(context,
-                    String.format(java.util.Locale.FRANCE, "Seuil wake → %.2f", threshold),
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
+    // ── Lignes « interrupteur » et « choix » ─────────────────────────────────
+
+    private void addSwitchRow(String title, String summary, boolean checked,
+                              java.util.function.Consumer<Boolean> onChange) {
+        Context context = getContext();
+        float density = context.getResources().getDisplayMetrics().density;
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int p = (int) (12 * density);
+        row.setPadding(p, p, p, p);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(12 * density);
+        bg.setColor(Color.parseColor("#14FFFFFF"));
+        row.setBackground(bg);
+        row.addView(twoLines(context, title, summary), new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Switch sw = new android.widget.Switch(context);
+        sw.setChecked(checked);
+        sw.setOnCheckedChangeListener((b, on) -> onChange.accept(on));
+        row.addView(sw);
+        row.setOnClickListener(v -> sw.toggle());
+        LinearLayout.LayoutParams lp = wrapLp();
+        lp.topMargin = (int) (8 * density);
+        body.addView(row, lp);
     }
 
-    private static String wakeVoiceHint(Context context) {
-        boolean on = com.pegasuscorp.orbe.voice.WakeVoiceGate.isEnabled(context);
-        return "Après « Hey Pégase », Pégase compare la voix à tes enregistrements du "
-                + "wake word et ignore les autres voix (radio, télé). Actuellement : "
-                + (on ? String.format(java.util.Locale.FRANCE, "activé, seuil %.2f",
-                com.pegasuscorp.orbe.voice.WakeVoiceGate.getThreshold(context)) : "désactivé")
-                + ". S'il ne te répond plus, choisis « souple ».";
+    /** Ligne cliquable titre + valeur ; renvoie la vue de la valeur (pour la mettre à jour). */
+    private TextView addNavRow(String title, String summary, Runnable action) {
+        Context context = getContext();
+        float density = context.getResources().getDisplayMetrics().density;
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int p = (int) (12 * density);
+        row.setPadding(p, p, p, p);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(12 * density);
+        bg.setColor(Color.parseColor("#14FFFFFF"));
+        row.setBackground(bg);
+        LinearLayout texts = twoLines(context, title, summary);
+        row.addView(texts, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView chevron = new TextView(context);
+        chevron.setText("›");
+        chevron.setTextColor(Color.parseColor("#66FFFFFF"));
+        chevron.setTextSize(20);
+        row.addView(chevron);
+        row.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams lp = wrapLp();
+        lp.topMargin = (int) (8 * density);
+        body.addView(row, lp);
+        return (TextView) texts.getChildAt(1);
     }
 
-    private void addWakeVoiceRow(Context context, String label, boolean enabled, float threshold) {
-        addActionRow(label, () -> {
-            com.pegasuscorp.orbe.voice.WakeVoiceGate.setEnabled(context, enabled);
-            if (enabled) com.pegasuscorp.orbe.voice.WakeVoiceGate.setThreshold(context, threshold);
-            android.widget.Toast.makeText(context,
-                    enabled ? String.format(java.util.Locale.FRANCE,
-                            "Vérification de la voix → %.2f", threshold)
-                            : "Vérification de la voix désactivée",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
+    private LinearLayout twoLines(Context context, String title, String summary) {
+        LinearLayout texts = new LinearLayout(context);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t = new TextView(context);
+        t.setText(title);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(15);
+        texts.addView(t);
+        TextView s = new TextView(context);
+        s.setText(summary);
+        s.setTextColor(Color.parseColor("#88FFFFFF"));
+        s.setTextSize(12);
+        texts.addView(s);
+        return texts;
+    }
+
+    private void choose(String title, String[] items, int checked,
+                        java.util.function.IntConsumer onPick) {
+        AlertDialog.Builder b = new AlertDialog.Builder(getContext()).setTitle(title);
+        if (checked >= 0) {
+            b.setSingleChoiceItems(items, checked, (d, i) -> {
+                d.dismiss();
+                onPick.accept(i);
+            });
+        } else {
+            b.setItems(items, (d, i) -> onPick.accept(i));
+        }
+        b.setNegativeButton("Annuler", null).show();
+    }
+
+    private static int nearest(float[] values, float v) {
+        int best = 0;
+        for (int i = 1; i < values.length; i++) {
+            if (Math.abs(values[i] - v) < Math.abs(values[best] - v)) best = i;
+        }
+        return best;
+    }
+
+    private static int currentGateIndex(Context context, float[] values) {
+        if (!com.pegasuscorp.orbe.voice.WakeVoiceGate.isEnabled(context)) return values.length - 1;
+        float[] on = java.util.Arrays.copyOf(values, values.length - 1);
+        return nearest(on, com.pegasuscorp.orbe.voice.WakeVoiceGate.getThreshold(context));
+    }
+
+    private String currentVoiceLabel(Context context) {
+        if (PiperModelStore.usePiper(context)) {
+            return "Piper · " + PiperModelStore.getSelectedVoice(context).label
+                    + (PiperModelDownloader.isDownloading() ? " (téléchargement…)" : "");
+        }
+        String name = com.pegasuscorp.orbe.voice.AndroidTtsStore.getVoiceName(context);
+        for (com.pegasuscorp.orbe.voice.AndroidTtsStore.VoiceInfo v
+                : com.pegasuscorp.orbe.voice.AndroidTtsStore.getCachedVoices()) {
+            if (v.name.equals(name)) return "Système · " + v.displayLabel();
+        }
+        return "Système" + (name.isEmpty() ? "" : " · " + name);
+    }
+
+    /** Une seule liste : voix Piper puis voix système (filtrées si hors ligne uniquement). */
+    private void chooseVoice() {
+        Context context = getContext();
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        int checked = -1;
+        boolean piper = PiperModelStore.usePiper(context);
+        PiperModelStore.Voice selPiper = PiperModelStore.getSelectedVoice(context);
+        for (PiperModelStore.Voice voice : PiperModelStore.ALL_VOICES) {
+            if (piper && voice.id.equals(selPiper.id)) checked = labels.size();
+            labels.add("Piper · " + voice.label
+                    + (PiperModelStore.isVoiceReady(context, voice) ? "" : " (à télécharger)"));
+            actions.add(() -> {
+                PiperModelStore.setSelectedVoice(getContext(), voice);
+                PiperModelStore.setUsePiper(getContext(), true);
+                if (!PiperModelStore.isVoiceReady(getContext(), voice)) {
+                    if (listener != null) listener.onDownloadPiperVoice(voice);
+                } else if (listener != null) {
+                    listener.onPiperVoiceChanged();
+                }
+                refreshPiperStatus();
+            });
+        }
+        boolean localOnly = com.pegasuscorp.orbe.voice.AndroidTtsStore.preferLocalOnly(context);
+        String selSys = com.pegasuscorp.orbe.voice.AndroidTtsStore.getVoiceName(context);
+        for (com.pegasuscorp.orbe.voice.AndroidTtsStore.VoiceInfo v
+                : com.pegasuscorp.orbe.voice.AndroidTtsStore.getCachedVoices()) {
+            if (localOnly && v.networkRequired) continue;
+            if (!piper && v.name.equals(selSys)) checked = labels.size();
+            labels.add("Système · " + v.displayLabel());
+            actions.add(() -> {
+                com.pegasuscorp.orbe.voice.AndroidTtsStore.setVoiceName(getContext(), v.name);
+                PiperModelStore.setUsePiper(getContext(), false);
+                refreshTtsStatus();
+                if (listener != null) listener.onPiperVoiceChanged();
+            });
+        }
+        choose("Voix de Pégase", labels.toArray(new String[0]), Math.max(checked, 0),
+                i -> actions.get(i).run());
     }
 
     private TextView addActionRow(String label, Runnable action) {
