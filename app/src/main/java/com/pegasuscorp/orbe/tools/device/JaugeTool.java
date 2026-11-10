@@ -37,12 +37,13 @@ public final class JaugeTool implements Tool {
 
     @Override
     public String description() {
-        return "batterie(action:\"etat\"|\"conso\"|\"telephone\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\", "
+        return "batterie(action:\"etat\"|\"conso\"|\"recharges\"|\"telephone\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\", "
                 + "sujet?:\"reveils\"|\"signal\"|\"taches\"|\"temperatures\"|\"chargeur\"|\"donnees\"|\"ecran\"|"
                 + "\"notifications\"|\"vie_privee\"|\"stockage\"|\"memoire\") — "
                 + "batterie détaillée (app Jauge). etat=niveau, rythme %/h, temps restant, usure ; "
                 + "conso=quelles apps vident la batterie, GPS, alertes, dernière nuit ; "
                 + "longue_journee_on/off=mode économie (économiseur, luminosité, apps bridées) ; "
+                + "recharges=fiches des dernières décharges (entre deux recharges : durée, %/h, apps) ; "
                 + "telephone=autres mesures du téléphone selon sujet (réveils par app, signal mobile, "
                 + "tâches de fond, températures, chargeur, données mobiles/Wi-Fi par app, temps d'écran, "
                 + "notifications par app, vie privée = qui a utilisé micro/caméra/position, stockage, mémoire) ; "
@@ -89,7 +90,12 @@ public final class JaugeTool implements Tool {
         final String method;
         final String arg;
         final String consigne;
-        if (action.startsWith("tel") || action.startsWith("tél")) {
+        if (action.startsWith("rech") || action.contains("cycle")) {
+            method = "recharges";
+            arg = null;
+            consigne = "Consigne de réponse : résume la dernière décharge (durée, rythme, ce qui a consommé) "
+                    + "et compare-la aux précédentes si utile, en 2-3 phrases.\n";
+        } else if (action.startsWith("tel") || action.startsWith("tél")) {
             method = "telephone";
             arg = params.optString("sujet", "").trim().toLowerCase(Locale.ROOT);
             consigne = "Consigne de réponse : réponds à la question avec ces mesures, en 2-3 phrases, "
