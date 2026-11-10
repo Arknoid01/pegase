@@ -37,10 +37,15 @@ public final class JaugeTool implements Tool {
 
     @Override
     public String description() {
-        return "batterie(action:\"etat\"|\"conso\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\") — "
+        return "batterie(action:\"etat\"|\"conso\"|\"telephone\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\", "
+                + "sujet?:\"reveils\"|\"signal\"|\"taches\"|\"temperatures\"|\"chargeur\"|\"donnees\"|\"ecran\"|"
+                + "\"notifications\"|\"vie_privee\"|\"stockage\"|\"memoire\") — "
                 + "batterie détaillée (app Jauge). etat=niveau, rythme %/h, temps restant, usure ; "
                 + "conso=quelles apps vident la batterie, GPS, alertes, dernière nuit ; "
                 + "longue_journee_on/off=mode économie (économiseur, luminosité, apps bridées) ; "
+                + "telephone=autres mesures du téléphone selon sujet (réveils par app, signal mobile, "
+                + "tâches de fond, températures, chargeur, données mobiles/Wi-Fi par app, temps d'écran, "
+                + "notifications par app, vie privée = qui a utilisé micro/caméra/position, stockage, mémoire) ; "
                 + "ouvrir=ouvrir Jauge.";
     }
 
@@ -84,7 +89,12 @@ public final class JaugeTool implements Tool {
         final String method;
         final String arg;
         final String consigne;
-        if (action.contains("conso") || action.contains("vide") || action.contains("app")) {
+        if (action.startsWith("tel") || action.startsWith("tél")) {
+            method = "telephone";
+            arg = params.optString("sujet", "").trim().toLowerCase(Locale.ROOT);
+            consigne = "Consigne de réponse : réponds à la question avec ces mesures, en 2-3 phrases, "
+                    + "en citant les apps ou chiffres marquants ; dis si quelque chose paraît anormal.\n";
+        } else if (action.contains("conso") || action.contains("vide") || action.contains("app")) {
             method = "conso";
             arg = null;
             consigne = "Consigne de réponse : dis en 2-3 phrases ce qui vide la batterie, en commençant "
