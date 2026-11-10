@@ -362,7 +362,7 @@ public class PegaseMenuActivity extends AppCompatActivity {
     }
 
     /** Ouvre Pégase SMS (fork QUIK) ; à défaut, l'écran de ménage SMS. */
-    private static final String JAUGE_PACKAGE = "com.pegasuscorp.jauge";
+    private static final String JAUGE_PACKAGE = "com.pegase.jauge";
 
     /** « 62 % · en charge » d'après le dernier état batterie connu (sans permission). */
     private String batterySubtitle() {

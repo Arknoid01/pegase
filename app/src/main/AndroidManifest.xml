@@ -59,7 +59,7 @@
          il faut declarer les intents qu'on veut "voir". -->
     <queries>
         <package android:name="com.pegasuscorp.sms" />
-        <package android:name="com.pegasuscorp.jauge" />
+        <package android:name="com.pegase.jauge" />
         <provider android:authorities="com.pegasuscorp.sms.delete" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
