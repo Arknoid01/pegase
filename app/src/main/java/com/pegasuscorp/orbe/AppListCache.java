@@ -194,6 +194,7 @@ public final class AppListCache {
             CharSequence labelCs = ri.loadLabel(pm);
             String label = labelCs != null ? labelCs.toString().trim() : "";
             if (label.isEmpty()) label = pkg;
+            label = AppCustomStore.displayLabel(context, pkg, label);
             String activity = ri.activityInfo.name != null ? ri.activityInfo.name : pkg;
             apps.add(new AppEntry(label, pkg, activity, ri.loadIcon(pm)));
         }

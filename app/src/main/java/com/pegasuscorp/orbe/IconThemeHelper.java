@@ -16,6 +16,10 @@ public final class IconThemeHelper {
     private IconThemeHelper() {}
 
     public static Drawable resolve(Context context, AppListCache.AppEntry entry, int sizePx) {
+        Drawable custom = AppCustomStore.icon(context, entry.pkg);
+        if (custom != null) {
+            return apply(context, custom, sizePx, PersonalizationStore.getIconTheme(context));
+        }
         Drawable base = safeCopy(entry.icon(context));
         String pack = PersonalizationStore.getIconPack(context);
         if (pack != null && !pack.isEmpty()) {
@@ -28,6 +32,10 @@ public final class IconThemeHelper {
 
     public static Drawable resolveForPackage(Context context, String pkg,
                                              Drawable systemIcon, int sizePx) {
+        Drawable custom = AppCustomStore.icon(context, pkg);
+        if (custom != null) {
+            return apply(context, custom, sizePx, PersonalizationStore.getIconTheme(context));
+        }
         Drawable base = safeCopy(systemIcon);
         String pack = PersonalizationStore.getIconPack(context);
         if (pack != null && !pack.isEmpty()) {

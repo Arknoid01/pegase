@@ -50,6 +50,8 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <!-- Désinstaller une app depuis le tiroir (appui long) -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 

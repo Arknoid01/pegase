@@ -54,6 +54,9 @@ public final class HomeAssetController implements AppDrawerPanel.Personalization
     private final ExecutorService importIo = Executors.newSingleThreadExecutor();
 
     private ActivityResultLauncher<String> galleryWallpaperLauncher;
+    private ActivityResultLauncher<String> appIconLauncher;
+    private String pendingIconPkg;
+    private Runnable pendingIconDone;
     private ActivityResultLauncher<String[]> ggufImportLauncher;
     private ActivityResultLauncher<String[]> piperZipLauncher;
     private ActivityResultLauncher<Uri> piperFolderLauncher;
@@ -173,6 +176,9 @@ public final class HomeAssetController implements AppDrawerPanel.Personalization
         galleryWallpaperLauncher = activity.registerForActivityResult(
                 new ActivityResultContracts.GetContent(),
                 uri -> { if (uri != null) saveGalleryWallpaper(uri); });
+        appIconLauncher = activity.registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                uri -> { if (uri != null) saveAppIcon(uri); });
         ggufImportLauncher = activity.registerForActivityResult(
                 new ActivityResultContracts.OpenDocument(),
                 uri -> { if (uri != null) importGgufModel(uri); });
@@ -202,6 +208,49 @@ public final class HomeAssetController implements AppDrawerPanel.Personalization
 
     private File customWallpaperFile() {
         return new File(host.activity().getFilesDir(), "custom_wallpaper.jpg");
+    }
+
+    @Override
+    public void onPickAppIcon(String pkg, Runnable onDone) {
+        pendingIconPkg = pkg;
+        pendingIconDone = onDone;
+        appIconLauncher.launch("image/*");
+    }
+
+    private void saveAppIcon(Uri uri) {
+        AppCompatActivity activity = host.activity();
+        String pkg = pendingIconPkg;
+        Runnable done = pendingIconDone;
+        pendingIconPkg = null;
+        pendingIconDone = null;
+        if (pkg == null) return;
+        importIo.execute(() -> {
+            boolean ok = false;
+            try {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                try (InputStream in = activity.getContentResolver().openInputStream(uri)) {
+                    android.graphics.BitmapFactory.decodeStream(in, null, o);
+                }
+                int side = Math.min(o.outWidth, o.outHeight);
+                o.inSampleSize = 1;
+                while (side / (o.inSampleSize * 2) >= 512) o.inSampleSize *= 2;
+                o.inJustDecodeBounds = false;
+                android.graphics.Bitmap bmp;
+                try (InputStream in = activity.getContentResolver().openInputStream(uri)) {
+                    bmp = android.graphics.BitmapFactory.decodeStream(in, null, o);
+                }
+                ok = com.pegasuscorp.orbe.AppCustomStore.saveIcon(activity, pkg, bmp);
+            } catch (Exception | OutOfMemoryError e) {
+                android.util.Log.w("HomeAssets", "icône app", e);
+            }
+            final boolean success = ok;
+            activity.runOnUiThread(() -> {
+                Toast.makeText(activity, success ? "Icône mise à jour" : "Impossible d'utiliser cette image",
+                        Toast.LENGTH_SHORT).show();
+                if (success && done != null) done.run();
+            });
+        });
     }
 
     public void saveGalleryWallpaper(Uri uri) {

@@ -98,6 +98,8 @@ public class AppDrawerPanel extends FrameLayout {
     };
 
     public interface PersonalizationListener {
+        /** Galerie → icône personnalisée de {@code pkg} ; {@code onDone} sur le thread UI. */
+        void onPickAppIcon(String pkg, Runnable onDone);
         void onPersonalizationChanged();
         void onPickSystemWallpaper();
         void onPickGalleryWallpaper();
@@ -393,6 +395,13 @@ public class AppDrawerPanel extends FrameLayout {
                 context.startActivity(launch);
                 hide();
             }
+        });
+
+        grid.setOnItemLongClickListener((parent, view, pos, id) -> {
+            if (pos < 0 || pos >= filteredApps.size()) return false;
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            showAppMenu(filteredApps.get(pos));
+            return true;
         });
 
         grid.setOnScrollListener(new AbsListView.OnScrollListener() {
@@ -693,6 +702,128 @@ public class AppDrawerPanel extends FrameLayout {
         suppressSearchEvents = false;
     }
 
+    // ── Appui long sur une app : renommer, icône, infos, désinstaller ──────
+
+    private void showAppMenu(AppListCache.AppEntry app) {
+        Context ctx = getContext();
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        labels.add("✏️  Renommer");
+        actions.add(() -> renameApp(app));
+        labels.add("🖼️  Changer l'icône");
+        actions.add(() -> changeIcon(app));
+        labels.add("ℹ️  Infos de l'app");
+        actions.add(() -> {
+            Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + app.pkg));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+        });
+        if (isRemovable(ctx, app.pkg)) {
+            labels.add("🗑️  Désinstaller");
+            actions.add(() -> {
+                Intent i = new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(i);
+            });
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(ctx)
+                .setTitle(app.label != null ? app.label : app.pkg)
+                .setItems(labels.toArray(new String[0]), (d, w) -> actions.get(w).run())
+                .show();
+    }
+
+    private static boolean isRemovable(Context ctx, String pkg) {
+        try {
+            android.content.pm.ApplicationInfo ai = ctx.getPackageManager().getApplicationInfo(pkg, 0);
+            boolean system = (ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
+            boolean updated = (ai.flags & android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+            return !system || updated;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void renameApp(AppListCache.AppEntry app) {
+        Context ctx = getContext();
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.EditText field = new android.widget.EditText(ctx);
+        field.setSingleLine(true);
+        field.setText(app.label);
+        field.setSelection(field.getText().length());
+        FrameLayout box = new FrameLayout(ctx);
+        box.setPadding((int) (20 * d), (int) (8 * d), (int) (20 * d), 0);
+        box.addView(field);
+        androidx.appcompat.app.AlertDialog.Builder b = new androidx.appcompat.app.AlertDialog.Builder(ctx)
+                .setTitle("Renommer")
+                .setView(box)
+                .setPositiveButton("Enregistrer", (dlg, w) -> {
+                    AppCustomStore.setLabel(ctx, app.pkg, field.getText().toString());
+                    refreshAfterCustomization();
+                })
+                .setNegativeButton("Annuler", null);
+        if (AppCustomStore.label(ctx, app.pkg) != null) {
+            b.setNeutralButton("Nom d'origine", (dlg, w) -> {
+                AppCustomStore.setLabel(ctx, app.pkg, null);
+                refreshAfterCustomization();
+            });
+        }
+        b.show();
+        field.requestFocus();
+    }
+
+    private void changeIcon(AppListCache.AppEntry app) {
+        Context ctx = getContext();
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        labels.add("Une image de la galerie");
+        actions.add(() -> {
+            if (personalizationListener != null) {
+                personalizationListener.onPickAppIcon(app.pkg, this::refreshAfterCustomization);
+            }
+        });
+        labels.add("L'icône d'une autre app");
+        actions.add(() -> pickIconFromOtherApp(app));
+        if (AppCustomStore.hasIcon(ctx, app.pkg)) {
+            labels.add("Icône d'origine");
+            actions.add(() -> {
+                AppCustomStore.clearIcon(ctx, app.pkg);
+                refreshAfterCustomization();
+            });
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(ctx)
+                .setTitle("Icône de " + app.label)
+                .setItems(labels.toArray(new String[0]), (dlg, w) -> actions.get(w).run())
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void pickIconFromOtherApp(AppListCache.AppEntry target) {
+        Context ctx = getContext();
+        java.util.List<AppListCache.AppEntry> others = new java.util.ArrayList<>(allApps);
+        String[] names = new String[others.size()];
+        for (int i = 0; i < others.size(); i++) names[i] = others.get(i).label;
+        new androidx.appcompat.app.AlertDialog.Builder(ctx)
+                .setTitle("Prendre l'icône de…")
+                .setItems(names, (dlg, w) -> {
+                    AppListCache.AppEntry src = others.get(w);
+                    android.graphics.drawable.Drawable icon =
+                            IconThemeHelper.resolveForPackage(ctx, src.pkg, src.icon(ctx),
+                                    AppCustomStore.ICON_PX);
+                    if (icon == null) icon = src.icon(ctx);
+                    if (AppCustomStore.saveIcon(ctx, target.pkg, icon)) refreshAfterCustomization();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    /** Recharge la liste (noms) et vide le cache d'icônes. */
+    public void refreshAfterCustomization() {
+        if (adapter != null) adapter.clearIconCache();
+        AppListCache.invalidate();
+        AppListCache.loadAsync(getContext(), apps -> post(() -> bindApps(apps)));
+    }
+
     private void bindApps(List<AppListCache.AppEntry> apps) {
         allApps.clear();
         if (apps != null) allApps.addAll(apps);
@@ -788,7 +919,7 @@ public class AppDrawerPanel extends FrameLayout {
         }
 
         private String iconCacheKey(AppListCache.AppEntry item) {
-            return item.pkg + "|" + iconSizePx + "|"
+            return item.pkg + "|" + iconSizePx + "|" + AppCustomStore.version(getContext()) + "|"
                     + PersonalizationStore.getIconTheme(getContext()) + "|"
                     + PersonalizationStore.getIconPack(getContext());
         }
