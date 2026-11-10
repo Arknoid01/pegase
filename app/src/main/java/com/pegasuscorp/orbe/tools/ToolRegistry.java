@@ -120,7 +120,8 @@ public class ToolRegistry {
             new com.pegasuscorp.orbe.tools.device.AppUsageTool(),
             new com.pegasuscorp.orbe.tools.knowledge.WebReadTool(),
             new com.pegasuscorp.orbe.tools.device.MessageriesTool(),
-            new com.pegasuscorp.orbe.tools.device.MailsTool()
+            new com.pegasuscorp.orbe.tools.device.MailsTool(),
+            new com.pegasuscorp.orbe.tools.device.JaugeTool()
     );
 
     private final CompositeTool compositeTool;

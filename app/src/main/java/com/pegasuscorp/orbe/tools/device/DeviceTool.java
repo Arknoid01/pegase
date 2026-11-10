@@ -42,7 +42,20 @@ public final class DeviceTool implements Tool {
         String action = resolveAction(params);
         switch (action) {
             case "battery":
-                cb.onSuccess(ToolResult.text(readBattery(ctx)));
+                if (JaugeTool.available(ctx)) {
+                    // Jauge connaît aussi le rythme et le temps restant
+                    Context app = ctx.getApplicationContext();
+                    android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                    new Thread(() -> {
+                        String detail = JaugeTool.query(app, "etat", null);
+                        main.post(() -> cb.onSuccess(detail == null
+                                ? ToolResult.text(readBattery(ctx))
+                                : ToolResult.text(readBattery(ctx),
+                                "Consigne de réponse : niveau + temps restant en une phrase.\n" + detail)));
+                    }, "device-battery").start();
+                } else {
+                    cb.onSuccess(ToolResult.text(readBattery(ctx)));
+                }
                 break;
             case "date":
                 cb.onSuccess(ToolResult.text("Nous sommes le "

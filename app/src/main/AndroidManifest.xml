@@ -50,6 +50,8 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <!-- Résumé batterie de Jauge (permission signature, même clé) -->
+    <uses-permission android:name="com.pegase.jauge.permission.READ_STATS" />
     <!-- Désinstaller une app depuis le tiroir (appui long) -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
@@ -60,6 +62,7 @@
     <queries>
         <package android:name="com.pegasuscorp.sms" />
         <package android:name="com.pegase.jauge" />
+        <provider android:authorities="com.pegase.jauge.stats" />
         <provider android:authorities="com.pegasuscorp.sms.delete" />
         <intent>
             <action android:name="android.intent.action.MAIN" />

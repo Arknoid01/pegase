@@ -37,7 +37,8 @@ public final class SystemIntentHandler implements IntentHandler {
             if (navigation != null) return navigation;
         }
 
-        if (looksLikeDevice(fold)) {
+        // « qu'est-ce qui vide ma batterie » : au LLM, qui appellera l'outil batterie (Jauge)
+        if (looksLikeDevice(fold) && !asksBatteryConsumption(fold)) {
             RoutedIntent device = routeDevice(context, text, fold);
             if (device != null) return device;
         }
@@ -214,6 +215,14 @@ public final class SystemIntentHandler implements IntentHandler {
             return "date";
         }
         return "time";
+    }
+
+    /** « qu'est-ce qui vide ma batterie », « qui consomme »… → outil batterie (Jauge). */
+    public static boolean asksBatteryConsumption(String fold) {
+        if (fold == null || !fold.contains("batterie")) return false;
+        return fold.contains("vide") || fold.contains("consomm") || fold.contains("mange")
+                || fold.contains("bouffe") || fold.contains("pompe") || fold.contains("use ")
+                || fold.contains("qui ") || fold.contains("pourquoi") || fold.contains("usure");
     }
 
     static RoutedIntent routeDevice(Context context, String text, String fold) {

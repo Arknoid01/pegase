@@ -914,6 +914,7 @@ public class PegaseSession {
         String fold = SpeechInputNormalizer.fold(userText).replace('\'', ' ')
                 .replace('’', ' ').replaceAll("\\s+", " ").trim();
         if (!SystemIntentHandler.looksLikeDevice(fold)) return false;
+        if (SystemIntentHandler.asksBatteryConsumption(fold)) return false;
         if (!allowToolExecution(obs)) {
             conv.addUserMessage(userText.trim());
             conv.recordToolReply(LockSessionPolicy.UNLOCK_TOOL_MESSAGE);
