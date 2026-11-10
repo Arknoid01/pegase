@@ -45,7 +45,8 @@ import java.util.concurrent.Executors;
  * 1. Scan : conversations à un seul SMS reçu, hors contacts ({@link SmsInbox}).
  * 2. Règles : spams probables cochés, services et récents à part ({@link SmsSpamRules}).
  * 3. Option : « Trier avec Pégase » envoie les textes au LLM pour affiner.
- * 4. Supprimer : Pégase devient app SMS par défaut le temps du ménage, puis rend la main.
+ * 4. Auto : les verdicts « spam » (Pégase sûre) sont supprimés sans demander.
+ * 5. Supprimer : le reste via Pégase SMS, ou en devenant app SMS par défaut.
  */
 public class SmsCleanerActivity extends AppCompatActivity {
 
@@ -62,7 +63,9 @@ public class SmsCleanerActivity extends AppCompatActivity {
     private TextView llmButton;
     private TextView deleteButton;
     private View restoreCard;
+    private CheckBox autoBox;
     private boolean busy;
+    private boolean sweptThisOpen;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -97,6 +100,22 @@ public class SmsCleanerActivity extends AppCompatActivity {
         status.setTextSize(13f);
         status.setPadding(0, dp(4), 0, 0);
         top.addView(status);
+
+        autoBox = new CheckBox(this);
+        autoBox.setText("Supprimer toute seule les spams dont je suis sûre");
+        autoBox.setTextColor(Color.WHITE);
+        autoBox.setTextSize(13f);
+        autoBox.setButtonTintList(android.content.res.ColorStateList.valueOf(OrbeTokens.COLOR_CYAN));
+        autoBox.setChecked(SmsInbox.isAutoCleanEnabled(this));
+        autoBox.setPadding(0, dp(8), 0, 0);
+        autoBox.setOnCheckedChangeListener((b, checked) -> {
+            SmsInbox.setAutoCleanEnabled(this, checked);
+            if (checked && !busy) {
+                sweptThisOpen = false;
+                scan();
+            }
+        });
+        top.addView(autoBox);
 
         restoreCard = buildRestoreCard();
         top.addView(restoreCard, spacedAbove(10));
@@ -187,6 +206,22 @@ public class SmsCleanerActivity extends AppCompatActivity {
                 }
                 candidates.clear();
                 candidates.addAll(result);
+                if (SmsInbox.isAutoCleanEnabled(getApplicationContext()) && !sweptThisOpen
+                        && !result.isEmpty()) {
+                    sweptThisOpen = true;
+                    busy = true;
+                    status.setText("Je vire les spams dont je suis sûre…");
+                    refreshButtons();
+                    io.execute(() -> {
+                        int n = SmsAutoCleaner.sweep(getApplicationContext());
+                        main.post(() -> {
+                            busy = false;
+                            if (n > 0) scan();
+                            else render();
+                        });
+                    });
+                    return;
+                }
                 render();
             });
         });
@@ -224,12 +259,23 @@ public class SmsCleanerActivity extends AppCompatActivity {
                     public void onReply(String text) {
                         main.post(() -> {
                             Map<Long, String[]> verdicts = SmsSpamRules.parseLlmVerdicts(text);
+                            int applied = 0;
                             for (SmsSpamRules.Candidate c : batch) {
                                 String[] v = verdicts.get(c.threadId);
                                 if (v != null) {
                                     SmsSpamRules.applyVerdict(c,
                                             SmsSpamRules.verdictOf(v[0]), v[1]);
+                                    applied++;
                                 }
+                            }
+                            if (applied == 0) {
+                                // Réponse illisible : le dire au lieu de tout laisser « à garder ».
+                                busy = false;
+                                render();
+                                status.setText("Pégase n'a pas rendu de verdict lisible pour ces "
+                                        + batch.size() + " SMS.\nLes règles simples restent "
+                                        + "appliquées ; réessaie dans un instant.");
+                                return;
                             }
                             runLlmBatch(to);
                         });
@@ -244,7 +290,7 @@ public class SmsCleanerActivity extends AppCompatActivity {
                                     + "\nLes règles simples restent appliquées.");
                         });
                     }
-                });
+                }, SmsSpamLlm.options());
     }
 
     // ── Suppression ──────────────────────────────────────────────────────

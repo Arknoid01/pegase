@@ -70,6 +70,22 @@ public class SmsSpamRulesTest {
     }
 
     @Test
+    public void sureToDelete_onlyExplicitLlmSpam() {
+        assertTrue(SmsSpamRules.isSureToDelete(SmsSpamRules.Verdict.SPAM));
+        assertFalse(SmsSpamRules.isSureToDelete(SmsSpamRules.Verdict.LEGIT));
+        assertFalse(SmsSpamRules.isSureToDelete(SmsSpamRules.Verdict.UNSURE));
+        assertFalse(SmsSpamRules.isSureToDelete(SmsSpamRules.Verdict.NONE));
+
+        SmsSpamRules.Candidate likely = new SmsSpamRules.Candidate(1, "+33612345678", "x", OLD);
+        SmsSpamRules.classify(likely);
+        SmsSpamRules.Candidate sure = new SmsSpamRules.Candidate(2, "+33699999999", "colis", OLD);
+        SmsSpamRules.classify(sure);
+        SmsSpamRules.applyVerdict(sure, SmsSpamRules.Verdict.SPAM, "faux colis");
+        assertTrue(likely.checked);
+        assertEquals(Arrays.asList(2L), SmsSpamRules.sureSpamThreadIds(Arrays.asList(likely, sure)));
+    }
+
+    @Test
     public void prompt_containsIdsAndTruncates() {
         StringBuilder longBody = new StringBuilder();
         for (int i = 0; i < 100; i++) longBody.append("abcdef ");

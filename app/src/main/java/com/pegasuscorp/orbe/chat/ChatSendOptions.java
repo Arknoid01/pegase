@@ -26,6 +26,11 @@ public final class ChatSendOptions {
     private final Integer maxTokensOverride;
     /** Niveau de compression prompt (Groq TIGHT / EMERGENCY). */
     public final PromptBudget.Level promptBudgetLevel;
+    /**
+     * Appel « nu » (tri, extraction…) : pas de persona/mémoire/outils, température basse.
+     * Le prompt utilisateur porte toute la consigne.
+     */
+    public final boolean bare;
 
     private ChatSendOptions(boolean nativeTools, EnumSet<ToolTag> allowedTools,
             boolean agenticStep, boolean allowMoreTools, Channel channel) {
@@ -43,6 +48,15 @@ public final class ChatSendOptions {
     private ChatSendOptions(boolean nativeTools, EnumSet<ToolTag> allowedTools,
             boolean agenticStep, boolean allowMoreTools, Channel channel,
             Integer maxTokensOverride, String intentName, PromptBudget.Level promptBudgetLevel) {
+        this(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
+                maxTokensOverride, intentName, promptBudgetLevel, false);
+    }
+
+    private ChatSendOptions(boolean nativeTools, EnumSet<ToolTag> allowedTools,
+            boolean agenticStep, boolean allowMoreTools, Channel channel,
+            Integer maxTokensOverride, String intentName, PromptBudget.Level promptBudgetLevel,
+            boolean bare) {
+        this.bare = bare;
         this.nativeTools = nativeTools;
         this.agenticStep = agenticStep;
         this.allowMoreTools = allowMoreTools;
@@ -54,6 +68,12 @@ public final class ChatSendOptions {
         this.intentName = intentName;
         this.promptBudgetLevel = promptBudgetLevel != null
                 ? promptBudgetLevel : PromptBudget.Level.NORMAL;
+    }
+
+    /** Appel nu : consigne autonome dans le prompt, réponse jusqu'à {@code maxTokens}. */
+    public static ChatSendOptions bare(int maxTokens) {
+        return new ChatSendOptions(false, EnumSet.allOf(ToolTag.class), false, false,
+                Channel.TEXT, Math.max(1, maxTokens), null, PromptBudget.Level.NORMAL, true);
     }
 
     public static ChatSendOptions legacy() {
@@ -92,36 +112,36 @@ public final class ChatSendOptions {
     /** Désactive le FC natif en conservant outils autorisés, canal et intent. */
     public ChatSendOptions withoutNativeTools() {
         return new ChatSendOptions(false, allowedTools, agenticStep, allowMoreTools, channel,
-                maxTokensOverride, intentName, promptBudgetLevel);
+                maxTokensOverride, intentName, promptBudgetLevel, bare);
     }
 
     /** Élargit / remplace le set d'outils FC (ex. retry après tool not in request.tools). */
     public ChatSendOptions withAllowedTools(EnumSet<ToolTag> tools) {
         return new ChatSendOptions(nativeTools, tools, agenticStep, allowMoreTools, channel,
-                maxTokensOverride, intentName, promptBudgetLevel);
+                maxTokensOverride, intentName, promptBudgetLevel, bare);
     }
 
     /** Surcharge le budget tokens (ex. analyse diag = 800). */
     public ChatSendOptions withMaxTokens(int maxTokens) {
         return new ChatSendOptions(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
-                Math.max(1, maxTokens), intentName, promptBudgetLevel);
+                Math.max(1, maxTokens), intentName, promptBudgetLevel, bare);
     }
 
     /** Attache l'intention ContextAnalyzer pour le budget TEXT. */
     public ChatSendOptions withIntent(ContextIntent intent) {
         String name = intent != null ? intent.intent : null;
         return new ChatSendOptions(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
-                maxTokensOverride, name, promptBudgetLevel);
+                maxTokensOverride, name, promptBudgetLevel, bare);
     }
 
     public ChatSendOptions withIntentName(String intent) {
         return new ChatSendOptions(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
-                maxTokensOverride, intent, promptBudgetLevel);
+                maxTokensOverride, intent, promptBudgetLevel, bare);
     }
 
     public ChatSendOptions withPromptBudgetLevel(PromptBudget.Level level) {
         return new ChatSendOptions(nativeTools, allowedTools, agenticStep, allowMoreTools, channel,
-                maxTokensOverride, intentName, level);
+                maxTokensOverride, intentName, level, bare);
     }
 
     /**

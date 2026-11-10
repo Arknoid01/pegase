@@ -246,6 +246,9 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
 
     private String buildBody(List<Turn> history, String userMessage, boolean stream,
             ChatSendOptions options) throws Exception {
+        if (options != null && options.bare) {
+            return buildBareBody(userMessage, stream, options);
+        }
         boolean nativeTools = options.nativeTools && provider.nativeFc
                 && CloudModelStore.isToolCapableModel(currentModelId());
         PromptBudget.Level level = resolveBudgetLevel(options);
@@ -298,6 +301,34 @@ public final class OpenAiCompatibleChatBackend implements ChatBackend {
         Trace.promptBudget(provider.id, currentModelId(), level.name(),
                 system.length(), historyChars, userWrapped.length(), toolsChars, body.length(),
                 options != null ? options.allowedTools : null);
+        return body;
+    }
+
+    /**
+     * Requête nue : sans persona, mémoire, historique ni outils — pour les tâches de tri
+     * dont la réponse est parsée (sinon 12 ko de persona + 500 tokens tronquaient le JSON).
+     */
+    private String buildBareBody(String userMessage, boolean stream, ChatSendOptions options)
+            throws Exception {
+        JSONArray messages = new JSONArray();
+        messages.put(message("system",
+                "Tu es un classificateur. Suis exactement la consigne et le format demandés, "
+                        + "sans commentaire."));
+        messages.put(message("user", userMessage != null ? userMessage : ""));
+        JSONObject root = new JSONObject();
+        String model = currentModelId();
+        root.put("model", model);
+        root.put("messages", messages);
+        root.put("temperature", 0.1);
+        root.put("max_tokens", options.replyMaxTokens());
+        if (stream) root.put("stream", true);
+        if (model != null && model.startsWith("openai/gpt-oss")) {
+            root.put("reasoning_effort", "low");
+        }
+        applyQwenReasoningFormat(root, model);
+        String body = root.toString();
+        Trace.promptBudget(provider.id, model, "BARE", 0, 0,
+                userMessage != null ? userMessage.length() : 0, 0, body.length(), null);
         return body;
     }
 

@@ -35,6 +35,8 @@ public final class SmsInbox {
     private static final String TAG = "SmsCleaner";
     private static final String PREFS = "sms_cleaner";
     private static final String KEY_PREVIOUS_DEFAULT = "previous_default_sms";
+    private static final String KEY_AUTO_SURE = "auto_sure_spam";
+    private static final String KEY_LAST_SWEEP_MS = "last_auto_sweep_ms";
 
     private SmsInbox() {}
 
@@ -131,6 +133,30 @@ public final class SmsInbox {
                 PEGASE_SMS_DELETE.getAuthority(), 0) != null;
     }
 
+    /**
+     * Cherche le fil à 1 SMS de cet expéditeur (celui qu'on vient de classer)
+     * et le supprime si on peut. Renvoie le nombre de fils supprimés.
+     */
+    public static int deleteSureSpamByAddress(Context ctx, String address) {
+        if (address == null || address.trim().isEmpty()) return 0;
+        if (!canDeleteViaPegaseSms(ctx) && !isDefaultSmsApp(ctx)) return 0;
+        List<SmsSpamRules.Candidate> found;
+        try {
+            found = scan(ctx);
+        } catch (Exception e) {
+            Log.w(TAG, "scan for auto-delete failed", e);
+            return 0;
+        }
+        List<Long> ids = new ArrayList<>();
+        for (SmsSpamRules.Candidate c : found) {
+            if (address.equals(c.address)) ids.add(c.threadId);
+        }
+        if (ids.isEmpty()) return 0;
+        return canDeleteViaPegaseSms(ctx)
+                ? deleteThreadsViaPegaseSms(ctx, ids)
+                : deleteThreads(ctx, ids);
+    }
+
     /** Suppression faite par Pégase SMS (base Android + sa propre liste) ; -1 si refusée. */
     public static int deleteThreadsViaPegaseSms(Context ctx, List<Long> threadIds) {
         long[] ids = new long[threadIds.size()];
@@ -186,6 +212,34 @@ public final class SmsInbox {
      * Rendre la main à l'ancienne app SMS. Depuis Android 10, une app ne peut pas
      * désigner une AUTRE app : on ouvre le réglage « Applications par défaut ».
      */
+    /** Ménage automatique des spams dont le LLM est sûr (défaut : oui). */
+    public static boolean isAutoCleanEnabled(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_AUTO_SURE, true);
+    }
+
+    public static void setAutoCleanEnabled(Context ctx, boolean enabled) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUTO_SURE, enabled).apply();
+    }
+
+    public static long lastAutoSweepMs(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_LAST_SWEEP_MS, 0L);
+    }
+
+    public static void markAutoSweepDone(Context ctx) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_LAST_SWEEP_MS, System.currentTimeMillis()).apply();
+    }
+
+    /** Tri raté : antidate le dernier passage pour réessayer dans {@code retryInMs}. */
+    public static void markAutoSweepRetry(Context ctx, long cooldownMs, long retryInMs) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_LAST_SWEEP_MS,
+                        System.currentTimeMillis() - cooldownMs + retryInMs).apply();
+    }
+
     public static Intent restoreDefaultIntent(Context ctx) {
         String previous = previousDefault(ctx);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && previous != null) {

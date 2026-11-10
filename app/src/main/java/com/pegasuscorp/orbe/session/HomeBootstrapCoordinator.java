@@ -14,6 +14,7 @@ import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.copilot.CopilotPrefs;
 import com.pegasuscorp.orbe.diag.Trace;
 import com.pegasuscorp.orbe.prefetch.PrefetchService;
+import com.pegasuscorp.orbe.sms.SmsAutoCleaner;
 import com.pegasuscorp.orbe.ui.OrbUiController;
 import com.pegasuscorp.orbe.voice.PegaseWakeController;
 import com.pegasuscorp.orbe.voice.PegaseWakeStore;
@@ -232,6 +233,9 @@ public final class HomeBootstrapCoordinator {
             try {
                 PrefetchService.run(activity);
             } catch (Exception ignored) {}
+        }
+        if (!lowMem) {
+            SmsAutoCleaner.maybeSweepAsync(activity);
         }
 
         OrbUiController orb = host.orbUi();

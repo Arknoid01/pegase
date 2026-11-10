@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.sms;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -82,6 +83,24 @@ public final class SmsSpamRules {
         c.reason = reason != null ? reason : "";
         if (v == Verdict.SPAM) c.checked = true;
         else if (v == Verdict.LEGIT) c.checked = false;
+    }
+
+    /**
+     * Assez sûre pour supprimer toute seule : uniquement un « spam » explicite du LLM.
+     * Un spam probable (règle « 1 SMS / hors contacts ») ou un « doute » restent
+     * pour le ménage manuel.
+     */
+    public static boolean isSureToDelete(Verdict v) {
+        return v == Verdict.SPAM;
+    }
+
+    public static List<Long> sureSpamThreadIds(List<Candidate> candidates) {
+        ArrayList<Long> ids = new ArrayList<>();
+        if (candidates == null) return ids;
+        for (Candidate c : candidates) {
+            if (isSureToDelete(c.verdict)) ids.add(c.threadId);
+        }
+        return ids;
     }
 
     public static String buildLlmPrompt(List<Candidate> batch) {

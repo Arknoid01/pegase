@@ -5,19 +5,9 @@ import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
-import com.pegasuscorp.orbe.chat.ChatBackend;
-import com.pegasuscorp.orbe.chat.ChatBackendFactory;
-import com.pegasuscorp.orbe.chat.ProviderTraceSink;
-
 import java.util.Collections;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Guichet « spam ou pas ? » pour Pégase SMS (fork de QUIK).
@@ -33,7 +23,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SpamCheckProvider extends ContentProvider {
 
     private static final String TAG = "SpamCheck";
-    private static final long LLM_TIMEOUT_S = 12;
 
     @Override
     public boolean onCreate() {
@@ -59,54 +48,22 @@ public class SpamCheckProvider extends ContentProvider {
 
         SmsSpamRules.Candidate c = new SmsSpamRules.Candidate(0, address, body,
                 System.currentTimeMillis());
-        AtomicReference<String> reply = new AtomicReference<>();
-        CountDownLatch done = new CountDownLatch(1);
-        ChatBackend backend = ChatBackendFactory.create(getContext());
-        // Les callbacks arrivent sur le thread principal : on attend ici, sur le thread binder.
-        new Handler(Looper.getMainLooper()).post(() -> backend.send(Collections.emptyList(),
-                SmsSpamRules.buildLlmPrompt(Collections.singletonList(c)),
-                new ChatBackend.OnReply() {
-                    @Override
-                    public void onReply(String text) {
-                        discardTrace(backend);
-                        reply.set(text);
-                        done.countDown();
-                    }
-
-                    @Override
-                    public void onError(String error) {
-                        discardTrace(backend);
-                        Log.w(TAG, "LLM indisponible : " + error);
-                        done.countDown();
-                    }
-                }));
-        try {
-            if (!done.await(LLM_TIMEOUT_S, TimeUnit.SECONDS)) Log.w(TAG, "LLM trop lent");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        Map<Long, String[]> verdicts = SmsSpamRules.parseLlmVerdicts(reply.get());
-        String[] v = verdicts.get(0L);
-        if (v == null) return verdict(out, "unsure", "");
-        SmsSpamRules.Verdict parsed = SmsSpamRules.verdictOf(v[0]);
+        SmsSpamLlm.classify(getContext(), Collections.singletonList(c));
+        SmsSpamRules.Verdict parsed = c.verdict;
         String name = parsed == SmsSpamRules.Verdict.SPAM ? "spam"
                 : parsed == SmsSpamRules.Verdict.LEGIT ? "legit" : "unsure";
         Log.i(TAG, "verdict " + name);
-        return verdict(out, name, v[1]);
+        if (SmsSpamRules.isSureToDelete(parsed) && SmsInbox.isAutoCleanEnabled(getContext())) {
+            int n = SmsInbox.deleteSureSpamByAddress(getContext(), address);
+            Log.i(TAG, "auto-delete " + n + " thread(s) for " + address);
+        }
+        return verdict(out, name, c.reason);
     }
 
     private static Bundle verdict(Bundle out, String verdict, String reason) {
         out.putString("verdict", verdict);
         out.putString("reason", reason != null ? reason : "");
         return out;
-    }
-
-    /** Le contenu des SMS ne doit pas finir dans la trace de diagnostic. */
-    private static void discardTrace(ChatBackend backend) {
-        if (backend instanceof ProviderTraceSink) {
-            ((ProviderTraceSink) backend).discardPendingProviderTrace();
-        }
     }
 
     // Pas de données tabulaires : seul call() sert.
