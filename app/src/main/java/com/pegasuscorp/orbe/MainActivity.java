@@ -625,6 +625,8 @@ public class MainActivity extends AppCompatActivity
                 return true;
             }
             if (event.getAction() == KeyEvent.ACTION_UP) {
+                // Dans une rubrique des réglages : retour au menu des réglages.
+                if (drawerPanel.backInSettings()) return true;
                 if (System.currentTimeMillis() - backDownTime >= BACK_LONG_PRESS_MS) {
                     drawerPanel.resetToAllApps();
                 } else {
@@ -643,6 +645,7 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onBackPressed() {
+        if (drawerPanel != null && drawerPanel.backInSettings()) return;
         if (drawerPanel != null && drawerPanel.isOpen()) {
             returnToHomeScreen();
             return;

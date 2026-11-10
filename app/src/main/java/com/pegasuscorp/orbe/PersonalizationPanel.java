@@ -69,7 +69,15 @@ public class PersonalizationPanel extends FrameLayout {
     }
 
     private Listener listener;
+    /** Page en cours de construction (les helpers addXxx y ajoutent leurs vues). */
     private LinearLayout body;
+    private ScrollView scroll;
+    private LinearLayout root;
+    private LinearLayout menuPage;
+    private final java.util.LinkedHashMap<String, LinearLayout> pages = new java.util.LinkedHashMap<>();
+    private final java.util.List<String[]> menuEntries = new java.util.ArrayList<>();
+    /** Page affichée, null = menu des rubriques. */
+    private String currentPage;
     private LinearLayout colorRow;
     private LinearLayout iconPackList;
     private LinearLayout cloudModelList;
@@ -125,25 +133,30 @@ public class PersonalizationPanel extends FrameLayout {
         int pad = (int) (16 * density);
         colorSizePx = (int) (40 * density);
 
-        setBackgroundColor(Color.parseColor("#E60B0E14"));
+        setBackgroundColor(Color.parseColor("#FA0B0E14"));
         setClickable(true);
         setFocusable(true);
         setVisibility(GONE);
         setElevation(24f);
 
-        ScrollView scroll = new ScrollView(context);
+        scroll = new ScrollView(context);
         scroll.setFillViewport(true);
         addView(scroll, new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        body = new LinearLayout(context);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(pad, pad, pad, pad);
-        scroll.addView(body, new ViewGroup.LayoutParams(
+        root = new LinearLayout(context);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int statusBarId = context.getResources().getIdentifier(
+                "status_bar_height", "dimen", "android");
+        int statusBar = statusBarId > 0
+                ? context.getResources().getDimensionPixelSize(statusBarId) : (int) (24 * density);
+        root.setPadding(pad, pad + statusBar, pad, pad);
+        scroll.addView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        body = newPage("appearance", "🎨", "Apparence",
+                "Couleur de l'orbe, icônes, fond d'écran, flou");
         // ── 1. Apparence ──────────────────────────────────────────────────────
-        body.addView(majorSectionTitle(context, "Apparence"));
 
         body.addView(addSubHeading(context, "Couleur de l'orbe"));
         colorRow = new LinearLayout(context);
@@ -238,9 +251,8 @@ public class PersonalizationPanel extends FrameLayout {
         });
         body.addView(blurSeek, wrapLp());
 
-        // ── 2. Launcher ─────────────────────────────────────────────────────────
-        addSectionSeparator(context);
-        body.addView(majorSectionTitle(context, "Launcher"));
+        body = newPage("home", "🏠", "Accueil & routines",
+                "Écran d'accueil, orbe flottante, brief, routines, localisation");
         addActionRow("Définir comme écran d'accueil", () -> {
             if (listener != null) listener.onSetDefaultLauncher();
         });
@@ -255,9 +267,19 @@ public class PersonalizationPanel extends FrameLayout {
                 getContext().startActivity(new android.content.Intent(getContext(),
                         com.pegasuscorp.orbe.intentions.location.SituationSettingsActivity.class)));
 
-        // ── 3. Pégase Cerveau ───────────────────────────────────────────────────
-        addSectionSeparator(context);
-        body.addView(majorSectionTitle(context, "Pégase Cerveau"));
+        addActionRow("Orbe flottante (mode copilote)", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), com.pegasuscorp.orbe.copilot.CopilotSettingsActivity.class)));
+        body.addView(spacer(context, (int) (12 * density)));
+        body.addView(addSubHeading(context, "Ma localisation (météo)"));
+        body.addView(hintLabel(context,
+                "Ville : nom affiché · GPS : latitude,longitude (ex: 46.1083,5.8261)\n"
+                + "Le GPS est prioritaire si renseigné — utile pour les petites communes."));
+        userCityField  = addApiKeyField(context, "Ma ville (ex: Valserhône)");
+        userCoordsField = addApiKeyField(context, "Coordonnées GPS (lat,lon)");
+
+        body = newPage("brain", "🧠", "Cerveau",
+                "Fournisseur, modèle, clés API");
 
         body.addView(addSubHeading(context, "Fournisseur"));
         body.addView(hintLabel(context,
@@ -271,14 +293,6 @@ public class PersonalizationPanel extends FrameLayout {
         cloudModelList.setOrientation(LinearLayout.VERTICAL);
         body.addView(cloudModelList, wrapLp());
         rebuildCloudModelList();
-
-        body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Ma localisation (météo)"));
-        body.addView(hintLabel(context,
-                "Ville : nom affiché · GPS : latitude,longitude (ex: 46.1083,5.8261)\n"
-                + "Le GPS est prioritaire si renseigné — utile pour les petites communes."));
-        userCityField  = addApiKeyField(context, "Ma ville (ex: Valserhône)");
-        userCoordsField = addApiKeyField(context, "Coordonnées GPS (lat,lon)");
 
         body.addView(spacer(context, (int) (12 * density)));
         body.addView(addSubHeading(context, "Clés API"));
@@ -302,71 +316,14 @@ public class PersonalizationPanel extends FrameLayout {
             if (listener != null) listener.onOpenChatTest();
         });
 
-        // ── 4. Pégase Voix ──────────────────────────────────────────────────────
-        addSectionSeparator(context);
-        body.addView(majorSectionTitle(context, "Pégase Voix"));
-
-        body.addView(addSubHeading(context, "Dictionnaire vocal"));
-        body.addView(hintLabel(context,
-                "Prononciation Piper/TTS — modifiable aussi à la voix "
-                        + "(« dis Qwen comme Couène », « vitesse à 85 % »)."));
-        addActionRow("Voir et modifier la prononciation", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), SpeechRulesSettingsActivity.class)));
-
-        body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Compréhension vocale"));
-        body.addView(hintLabel(context,
-                "Corrections STT apprises — modifiables aussi à la voix "
-                        + "(« non, je voulais dire… »)."));
-        addActionRow("Voir et modifier les corrections vocales", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), VoiceCorrectionsSettingsActivity.class)));
-        body.addView(hintLabel(context,
-                "Apprends à me connaître — le routeur mémorise tes formulations confirmées "
-                        + "(pas le LLM)."));
-        addActionRow(com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context)
-                ? "Désactiver « Apprends à me connaître »"
-                : "Activer « Apprends à me connaître »", () -> {
-            boolean enable = !com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context);
-            com.pegasuscorp.orbe.voice.LearnModeStore.setEnabled(context, enable);
-            android.widget.Toast.makeText(context,
-                    enable
-                            ? "Pégase va apprendre ta façon de parler"
-                            : "Apprentissage du routeur désactivé",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow("Voir mon corpus personnel", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), KnowMeSettingsActivity.class)));
-        body.addView(hintLabel(context,
-                "Routing UserExamples — importe une conversation, valide phrase → outil "
-                        + "(tous les outils du registre). Matching sémantique avant les règles "
-                        + "hardcodées (~30 j d'usage)."));
-        addActionRow("Apprentissage du routing", () ->
-                getContext().startActivity(
-                        new android.content.Intent(getContext(), RoutingLearningActivity.class)));
-
-        body.addView(spacer(context, (int) (12 * density)));
+        body = newPage("voice", "🎙️", "Voix",
+                "Mot d'éveil, ma voix, synthèse, compréhension");
+        body.addView(majorSectionTitle(context, "Écoute"));
         body.addView(addSubHeading(context, "Mot d'éveil « Pégase »"));
         body.addView(hintLabel(context,
                 "Écoute locale Sherpa (« Pégase ») dans un service dédié. "
                         + "Activez l'écoute ci-dessous ; le modèle (~17 Mo) se télécharge au premier usage. "
-                        + "Pendant une vidéo ou de la musique, l'écoute se met en pause. "
-                        + "Logs locaux : diag/kws_lifecycle.jsonl — export ci-dessous."));
-        addActionRow(com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context), () ->
-                android.widget.Toast.makeText(context,
-                        com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context),
-                        android.widget.Toast.LENGTH_LONG).show());
-        addActionRow("Réinitialiser garde KWS (si écoute bloquée)", () -> {
-            com.pegasuscorp.orbe.voice.KwsCrashGuard.resetForUser(context);
-            VoiceWakeClient.get().sync(context);
-            android.widget.Toast.makeText(context,
-                    "Garde KWS réinitialisée — relance de l'écoute",
-                    android.widget.Toast.LENGTH_SHORT).show();
-        });
-        addActionRow("Exporter logs KWS / crash (JSONL)", () ->
-                com.pegasuscorp.orbe.diag.PegaseDiagLog.shareLogs(context));
+                        + "Pendant une vidéo ou de la musique, l'écoute se met en pause."));
         addActionRow(com.pegasuscorp.orbe.voice.PegaseWakeStore.isEnabled(context)
                 ? "Désactiver l'écoute « Pégase »"
                 : "Activer l'écoute « Pégase »", () -> {
@@ -431,78 +388,6 @@ public class PersonalizationPanel extends FrameLayout {
                                 com.pegasuscorp.orbe.WakeWordRecordActivity.class)));
 
         body.addView(spacer(context, (int) (12 * density)));
-        body.addView(addSubHeading(context, "Wake local (Sherpa — filet)"));
-        body.addView(hintLabel(context,
-                "Filet si openWakeWord n'est pas encore installé (~15 Mo). "
-                        + "Téléchargement auto au premier démarrage de :voice."));
-        TextView kwsStatus = new TextView(context);
-        kwsStatus.setTextColor(Color.parseColor("#88FFFFFF"));
-        kwsStatus.setTextSize(12);
-        kwsStatus.setTag("kws_status");
-        kwsStatus.setText(com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context));
-        body.addView(kwsStatus, wrapLp());
-        addActionRow(com.pegasuscorp.orbe.voice.KwsModelStore.isModelReady(context)
-                        || com.pegasuscorp.orbe.voice.KwsModelDownloader.isDownloading()
-                ? "Réinstaller le modèle wake"
-                : "Télécharger le modèle wake (~15 Mo)", () -> {
-            if (com.pegasuscorp.orbe.voice.KwsModelDownloader.isDownloading()) {
-                android.widget.Toast.makeText(context, "Téléchargement déjà en cours…",
-                        android.widget.Toast.LENGTH_SHORT).show();
-                return;
-            }
-            android.widget.Toast.makeText(context, "Téléchargement wake Sherpa…",
-                    android.widget.Toast.LENGTH_SHORT).show();
-            com.pegasuscorp.orbe.voice.KwsModelDownloader.download(context,
-                    new com.pegasuscorp.orbe.voice.KwsModelDownloader.Callback() {
-                        @Override
-                        public void onProgress(int percent) {
-                            mainHandler.post(() -> {
-                                for (int i = 0; i < body.getChildCount(); i++) {
-                                    android.view.View child = body.getChildAt(i);
-                                    if ("kws_status".equals(child.getTag())) {
-                                        ((TextView) child).setText(
-                                                "Téléchargement wake… " + percent + "%");
-                                    }
-                                }
-                            });
-                        }
-
-                        @Override
-                        public void onComplete(boolean success, String message) {
-                            mainHandler.post(() -> {
-                                for (int i = 0; i < body.getChildCount(); i++) {
-                                    android.view.View child = body.getChildAt(i);
-                                    if ("kws_status".equals(child.getTag())) {
-                                        ((TextView) child).setText(
-                                                com.pegasuscorp.orbe.voice.KwsModelStore
-                                                        .statusLabel(getContext()));
-                                    }
-                                }
-                                android.widget.Toast.makeText(getContext(), message,
-                                        android.widget.Toast.LENGTH_LONG).show();
-                                if (success) {
-                                    VoiceWakeClient.get().sync(getContext());
-                                }
-                            });
-                        }
-                    });
-        });
-        addActionRow("Réinitialiser le coupe-circuit wake", () -> {
-            if (!com.pegasuscorp.orbe.voice.VoiceWakeClient.get()
-                    .getCachedWakeHealth().isProblem()) {
-                android.widget.Toast.makeText(context,
-                        "Aucun problème wake détecté pour l'instant",
-                        android.widget.Toast.LENGTH_SHORT).show();
-                return;
-            }
-            com.pegasuscorp.orbe.voice.VoiceWakeClient.get().resetKwsCrashGuard(context);
-            android.widget.Toast.makeText(context,
-                    "Coupe-circuit réinitialisé — relance du wake…",
-                    android.widget.Toast.LENGTH_SHORT).show();
-            VoiceWakeClient.get().sync(context);
-        });
-
-        body.addView(spacer(context, (int) (12 * density)));
         body.addView(addSubHeading(context, "Ma voix"));
         body.addView(hintLabel(context,
                 "Enregistre ta voix pour que seul toi puisses activer Pégase "
@@ -531,7 +416,8 @@ public class PersonalizationPanel extends FrameLayout {
                     android.widget.Toast.LENGTH_SHORT).show();
         });
 
-        body.addView(spacer(context, (int) (12 * density)));
+        addSectionSeparator(context);
+        body.addView(majorSectionTitle(context, "Parole"));
         body.addView(addSubHeading(context, "Synthèse vocale"));
         body.addView(hintLabel(context,
                 "Piper (local) ou TTS système Google. La voix système est choisie par "
@@ -634,9 +520,51 @@ public class PersonalizationPanel extends FrameLayout {
         body.addView(hintLabel(context,
                 "Vitesse plus lente = articulation plus claire (tirets, fin de mots)."));
 
-        // ── 5. Pégase Mémoire ──────────────────────────────────────────────────
+        body.addView(spacer(context, (int) (12 * density)));
+        body.addView(addSubHeading(context, "Dictionnaire vocal"));
+        body.addView(hintLabel(context,
+                "Prononciation Piper/TTS — modifiable aussi à la voix "
+                        + "(« dis Qwen comme Couène », « vitesse à 85 % »)."));
+        addActionRow("Voir et modifier la prononciation", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), SpeechRulesSettingsActivity.class)));
+
         addSectionSeparator(context);
-        body.addView(majorSectionTitle(context, "Pégase Mémoire"));
+        body.addView(majorSectionTitle(context, "Compréhension"));
+        body.addView(addSubHeading(context, "Compréhension vocale"));
+        body.addView(hintLabel(context,
+                "Corrections STT apprises — modifiables aussi à la voix "
+                        + "(« non, je voulais dire… »)."));
+        addActionRow("Voir et modifier les corrections vocales", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), VoiceCorrectionsSettingsActivity.class)));
+        body.addView(hintLabel(context,
+                "Apprends à me connaître — le routeur mémorise tes formulations confirmées "
+                        + "(pas le LLM)."));
+        addActionRow(com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context)
+                ? "Désactiver « Apprends à me connaître »"
+                : "Activer « Apprends à me connaître »", () -> {
+            boolean enable = !com.pegasuscorp.orbe.voice.LearnModeStore.isEnabled(context);
+            com.pegasuscorp.orbe.voice.LearnModeStore.setEnabled(context, enable);
+            android.widget.Toast.makeText(context,
+                    enable
+                            ? "Pégase va apprendre ta façon de parler"
+                            : "Apprentissage du routeur désactivé",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
+        addActionRow("Voir mon corpus personnel", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), KnowMeSettingsActivity.class)));
+        body.addView(hintLabel(context,
+                "Routing UserExamples — importe une conversation, valide phrase → outil "
+                        + "(tous les outils du registre). Matching sémantique avant les règles "
+                        + "hardcodées (~30 j d'usage)."));
+        addActionRow("Apprentissage du routing", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), RoutingLearningActivity.class)));
+
+        body = newPage("memory", "💾", "Mémoire",
+                "Portrait, atlas, souvenirs");
         body.addView(hintLabel(context,
                 "Souvenirs, profil et résumés de session — modifiables aussi à la voix "
                         + "(« retiens que… », « oublie… »)."));
@@ -651,9 +579,8 @@ public class PersonalizationPanel extends FrameLayout {
         addActionRow("Interface Pégase (conversation, outils)", () ->
                 PegaseInterfaceState.openOrBringToFront(getContext()));
 
-        // ── 6. Services connectés ───────────────────────────────────────────────
-        addSectionSeparator(context);
-        body.addView(majorSectionTitle(context, "Services connectés"));
+        body = newPage("services", "🔌", "Services",
+                "Spotify, notifications, Orion, Drive, MCP, PC");
 
         body.addView(addSubHeading(context, "Spotify Premium"));
         body.addView(hintLabel(context,
@@ -688,7 +615,103 @@ public class PersonalizationPanel extends FrameLayout {
                 getContext().startActivity(
                         new android.content.Intent(getContext(), OrionSettingsActivity.class)));
 
-        // ── 7. Diagnostic ───────────────────────────────────────────────────────
+        body.addView(spacer(context, (int) (12 * density)));
+        body.addView(addSubHeading(context, "Autres connexions"));
+        addActionRow("Synchro Google Drive", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), com.pegasuscorp.orbe.sync.DriveSyncSettingsActivity.class)));
+        addActionRow("Serveurs MCP", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), com.pegasuscorp.orbe.mcp.McpSettingsActivity.class)));
+        addActionRow("Terminal PC", () ->
+                getContext().startActivity(
+                        new android.content.Intent(getContext(), com.pegasuscorp.orbe.pcshell.PcShellSettingsActivity.class)));
+        body = newPage("advanced", "🛠️", "Avancé",
+                "Dépannage du mot d'éveil, traces, mini-tests");
+        body.addView(addSubHeading(context, "Mot d'éveil — dépannage"));
+        addActionRow(com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context), () ->
+                android.widget.Toast.makeText(context,
+                        com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context),
+                        android.widget.Toast.LENGTH_LONG).show());
+        addActionRow("Réinitialiser garde KWS (si écoute bloquée)", () -> {
+            com.pegasuscorp.orbe.voice.KwsCrashGuard.resetForUser(context);
+            VoiceWakeClient.get().sync(context);
+            android.widget.Toast.makeText(context,
+                    "Garde KWS réinitialisée — relance de l'écoute",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
+        addActionRow("Exporter logs KWS / crash (JSONL)", () ->
+                com.pegasuscorp.orbe.diag.PegaseDiagLog.shareLogs(context));
+        body.addView(spacer(context, (int) (12 * density)));
+        body.addView(addSubHeading(context, "Wake local (Sherpa — filet)"));
+        body.addView(hintLabel(context,
+                "Filet si openWakeWord n'est pas encore installé (~15 Mo). "
+                        + "Téléchargement auto au premier démarrage de :voice."));
+        TextView kwsStatus = new TextView(context);
+        kwsStatus.setTextColor(Color.parseColor("#88FFFFFF"));
+        kwsStatus.setTextSize(12);
+        kwsStatus.setTag("kws_status");
+        kwsStatus.setText(com.pegasuscorp.orbe.voice.KwsModelStore.statusLabel(context));
+        body.addView(kwsStatus, wrapLp());
+        addActionRow(com.pegasuscorp.orbe.voice.KwsModelStore.isModelReady(context)
+                        || com.pegasuscorp.orbe.voice.KwsModelDownloader.isDownloading()
+                ? "Réinstaller le modèle wake"
+                : "Télécharger le modèle wake (~15 Mo)", () -> {
+            if (com.pegasuscorp.orbe.voice.KwsModelDownloader.isDownloading()) {
+                android.widget.Toast.makeText(context, "Téléchargement déjà en cours…",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            android.widget.Toast.makeText(context, "Téléchargement wake Sherpa…",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            com.pegasuscorp.orbe.voice.KwsModelDownloader.download(context,
+                    new com.pegasuscorp.orbe.voice.KwsModelDownloader.Callback() {
+                        @Override
+                        public void onProgress(int percent) {
+                            mainHandler.post(() -> {
+                                for (View child : allRows()) {
+                                    if ("kws_status".equals(child.getTag())) {
+                                        ((TextView) child).setText(
+                                                "Téléchargement wake… " + percent + "%");
+                                    }
+                                }
+                            });
+                        }
+
+                        @Override
+                        public void onComplete(boolean success, String message) {
+                            mainHandler.post(() -> {
+                                for (View child : allRows()) {
+                                    if ("kws_status".equals(child.getTag())) {
+                                        ((TextView) child).setText(
+                                                com.pegasuscorp.orbe.voice.KwsModelStore
+                                                        .statusLabel(getContext()));
+                                    }
+                                }
+                                android.widget.Toast.makeText(getContext(), message,
+                                        android.widget.Toast.LENGTH_LONG).show();
+                                if (success) {
+                                    VoiceWakeClient.get().sync(getContext());
+                                }
+                            });
+                        }
+                    });
+        });
+        addActionRow("Réinitialiser le coupe-circuit wake", () -> {
+            if (!com.pegasuscorp.orbe.voice.VoiceWakeClient.get()
+                    .getCachedWakeHealth().isProblem()) {
+                android.widget.Toast.makeText(context,
+                        "Aucun problème wake détecté pour l'instant",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            com.pegasuscorp.orbe.voice.VoiceWakeClient.get().resetKwsCrashGuard(context);
+            android.widget.Toast.makeText(context,
+                    "Coupe-circuit réinitialisé — relance du wake…",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            VoiceWakeClient.get().sync(context);
+        });
+
         addSectionSeparator(context);
         body.addView(majorSectionTitle(context, "Diagnostic"));
         body.addView(hintLabel(context,
@@ -710,6 +733,138 @@ public class PersonalizationPanel extends FrameLayout {
         addActionRow("Réinitialiser les traces", this::confirmClearTraceFiles);
         addActionRow("Partager trace.jsonl", this::shareTraceFile);
         addActionRow("Partager le rapport JSON", this::shareDiagReport);
+
+        buildMenu(context);
+        showMenu();
+    }
+
+    // ── Pages ────────────────────────────────────────────────────────────────
+
+    private LinearLayout newPage(String key, String icon, String title, String summary) {
+        LinearLayout page = new LinearLayout(getContext());
+        page.setOrientation(LinearLayout.VERTICAL);
+        pages.put(key, page);
+        menuEntries.add(new String[]{key, icon, title, summary});
+        return page;
+    }
+
+    private void buildMenu(Context context) {
+        float density = context.getResources().getDisplayMetrics().density;
+        menuPage = new LinearLayout(context);
+        menuPage.setOrientation(LinearLayout.VERTICAL);
+        TextView title = majorSectionTitle(context, "Réglages");
+        title.setTextSize(20);
+        menuPage.addView(title, wrapLp());
+        for (String[] e : menuEntries) {
+            LinearLayout row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            int p = (int) (14 * density);
+            row.setPadding(p, p, p, p);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(14 * density);
+            bg.setColor(Color.parseColor("#14FFFFFF"));
+            row.setBackground(bg);
+
+            TextView icon = new TextView(context);
+            icon.setText(e[1]);
+            icon.setTextSize(22);
+            row.addView(icon, new LinearLayout.LayoutParams(
+                    (int) (44 * density), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            TextView name = new TextView(context);
+            name.setText(e[2]);
+            name.setTextColor(Color.WHITE);
+            name.setTextSize(16);
+            name.setTypeface(null, Typeface.BOLD);
+            texts.addView(name);
+            TextView summary = new TextView(context);
+            summary.setText(e[3]);
+            summary.setTextColor(Color.parseColor("#88FFFFFF"));
+            summary.setTextSize(12);
+            texts.addView(summary);
+            row.addView(texts, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView chevron = new TextView(context);
+            chevron.setText("›");
+            chevron.setTextColor(Color.parseColor("#66FFFFFF"));
+            chevron.setTextSize(22);
+            row.addView(chevron);
+
+            final String key = e[0];
+            final String pageTitle = e[1] + "  " + e[2];
+            row.setOnClickListener(v -> openPage(key, pageTitle));
+            LinearLayout.LayoutParams lp = wrapLp();
+            lp.topMargin = (int) (10 * density);
+            menuPage.addView(row, lp);
+        }
+    }
+
+    private void showMenu() {
+        currentPage = null;
+        hideKeyboard();
+        root.removeAllViews();
+        root.addView(menuPage, wrapLp());
+        scroll.scrollTo(0, 0);
+    }
+
+    private void openPage(String key, String title) {
+        LinearLayout page = pages.get(key);
+        if (page == null) return;
+        currentPage = key;
+        Context context = getContext();
+        float density = context.getResources().getDisplayMetrics().density;
+        root.removeAllViews();
+
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = new TextView(context);
+        back.setText("‹");
+        back.setTextColor(Color.WHITE);
+        back.setTextSize(28);
+        back.setPadding((int) (4 * density), 0, (int) (16 * density), (int) (4 * density));
+        back.setContentDescription("Retour aux réglages");
+        back.setOnClickListener(v -> showMenu());
+        header.addView(back);
+        TextView name = majorSectionTitle(context, title);
+        name.setTextSize(19);
+        name.setTextColor(Color.WHITE);
+        name.setPadding(0, 0, 0, 0);
+        header.addView(name);
+        LinearLayout.LayoutParams hlp = wrapLp();
+        hlp.bottomMargin = (int) (10 * density);
+        root.addView(header, hlp);
+
+        if (page.getParent() instanceof ViewGroup) ((ViewGroup) page.getParent()).removeView(page);
+        root.addView(page, wrapLp());
+        scroll.scrollTo(0, 0);
+    }
+
+    /** Retour Android : depuis une rubrique, revient au menu. @return true si consommé. */
+    public boolean handleBack() {
+        if (!isVisiblePanel() || currentPage == null) return false;
+        showMenu();
+        return true;
+    }
+
+    private void hideKeyboard() {
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getContext()
+                        .getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
+    }
+
+    /** Vues de premier niveau de toutes les rubriques (recherche par tag). */
+    private java.util.List<View> allRows() {
+        java.util.List<View> out = new java.util.ArrayList<>();
+        for (LinearLayout page : pages.values()) {
+            for (int i = 0; i < page.getChildCount(); i++) out.add(page.getChildAt(i));
+        }
+        return out;
     }
 
     private String prefetchAlarmLabel(Context context) {
@@ -758,8 +913,7 @@ public class PersonalizationPanel extends FrameLayout {
     }
 
     public void refreshPiperStatus() {
-        for (int i = 0; i < body.getChildCount(); i++) {
-            View child = body.getChildAt(i);
+        for (View child : allRows()) {
             if ("piper_status".equals(child.getTag())) {
                 ((TextView) child).setText(PiperModelStore.statusLabel(getContext()));
             }
@@ -768,9 +922,8 @@ public class PersonalizationPanel extends FrameLayout {
     }
 
     private void refreshTtsStatus() {
-        if (body == null) return;
-        for (int i = 0; i < body.getChildCount(); i++) {
-            View child = body.getChildAt(i);
+        if (pages.isEmpty()) return;
+        for (View child : allRows()) {
             if ("tts_engine_status".equals(child.getTag())) {
                 ((TextView) child).setText(
                         com.pegasuscorp.orbe.voice.AndroidTtsStore.statusLabel(getContext())
@@ -780,10 +933,9 @@ public class PersonalizationPanel extends FrameLayout {
     }
 
     private void rebuildSystemVoiceRows() {
-        if (body == null) return;
+        if (pages.isEmpty()) return;
         LinearLayout list = null;
-        for (int i = 0; i < body.getChildCount(); i++) {
-            View child = body.getChildAt(i);
+        for (View child : allRows()) {
             if ("system_voice_list".equals(child.getTag()) && child instanceof LinearLayout) {
                 list = (LinearLayout) child;
                 break;
@@ -871,11 +1023,46 @@ public class PersonalizationPanel extends FrameLayout {
         field.setBackgroundColor(Color.parseColor("#22FFFFFF"));
         field.setPadding((int) (12 * density), (int) (10 * density),
                 (int) (12 * density), (int) (10 * density));
-        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        boolean secret = hint.startsWith("Clé") || hint.startsWith("Client ID");
         field.setSingleLine(true);
+        // Intitulé permanent : le hint disparaît dès que le champ est rempli.
+        TextView caption = new TextView(context);
+        caption.setText(hint);
+        caption.setTextColor(Color.parseColor("#AAFFFFFF"));
+        caption.setTextSize(12);
+        caption.setPadding(0, (int) (8 * density), 0, 0);
+        body.addView(caption, wrapLp());
         LinearLayout.LayoutParams lp = wrapLp();
         lp.topMargin = (int) (6 * density);
-        body.addView(field, lp);
+        if (!secret) {
+            field.setInputType(InputType.TYPE_CLASS_TEXT);
+            body.addView(field, lp);
+            return field;
+        }
+        // setSingleLine() remplace la transformation : masquer APRÈS (sinon clés en clair).
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        field.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
+        LinearLayout wrap = new LinearLayout(context);
+        wrap.setOrientation(LinearLayout.HORIZONTAL);
+        wrap.setGravity(Gravity.CENTER_VERTICAL);
+        wrap.addView(field, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView eye = new TextView(context);
+        eye.setText("👁");
+        eye.setTextSize(18);
+        eye.setAlpha(0.5f);
+        eye.setPadding((int) (12 * density), (int) (8 * density), (int) (8 * density), (int) (8 * density));
+        eye.setContentDescription("Afficher ou masquer la clé");
+        eye.setOnClickListener(v -> {
+            boolean hidden = field.getTransformationMethod()
+                    instanceof android.text.method.PasswordTransformationMethod;
+            field.setTransformationMethod(hidden ? null
+                    : android.text.method.PasswordTransformationMethod.getInstance());
+            field.setSelection(field.getText().length());
+            eye.setAlpha(hidden ? 1f : 0.5f);
+        });
+        wrap.addView(eye);
+        body.addView(wrap, lp);
         return field;
     }
 
@@ -1032,8 +1219,7 @@ public class PersonalizationPanel extends FrameLayout {
 
     private void refreshProviderRows() {
         String selected = CloudModelStore.getActiveProvider(getContext());
-        for (int i = 0; i < body.getChildCount(); i++) {
-            View child = body.getChildAt(i);
+        for (View child : allRows()) {
             Object tag = child.getTag();
             if (tag instanceof String && ((String) tag).startsWith("provider:")) {
                 String provider = ((String) tag).substring("provider:".length());
@@ -1226,6 +1412,7 @@ public class PersonalizationPanel extends FrameLayout {
         if (prefetchAlarmBtn != null) {
             prefetchAlarmBtn.setText(prefetchAlarmLabel(getContext()));
         }
+        if (menuPage != null) showMenu();
         setVisibility(VISIBLE);
         bringToFront();
         setAlpha(0f);
@@ -1343,8 +1530,7 @@ public class PersonalizationPanel extends FrameLayout {
 
     private void refreshIconThemeRows() {
         int selected = PersonalizationStore.getIconTheme(getContext());
-        for (int i = 0; i < body.getChildCount(); i++) {
-            View child = body.getChildAt(i);
+        for (View child : allRows()) {
             if (child.getTag() instanceof Integer) {
                 styleIconThemeRow(child, ((Integer) child.getTag()) == selected);
             }

@@ -656,9 +656,15 @@ public class AppDrawerPanel extends FrameLayout {
         post(() -> updateScrollSection(0));
     }
 
+    /** Retour depuis une rubrique des réglages → menu des réglages. */
+    public boolean backInSettings() {
+        return open && personalizationPanel != null && personalizationPanel.handleBack();
+    }
+
     /** @return true si le back a été consommé (raccourci legacy) */
     public boolean handleBack() {
         if (!open) return false;
+        if (personalizationPanel != null && personalizationPanel.handleBack()) return true;
         closeToHome();
         return true;
     }
