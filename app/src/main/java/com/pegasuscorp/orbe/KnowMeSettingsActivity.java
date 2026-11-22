@@ -123,6 +123,22 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
         addActionButton("Exporter le journal d'entraînement", this::exportTrainingJournal);
         addActionButton("Effacer le journal d'entraînement", this::confirmClearTrainingJournal);
 
+        // Commandes simples traitées en local (Qwen3.5-2B sur le téléphone)
+        com.pegasuscorp.orbe.llm.LocalLlmServer local =
+                com.pegasuscorp.orbe.llm.LocalLlmServer.get(this);
+        boolean localOn = com.pegasuscorp.orbe.llm.LocalLlmServer.isEnabled(this);
+        boolean modelOk = local.modelFile().isFile();
+        contentHost.addView(hint("Commandes en local (" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL
+                + ") : " + (localOn ? "activées" : "désactivées")
+                + (modelOk ? "" : " — modèle absent (" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_FILE + ")")
+                + ". Réveil, minuteur, agenda, notes, musique, météo, SMS et appels sont décidés "
+                + "sur le téléphone, sans cloud ; le reste part au cloud comme avant."));
+        addActionButton(localOn ? "Désactiver les commandes en local"
+                : "Activer les commandes en local", () -> {
+            com.pegasuscorp.orbe.llm.LocalLlmServer.setEnabled(this, !localOn);
+            rebuildList();
+        });
+
         List<VoiceIntentLearnStore.LearnedIntent> entries = store.getEntries();
         if (entries.isEmpty()) {
             contentHost.addView(emptyLabel("Aucune formulation apprise pour l'instant.\n"

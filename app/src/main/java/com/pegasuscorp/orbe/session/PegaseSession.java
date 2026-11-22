@@ -353,6 +353,18 @@ public class PegaseSession {
             return;
         }
 
+        // Commande simple (réveil, minuteur, agenda, notes…) → modèle local sur le téléphone.
+        // Repli automatique sur le cloud si le local ne sait pas faire.
+        if (tryLocalLlmShortCircuit(conv, userVisible, payload, displayText, obs)) {
+            return;
+        }
+
+        sendToCloud(conv, payload, displayText, userVisible, obs);
+    }
+
+    /** Envoi au fournisseur cloud (chaîne Groq → Cerebras → OpenRouter). */
+    private void sendToCloud(ConversationManager conv, String payload, String displayText,
+            String userVisible, SessionObserver obs) {
         ChatSendOptions sendOptions = buildSendOptions(userVisible);
 
         notifyLlmStart(obs);
@@ -886,6 +898,53 @@ public class PegaseSession {
      * Court-circuit diag local : réponse honnête depuis la trace, ou lancement de l'outil.
      * Évite que le LLM invente « j'ai essayé mais quota dépassé ».
      */
+    private final java.util.concurrent.ExecutorService localLlmExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /**
+     * Commande simple → Qwen3.5-2B local ({@link com.pegasuscorp.orbe.llm.LocalCommandRouter}).
+     * @return true si le tour est pris en charge (le repli cloud éventuel est fait ici).
+     */
+    private boolean tryLocalLlmShortCircuit(ConversationManager conv, String userText,
+            String payload, String displayText, SessionObserver obs) {
+        if (appContext == null || userText == null || userText.trim().isEmpty()) return false;
+        final com.pegasuscorp.orbe.llm.LocalLlmServer server =
+                com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext);
+        if (!server.isAvailable()) return false;
+        if (com.pegasuscorp.orbe.llm.LocalCommandRouter.route(userText).isEmpty()) return false;
+        if (!allowToolExecution(obs)) return false;   // verrouillé : chemin habituel
+        final long requestId = activeRequestId;
+        final String text = userText.trim();
+        notifyLlmStart(obs);
+        localLlmExecutor.execute(() -> {
+            com.pegasuscorp.orbe.llm.LocalCommandRouter.Decision d =
+                    com.pegasuscorp.orbe.llm.LocalCommandRouter.decide(server, toolRegistry, text);
+            main.post(() -> {
+                if (requestId != activeRequestId) return;   // nouvelle demande entre-temps
+                if (d == null) {
+                    Trace.error("local_llm", "repli cloud : " + text);
+                    sendToCloud(conv, payload, displayText, userText, obs);
+                    return;
+                }
+                String label = "Local/" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL;
+                com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser(label);
+                Trace.error("local_llm", "ok " + d.latencyMs + " ms : "
+                        + (d.clarification != null ? "question" : d.toolIds));
+                if (d.clarification != null) {
+                    conv.addUserMessage(text);
+                    conv.recordToolReply(d.clarification);
+                    publishReasoningForReply(d.clarification);
+                    notifyReply(obs, d.clarification, false);
+                    return;
+                }
+                // Un appel par tour (les petits modèles enchaînent mal) ; la confirmation
+                // affichée est le texte renvoyé par l'outil.
+                executeToolInternal(d.toolIds.get(0), d.params.get(0), text, obs, true);
+            });
+        });
+        return true;
+    }
+
     private boolean tryOpenAppLocalShortCircuit(ConversationManager conv, String userText,
             SessionObserver obs) {
         if (userText == null || userText.trim().isEmpty()) return false;

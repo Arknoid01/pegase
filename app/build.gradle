@@ -47,6 +47,11 @@ android {
         resources {
             excludes += ['META-INF/LICENSE.md', 'META-INF/NOTICE.md']
         }
+        // libllamaserver.so (llama-server, voir tools/build-llama-server-android.sh) est
+        // exécuté comme un programme : il doit être extrait dans nativeLibraryDir.
+        jniLibs {
+            useLegacyPackaging true
+        }
     }
 
     compileOptions {

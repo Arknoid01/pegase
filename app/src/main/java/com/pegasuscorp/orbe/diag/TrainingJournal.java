@@ -92,6 +92,13 @@ public final class TrainingJournal {
         }
     }
 
+    /** Le tour a été décidé par un autre modèle que le backend de conversation (ex. local). */
+    public static void noteChooser(String label) {
+        synchronized (LOCK) {
+            if (turn != null && label != null) put(turn, "chooser", label);
+        }
+    }
+
     /** Précise si le prochain outil vient du routeur local (true) ou du LLM (false). */
     public static void noteRouting(boolean localRouter) {
         synchronized (LOCK) { nextToolLocalRouter = localRouter; }
@@ -136,7 +143,8 @@ public final class TrainingJournal {
                 turnTools.put(pendingTool);
             }
             put(turn, "tools", turnTools);
-            put(turn, "backend", backend != null ? backend : "");
+            String chooser = turn.optString("chooser", "");
+            put(turn, "backend", !chooser.isEmpty() ? chooser : (backend != null ? backend : ""));
             put(turn, "reply", clip(reply, MAX_REPLY_CHARS));
             line = turn.toString();
             resetTurn();
