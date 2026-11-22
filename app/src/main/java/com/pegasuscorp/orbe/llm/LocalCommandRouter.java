@@ -84,7 +84,7 @@ public final class LocalCommandRouter {
             "^(?:reveille[- ]moi|(?:mets?|programme|regle)(?:-moi)?\\s+(?:(?:un|1)\\s+reveil|(?:une|1)\\s+alarme)|reveil|alarme)"
                     + "\\s*(?:pour\\s+)?(demain\\s+(?:matin\\s+)?)?(?:a\\s+)?(\\d{1,2})\\s*h\\s*(\\d{2})?(.*)$");
     private static final Pattern Q_NOTE = Pattern.compile(
-            "^(?:note|noter|prends note|ecris)\\s+(?:que\\s+|qu')?(.{3,})$");
+            "^(?:note|noter|prends note)\\s+(?:que\\s+|qu')?(.{3,})$");
     private static final Pattern Q_LIST_ADD = Pattern.compile(
             "^ajoute\\s+(.{2,}?)\\s+(?:a|dans|sur)\\s+(?:ma|la|mes)\\s+(?:liste|notes?)(?:\\s+de courses)?\\s*[.!]?$");
     private static final Pattern Q_MEMORY = Pattern.compile(
@@ -129,6 +129,8 @@ public final class LocalCommandRouter {
                 a.put("hour", h).put("minute", mi);
                 return decision("alarm", a);
             }
+            // Messages / appels : jamais par l'analyseur (destinataire et texte à vérifier)
+            if (fk.matches(".*\\b(message|sms|texto|ecris a|appelle|telephone)\\b.*")) return null;
             if (!fk.endsWith("?")) {
                 m = Q_LIST_ADD.matcher(fk);
                 if (m.matches()) return decision("notepad", new JSONObject()
@@ -217,105 +219,253 @@ public final class LocalCommandRouter {
         return new ArrayList<>(out);
     }
 
+    // ======================================================================
+    // Modèle local en SORTIE COMPACTE : une ligne « outil action clé="valeur" »
+    // imposée par une grammaire GBNF (≈3–25 jetons au lieu de 40–120 en JSON
+    // tool_calls) ; prompt 3× plus court que les schémas OpenAI.
+    // ======================================================================
+
+    /** Spécification compacte d'un outil : actions, paramètres, aide, exemples (phrase → ligne). */
+    private static final class Spec {
+        final String[] actions, params;
+        final String help;
+        final String[][] examples;
+        Spec(String[] actions, String[] params, String help, String[]... examples) {
+            this.actions = actions; this.params = params; this.help = help; this.examples = examples;
+        }
+    }
+
+    private static final java.util.Map<String, Spec> SPECS = new java.util.LinkedHashMap<>();
+    static {
+        SPECS.put("alarm", new Spec(new String[]{"add", "list"}, new String[]{"hour", "minute", "label", "days"},
+                "réveil ; hour et minute en chiffres ; days seulement si répétition (1=lun…7=dim, ex. \"1,2,3,4,5\")",
+                new String[]{"réveille-moi à 7h15 du lundi au vendredi", "alarm add hour=\"7\" minute=\"15\" days=\"1,2,3,4,5\""}));
+        SPECS.put("timer", new Spec(new String[]{"start", "list"}, new String[]{"duration", "label"},
+                "minuteur ; duration telle que dite",
+                new String[]{"minuteur de 5 min pour le thé", "timer start duration=\"5 min\" label=\"thé\""}));
+        SPECS.put("agenda", new Spec(new String[]{"add", "today", "tomorrow", "week", "delete"},
+                new String[]{"title", "start", "location"},
+                "calendrier ; add = ajouter (start tel que dit) ; today/tomorrow/week = lire",
+                new String[]{"ajoute réunion vendredi 10h au bureau", "agenda add title=\"réunion\" start=\"vendredi 10h\" location=\"bureau\""},
+                new String[]{"j'ai des trucs aujourd'hui ?", "agenda today"}));
+        SPECS.put("weather", new Spec(new String[]{}, new String[]{"city", "days"},
+                "météo ; days = nombre de jours (1 = aujourd'hui, 2 = demain)",
+                new String[]{"il fera beau à Nice demain ?", "weather city=\"Nice\" days=\"2\""}));
+        SPECS.put("spotify", new Spec(new String[]{"play", "pause", "next", "previous"}, new String[]{"query"},
+                "musique", new String[]{"mets un peu de rock", "spotify play query=\"rock\""}));
+        SPECS.put("memory", new Spec(new String[]{"add", "forget"}, new String[]{"text"},
+                "mémoire durable (préférences, infos perso)",
+                new String[]{"souviens-toi que mon frère s'appelle Paul", "memory add text=\"mon frère s'appelle Paul\""}));
+        SPECS.put("notepad", new Spec(new String[]{"add", "list", "done"}, new String[]{"text"},
+                "bloc-notes / liste de tâches ou de courses",
+                new String[]{"mets des piles sur ma liste", "notepad add text=\"des piles\""}));
+        SPECS.put("sms", new Spec(new String[]{}, new String[]{"to", "message"},
+                "SMS ; to et message UNIQUEMENT s'ils sont dits",
+                new String[]{"écris à Léa que j'arrive", "sms to=\"Léa\" message=\"j'arrive\""}));
+        SPECS.put("call", new Spec(new String[]{}, new String[]{"contact"},
+                "appel téléphonique", new String[]{"appelle Marc", "call contact=\"Marc\""}));
+    }
+    private static final Pattern KV = Pattern.compile("(\\w+)=\"([^\"]*)\"");
+
+    /** Outils du groupe ayant une spec compacte et existant dans Orbe. */
+    private static List<String> compactTools(List<String> ids, ToolRegistry registry) {
+        List<String> out = new ArrayList<>();
+        for (String id : ids) if (SPECS.containsKey(id) && registry.findById(id) != null) out.add(id);
+        return out;
+    }
+
+    private static boolean allowsAsk(List<String> tools) {
+        return tools.contains("sms") || tools.contains("call");
+    }
+
+    /** Grammaire GBNF : une commande d'un des outils (ou « ? … » pour SMS / appel). */
+    static String grammar(List<String> tools) {
+        StringBuilder g = new StringBuilder();
+        g.append("root ::= ").append(allowsAsk(tools) ? "ask | call" : "call").append('\n');
+        g.append("ask ::= \"? \" [^\\n]{3,150}\n");
+        g.append("val ::= \"\\\"\" [^\"\\n]{1,80} \"\\\"\"\n");
+        StringBuilder call = new StringBuilder("call ::= ");
+        for (int i = 0; i < tools.size(); i++) {
+            String t = tools.get(i);
+            Spec sp = SPECS.get(t);
+            call.append(i > 0 ? " | " : "").append("t").append(t);
+            g.append("t").append(t).append(" ::= \"").append(t).append('"');
+            if (sp.actions.length > 0) {
+                g.append(" (\" \" (");
+                for (int k = 0; k < sp.actions.length; k++) g.append(k > 0 ? " | " : "").append('"').append(sp.actions[k]).append('"');
+                g.append("))");
+            }
+            g.append(" (\" \" p").append(t).append(")*\n");
+            g.append("p").append(t).append(" ::= (");
+            for (int k = 0; k < sp.params.length; k++) g.append(k > 0 ? " | " : "").append('"').append(sp.params[k]).append('"');
+            g.append(") \"=\" val\n");
+        }
+        g.append(call).append('\n');
+        return g.toString();
+    }
+
+    /** Prompt fixe (système + exemples) puis la phrase ; l'heure est à la fin (cache réutilisable). */
+    static JSONArray compactMessages(List<String> tools, String userText) throws Exception {
+        StringBuilder lines = new StringBuilder();
+        for (String t : tools) {
+            Spec sp = SPECS.get(t);
+            lines.append("- ").append(t).append(" : ");
+            if (sp.actions.length > 0) lines.append("actions ").append(String.join("|", sp.actions)).append(" ; ");
+            lines.append(sp.help).append('\n');
+        }
+        String sys = "Tu es Pégase, l'assistant de ton utilisateur sur son téléphone. Tu le tutoies. "
+                + "Réponds par UNE seule ligne : une commande « outil action clé=\"valeur\" » avec seulement "
+                + "les paramètres utiles (valeurs telles que dites, rien d'inventé)"
+                + (allowsAsk(tools) ? ", ou « ? » si le destinataire ou le contenu manque" : "")
+                + ".\nOutils :\n" + lines;
+        JSONArray m = new JSONArray().put(new JSONObject().put("role", "system").put("content", sys));
+        for (String t : tools) {
+            for (String[] ex : SPECS.get(t).examples) {
+                m.put(new JSONObject().put("role", "user").put("content", ex[0]));
+                m.put(new JSONObject().put("role", "assistant").put("content", ex[1]));
+            }
+        }
+        String now = new SimpleDateFormat("EEEE d MMMM yyyy, HH'h'mm", Locale.FRENCH).format(new Date());
+        m.put(new JSONObject().put("role", "user").put("content",
+                userText.trim() + "\n\n(Nous sommes le " + now + ".)"));
+        return m;
+    }
+
+    /** « alarm add hour="7" » → (outil, paramètres typés). null si illisible. */
+    static Object[] parseCompact(String line, List<String> tools) throws Exception {
+        String l = line.trim();
+        int sp = l.indexOf(' ');
+        String tool = sp < 0 ? l : l.substring(0, sp);
+        if (!tools.contains(tool)) return null;
+        JSONObject a = new JSONObject();
+        String rest = sp < 0 ? "" : l.substring(sp + 1).trim();
+        if (!rest.isEmpty() && !rest.contains("=")) {
+            a.put("action", rest.split("\\s+")[0]);
+        } else if (!rest.isEmpty() && rest.indexOf(' ') > 0 && !rest.substring(0, rest.indexOf(' ')).contains("=")) {
+            a.put("action", rest.substring(0, rest.indexOf(' ')));
+        }
+        Matcher m = KV.matcher(rest);
+        while (m.find()) {
+            String k = m.group(1), v = m.group(2).trim();
+            if (v.isEmpty()) continue;
+            if (k.equals("hour") || k.equals("minute") || (tool.equals("weather") && k.equals("days"))) {
+                if (!v.matches("\\d{1,2}")) continue;
+                a.put(k, Integer.parseInt(v));
+            } else if (tool.equals("alarm") && k.equals("days")) {
+                JSONArray days = new JSONArray();
+                for (String d : v.split("[,; ]+")) if (d.matches("[1-7]")) days.put(Integer.parseInt(d));
+                if (days.length() > 0) a.put("days", days);
+            } else {
+                a.put(k, v);
+            }
+        }
+        return new Object[]{tool, a};
+    }
+
+    /** Valeurs texte dont aucun mot n'est dans la phrase = recopiées d'un exemple → retirées. */
+    static void dropCopiedValues(String tool, JSONObject a, String userText) {
+        String f = fold(userText);
+        java.util.Iterator<String> it = a.keys();
+        List<String> drop = new ArrayList<>();
+        while (it.hasNext()) {
+            String k = it.next();
+            if (k.equals("action") || k.equals("start") || k.equals("duration")) continue;
+            Object v = a.opt(k);
+            if (!(v instanceof String)) continue;
+            boolean seen = false;
+            for (String w : fold((String) v).split("[^a-z0-9']+")) {
+                if (w.length() >= 3 && f.contains(w)) { seen = true; break; }
+            }
+            if (!seen) drop.add(k);
+        }
+        for (String k : drop) a.remove(k);
+    }
+
     /**
-     * Demande au modèle local quoi faire. Bloquant (≈4–8 s) : hors thread UI.
+     * Demande au modèle local quoi faire. Bloquant (≈1–4 s à chaud) : hors thread UI.
      * @return décision, ou null → repli cloud.
      */
     public static Decision decide(LocalLlmServer server, ToolRegistry registry, String userText) {
         List<String> ids = route(userText);
         if (ids.isEmpty() || server == null || registry == null) return null;
+        List<String> tools = compactTools(ids, registry);
+        if (tools.isEmpty()) return null;
         long t0 = System.currentTimeMillis();
         try {
-            JSONArray tools = new JSONArray();
-            for (String id : ids) {
-                Tool t = registry.findById(id);
-                if (t != null) tools.put(OpenAiToolSchemaBuilder.toOpenAiTool(t));
-            }
-            if (tools.length() == 0) return null;
             if (!server.ensureStarted()) return null;
-
-            JSONArray msgs = messages(userText);
+            JSONArray msgs = compactMessages(tools, userText);
             String key = String.join("+", ids);
             int slot = GROUPS.indexOf(key);
-            String cacheName = null;
-            if (slot >= 0) {
-                cacheName = cacheName(key, msgs, tools);
-            } else {
-                slot = LocalLlmServer.SLOT_COUNT - 1;    // combinaison rare : slot libre
-            }
+            String cacheName = slot >= 0 ? cacheName(key, msgs) : null;
+            if (slot < 0) slot = LocalLlmServer.SLOT_COUNT - 1;      // combinaison rare
+            JSONObject kw = new JSONObject().put("enable_thinking", false);
             JSONObject body = new JSONObject()
                     .put("messages", msgs)
-                    .put("tools", tools)
-                    .put("temperature", 0.3)
-                    .put("top_p", 0.9)
-                    .put("top_k", 40)
-                    .put("max_tokens", 160)
-                    .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
-            if (cacheName == null) body.put("id_slot", slot);
-            JSONObject templateBody = new JSONObject().put("messages", msgs).put("tools", tools)
-                    .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
-            JSONObject resp = cacheName != null
-                    ? server.chatInSlot(body, slot, cacheName, templateBody, 45_000)
-                    : server.chat(body, 45_000);
-            JSONObject msg = resp.getJSONArray("choices").getJSONObject(0).getJSONObject("message");
+                    .put("grammar", grammar(tools))
+                    .put("temperature", 0.2)
+                    .put("max_tokens", 64)
+                    .put("chat_template_kwargs", kw);
+            JSONObject resp;
+            if (cacheName != null) {
+                JSONObject templateBody = new JSONObject().put("messages", msgs).put("chat_template_kwargs", kw);
+                resp = server.chatInSlot(body, slot, cacheName, templateBody, 45_000);
+            } else {
+                body.put("id_slot", slot);
+                resp = server.chat(body, 45_000);
+            }
+            String line = resp.getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").optString("content", "").trim();
             Decision d = new Decision();
             d.latencyMs = System.currentTimeMillis() - t0;
-            JSONArray calls = msg.optJSONArray("tool_calls");
-            if (calls == null || calls.length() == 0) {
-                String text = msg.optString("content", "").trim();
-                // Seule réponse texte acceptée : une question de clarification courte.
-                if (text.endsWith("?") && text.length() < 200) {
-                    d.clarification = text;
-                    return d;
-                }
-                return null;
+            if (line.startsWith("?")) {
+                // La question est formulée par le code (le modèle tourne mal ses phrases)
+                d.clarification = tools.contains("call") && !tools.contains("sms")
+                        ? "Qui veux-tu appeler ?"
+                        : "À qui veux-tu envoyer un message, et qu'est-ce que je lui dis ?";
+                return d;
             }
-            for (int i = 0; i < calls.length(); i++) {
-                JSONObject fn = calls.getJSONObject(i).getJSONObject("function");
-                String name = fn.optString("name", "");
-                if (!ids.contains(name)) return null;               // outil non proposé
-                JSONObject args = parseArgs(fn.opt("arguments"));
-                fixAction(name, args, tools);
-                String ask = needsClarification(name, args, userText);
-                if (ask != null) {
-                    d.toolIds.clear(); d.params.clear();
-                    d.clarification = ask;
-                    return d;
-                }
-                args = guard(name, args, userText);
-                if (args == null) return null;
-                d.toolIds.add(name);
-                d.params.add(args);
+            Object[] parsed = parseCompact(line, tools);
+            if (parsed == null) return null;
+            String name = (String) parsed[0];
+            JSONObject args = (JSONObject) parsed[1];
+            dropCopiedValues(name, args, userText);
+            fixAction(name, args, null);
+            String ask = needsClarification(name, args, userText);
+            if (ask == null && name.equals("alarm") && "add".equals(args.optString("action", "add"))
+                    && !args.has("hour") && !HOUR.matcher(fold(userText)).find()) {
+                ask = "À quelle heure ?";
             }
+            if (ask != null) { d.clarification = ask; return d; }
+            args = guard(name, args, userText);
+            if (args == null) return null;
+            d.toolIds.add(name);
+            d.params.add(args);
             return d;
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** Nom du cache : change si le prompt fixe ou les schémas d'outils changent. */
-    private static String cacheName(String key, JSONArray msgs, JSONArray tools) throws Exception {
-        String prefix = msgs.getJSONObject(0).toString() + tools.toString();
-        return key.replace('+', '_') + "-p2-" + Integer.toHexString(prefix.hashCode());
+    /** Nom du cache : change si le prompt fixe (système + exemples) change. */
+    private static String cacheName(String key, JSONArray msgs) throws Exception {
+        StringBuilder prefix = new StringBuilder();
+        for (int i = 0; i < msgs.length() - 1; i++) prefix.append(msgs.getJSONObject(i).toString());
+        return key.replace('+', '_') + "-c1-" + Integer.toHexString(prefix.toString().hashCode());
     }
 
     /**
-     * Démarre le serveur et recharge tous les caches déjà calculés (bloquant, hors UI).
+     * Démarre le serveur et nettoie les caches obsolètes (bloquant, hors UI).
      * Appelé à l'ouverture de la discussion : le chargement (~7 s) se fait pendant la frappe.
      */
     public static void prewarm(LocalLlmServer server, ToolRegistry registry) {
         if (server == null || registry == null || !server.isAvailable()) return;
         if (!server.ensureStarted()) return;
         try {
-            JSONArray msgs = messages("x");
             java.util.Set<String> keep = new java.util.HashSet<>();
             for (String key : GROUPS) {
-                JSONArray tools = new JSONArray();
-                for (String id : key.split("\\+")) {
-                    Tool t = registry.findById(id);
-                    if (t != null) tools.put(OpenAiToolSchemaBuilder.toOpenAiTool(t));
-                }
-                if (tools.length() > 0) keep.add(LocalLlmServer.fileFor(cacheName(key, msgs, tools)));
+                List<String> tools = compactTools(java.util.Arrays.asList(key.split("\\+")), registry);
+                if (tools.isEmpty()) continue;
+                keep.add(LocalLlmServer.fileFor(cacheName(key, compactMessages(tools, "x"))));
             }
             server.pruneCaches(keep);   // anciens formats / prompts modifiés
         } catch (Exception ignored) {
@@ -342,7 +492,7 @@ public final class LocalCommandRouter {
         JSONArray allowed = null;
         String[] known = KNOWN_ACTIONS.get(tool);
         if (known != null) allowed = new JSONArray(java.util.Arrays.asList(known));
-        for (int i = 0; i < tools.length(); i++) {
+        for (int i = 0; tools != null && i < tools.length(); i++) {
             JSONObject f = tools.getJSONObject(i).getJSONObject("function");
             if (!tool.equals(f.optString("name"))) continue;
             JSONObject props = f.optJSONObject("parameters") != null
