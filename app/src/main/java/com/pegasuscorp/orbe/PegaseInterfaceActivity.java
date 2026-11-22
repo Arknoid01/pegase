@@ -391,6 +391,8 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         super.onResume();
         ChatProgressNotifier.onInterfaceResumed(this);
         PegaseSession.get(this).init(new SessionContext(Channel.TEXT, false));
+        // Modèle local chargé pendant que l'utilisateur tape (≈7 s cachées)
+        PegaseSession.get(this).prewarmLocalLlm();
         FloatingOrbService.hide(this);
         updateSubtitle();
         subtitleHandler.removeCallbacks(subtitleTick);

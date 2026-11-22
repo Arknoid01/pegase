@@ -12,5 +12,13 @@
                 <action android:name="com.pegasuscorp.orbe.action.RUN_DIAG_SUITE" />
             </intent-filter>
         </receiver>
+
+        <!-- Phrase de test envoyée à Pégase comme si elle était tapée dans la discussion
+             (am broadcast -n …/.diag.DebugChatReceiver avec l'extra « text »).
+             Debug uniquement, même raison que ci-dessus. -->
+        <receiver
+            android:name="com.pegasuscorp.orbe.diag.DebugChatReceiver"
+            android:exported="true"
+            android:enabled="true" />
     </application>
 </manifest>

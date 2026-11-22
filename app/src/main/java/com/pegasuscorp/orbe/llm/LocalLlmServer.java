@@ -50,8 +50,6 @@ public final class LocalLlmServer {
     private Process process;
     private ScheduledFuture<?> idleStop;
     private volatile boolean ready;
-    /** Fichier de cache actuellement chargé dans chaque slot (null = inconnu). */
-    private final String[] slotLoaded = new String[SLOT_COUNT];
 
     private LocalLlmServer(Context ctx) {
         this.app = ctx.getApplicationContext();
@@ -154,39 +152,76 @@ public final class LocalLlmServer {
     }
 
     /**
-     * Requête épinglée sur le slot du groupe {@code slot} ; le préfixe (système + outils) est
-     * rechargé depuis le disque s'il a déjà été calculé ({@code cacheName}), sinon calculé puis
-     * sauvegardé. {@code slot} &lt; 0 : slot libre, sans persistance.
+     * Requête épinglée sur le slot du groupe {@code slot}.
+     *
+     * <p>Qwen3.5 est hybride (couches récurrentes) : un état ne peut pas « reculer ». On garde
+     * donc sur disque l'état arrêté PILE à la fin du préfixe fixe (système + outils + exemples,
+     * jusqu'au jeton {@code <|im_start|>} du tour utilisateur), et on le recharge avant CHAQUE
+     * requête (~50 ms) : seuls la phrase et l'en-tête sont lus (~20–40 jetons).
+     *
+     * @param templateBody messages + tools (comme la requête) pour rendre le préfixe exact.
      */
-    public JSONObject chatInSlot(JSONObject body, int slot, String cacheName, int readTimeoutMs)
-            throws Exception {
+    public JSONObject chatInSlot(JSONObject body, int slot, String cacheName,
+            JSONObject templateBody, int readTimeoutMs) throws Exception {
         if (slot < 0 || slot >= SLOT_COUNT || cacheName == null) return chat(body, readTimeoutMs);
-        String file = cacheName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".bin";
-        boolean onDisk = new File(slotsDir(), file).isFile();
-        synchronized (this) {
-            if (onDisk && !file.equals(slotLoaded[slot])) {
-                try {
-                    HttpJson.postJson(baseUrl() + "/slots/" + slot + "?action=restore", null,
-                            new JSONObject().put("filename", file), 3_000, 20_000);
-                    slotLoaded[slot] = file;
-                } catch (Exception e) {
-                    Log.w(TAG, "restore " + file + " : " + e.getMessage());
-                }
-            }
-        }
+        if (ensurePrefix(slot, cacheName, templateBody)) restore(slot, cacheName);
         body.put("id_slot", slot);
         body.put("cache_prompt", true);
-        JSONObject resp = chat(body, readTimeoutMs);
-        if (!onDisk) {
-            try {
-                HttpJson.postJson(baseUrl() + "/slots/" + slot + "?action=save", null,
-                        new JSONObject().put("filename", file), 3_000, 20_000);
-                synchronized (this) { slotLoaded[slot] = file; }
-            } catch (Exception e) {
-                Log.w(TAG, "save " + file + " : " + e.getMessage());
+        return chat(body, readTimeoutMs);
+    }
+
+    /** Crée le fichier de préfixe s'il manque (≈10–15 s la toute première fois). */
+    public synchronized boolean ensurePrefix(int slot, String cacheName, JSONObject templateBody) {
+        String file = slotFile(cacheName);
+        if (new File(slotsDir(), file).isFile()) return true;
+        try {
+            touch();
+            JSONObject rendered = HttpJson.postJson(baseUrl() + "/apply-template", null,
+                    templateBody, 3_000, 20_000);
+            String prompt = rendered.optString("prompt", "");
+            int cut = prompt.lastIndexOf("<|im_start|>user");
+            if (cut < 0) return false;
+            String prefix = prompt.substring(0, cut + "<|im_start|>".length());
+            HttpJson.postJson(baseUrl() + "/completion", null, new JSONObject()
+                    .put("prompt", prefix).put("n_predict", 0)
+                    .put("id_slot", slot).put("cache_prompt", true), 3_000, 120_000);
+            HttpJson.postJson(baseUrl() + "/slots/" + slot + "?action=save", null,
+                    new JSONObject().put("filename", file), 3_000, 30_000);
+            Log.i(TAG, "préfixe sauvegardé : " + file);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "préfixe " + file + " : " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void restore(int slot, String cacheName) {
+        try {
+            HttpJson.postJson(baseUrl() + "/slots/" + slot + "?action=restore", null,
+                    new JSONObject().put("filename", slotFile(cacheName)), 3_000, 20_000);
+        } catch (Exception e) {
+            Log.w(TAG, "restore " + cacheName + " : " + e.getMessage());
+        }
+    }
+
+    /** Supprime les fichiers de cache qui ne sont plus dans {@code keep} (prompt ou outils modifiés). */
+    public void pruneCaches(java.util.Set<String> keep) {
+        File[] files = slotsDir().listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (!keep.contains(f.getName())) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
             }
         }
-        return resp;
+    }
+
+    static String fileFor(String cacheName) {
+        return slotFile(cacheName);
+    }
+
+    private static String slotFile(String cacheName) {
+        return cacheName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".bin";
     }
 
     /** POST /v1/chat/completions. Bloquant. */
@@ -222,7 +257,6 @@ public final class LocalLlmServer {
 
     private void stopProcess() {
         ready = false;
-        java.util.Arrays.fill(slotLoaded, null);
         if (process != null) {
             try { process.destroy(); } catch (Exception ignored) {}
             process = null;

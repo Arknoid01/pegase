@@ -63,6 +63,145 @@ public final class LocalCommandRouter {
 
     private LocalCommandRouter() {}
 
+    // ======================================================================
+    // Analyseur instantané (sans modèle) pour les formulations évidentes.
+    // Ne renvoie une décision que s'il est sûr ; sinon null → modèle local.
+    // ======================================================================
+
+    private static final String[][] NUMBER_WORDS = {
+            {"une", "1"}, {"un", "1"}, {"deux", "2"}, {"trois", "3"}, {"quatre", "4"},
+            {"cinq", "5"}, {"six", "6"}, {"sept", "7"}, {"huit", "8"}, {"neuf", "9"},
+            {"dix", "10"}, {"onze", "11"}, {"douze", "12"}, {"quinze", "15"},
+            {"vingt", "20"}, {"trente", "30"}, {"quarante-cinq", "45"}, {"quarante", "40"},
+            {"cinquante", "50"}, {"soixante", "60"},
+    };
+    private static final Pattern Q_TIMER = Pattern.compile(
+            "^(?:(?:mets?|lance|demarre|programme|fais)(?:-moi)?\\s+)?(?:un|le|1)?\\s*(?:minuteur|chrono|timer|compte a rebours)"
+                    + "\\s*(?:de|pour|dans|sur)?\\s*(\\d+)\\s*(h|heures?|min|minutes?|s|sec|secondes?)"
+                    + "(?:\\s*(?:et\\s+)?(\\d+)\\s*(min|minutes?|s|sec|secondes?)?)?"
+                    + "(?:\\s+pour\\s+(?:les\\s+|le\\s+|la\\s+|l')?([a-z' -]{2,30}))?\\s*[.!]?$");
+    private static final Pattern Q_ALARM = Pattern.compile(
+            "^(?:reveille[- ]moi|(?:mets?|programme|regle)(?:-moi)?\\s+(?:(?:un|1)\\s+reveil|(?:une|1)\\s+alarme)|reveil|alarme)"
+                    + "\\s*(?:pour\\s+)?(demain\\s+(?:matin\\s+)?)?(?:a\\s+)?(\\d{1,2})\\s*h\\s*(\\d{2})?(.*)$");
+    private static final Pattern Q_NOTE = Pattern.compile(
+            "^(?:note|noter|prends note|ecris)\\s+(?:que\\s+|qu')?(.{3,})$");
+    private static final Pattern Q_LIST_ADD = Pattern.compile(
+            "^ajoute\\s+(.{2,}?)\\s+(?:a|dans|sur)\\s+(?:ma|la|mes)\\s+(?:liste|notes?)(?:\\s+de courses)?\\s*[.!]?$");
+    private static final Pattern Q_MEMORY = Pattern.compile(
+            "^(?:retiens|souviens-toi|memorise)\\s+(?:bien\\s+)?(?:que\\s+|qu')?(.{3,})$");
+    private static final Pattern Q_MUSIC_PLAY = Pattern.compile(
+            "^(?:mets?|joue|lance)\\s+(?:du|de la|des|un peu de)\\s+(.{2,}?)(?:\\s+sur spotify)?\\s*[.!]?$");
+    private static final Pattern Q_AGENDA = Pattern.compile(
+            "(prevu|rendez[- ]?vous|\\brdv\\b|agenda|au programme|j'ai quoi)");
+
+    /** Décision immédiate sans modèle, ou null. {@code latencyMs} = 0. */
+    public static Decision quickParse(String userText) {
+        if (userText == null) return null;
+        String orig = userText.trim();
+        String fk = foldKeepLength(orig);           // même longueur que orig (extraits de texte)
+        String fn = numbersToDigits(fold(orig));    // chiffres pour durées / heures
+        try {
+            Matcher m = Q_TIMER.matcher(fn);
+            if (m.matches()) {
+                String dur = m.group(1) + " " + m.group(2)
+                        + (m.group(3) != null ? " " + m.group(3) + " " + (m.group(4) != null ? m.group(4) : "min") : "");
+                JSONObject a = new JSONObject().put("action", "start").put("duration", dur.trim());
+                if (m.group(5) != null) a.put("label", m.group(5).trim());
+                return decision("timer", a);
+            }
+            m = Q_ALARM.matcher(fn);
+            if (m.matches()) {
+                int h = Integer.parseInt(m.group(2));
+                int mi = m.group(3) != null ? Integer.parseInt(m.group(3)) : 0;
+                String rest = m.group(4) != null ? m.group(4) : "";
+                JSONObject a = new JSONObject().put("action", "add");
+                if (rest.matches(".*\\b(du soir|de l'apres-midi)\\b.*") && h < 12) h += 12;
+                if (rest.matches(".*(du lundi au vendredi|en semaine).*")) {
+                    a.put("days", new JSONArray(new int[]{1, 2, 3, 4, 5}));
+                } else if (rest.matches(".*tous les jours.*")) {
+                    a.put("days", new JSONArray(new int[]{1, 2, 3, 4, 5, 6, 7}));
+                } else if (rest.matches(".*(le week-?end).*")) {
+                    a.put("days", new JSONArray(new int[]{6, 7}));
+                }
+                String leftover = rest.replaceAll("du lundi au vendredi|en semaine|tous les jours|le week-?end"
+                        + "|demain|du matin|du soir|de l'apres-midi|pile|s'il te plait|stp|[.,!]", "").trim();
+                if (h > 23 || mi > 59 || !leftover.isEmpty()) return null;
+                a.put("hour", h).put("minute", mi);
+                return decision("alarm", a);
+            }
+            if (!fk.endsWith("?")) {
+                m = Q_LIST_ADD.matcher(fk);
+                if (m.matches()) return decision("notepad", new JSONObject()
+                        .put("action", "add").put("text", capitalize(orig.substring(m.start(1), m.end(1)))));
+                m = Q_NOTE.matcher(fk);
+                if (m.matches() && !fk.startsWith("note mes") && !fk.contains("mes notes")) {
+                    return decision("notepad", new JSONObject()
+                            .put("action", "add").put("text", capitalize(stripEnd(orig.substring(m.start(1))))));
+                }
+                m = Q_MEMORY.matcher(fk);
+                if (m.matches()) return decision("memory", new JSONObject()
+                        .put("action", "add").put("text", capitalize(stripEnd(orig.substring(m.start(1))))));
+                if (fk.matches("^(pause|mets? (la musique )?en pause|stoppe? la musique)[.!]?$")) {
+                    return decision("spotify", new JSONObject().put("action", "pause"));
+                }
+                if (fk.matches("^((chanson|musique|morceau|titre) suivante?|suivant)[.!]?$")) {
+                    return decision("spotify", new JSONObject().put("action", "next"));
+                }
+                m = Q_MUSIC_PLAY.matcher(fk);
+                if (m.matches() && !fk.matches(".*\\b(liste|notes?|courses|minuteur|reveil|alarme|agenda)\\b.*")) return decision("spotify", new JSONObject()
+                        .put("action", "play").put("query", orig.substring(m.start(1), m.end(1))));
+            }
+            // Lecture d'agenda : question + mot d'agenda + période claire, sans verbe d'ajout
+            boolean question = fk.endsWith("?") || fk.startsWith("qu'") || fk.startsWith("j'ai")
+                    || fk.startsWith("est-ce");
+            if (question && Q_AGENDA.matcher(fk).find()
+                    && !fk.matches(".*\\b(ajoute|mets|cree|note|annule|supprime|programme (un|une|le|la))\\b.*")) {
+                String act = fk.contains("demain") ? "tomorrow"
+                        : fk.contains("cette semaine") ? "week"
+                        : (fk.contains("aujourd'hui") || fk.contains("ce soir")) ? "today" : null;
+                if (act != null) return decision("agenda", new JSONObject().put("action", act));
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static Decision decision(String tool, JSONObject args) {
+        Decision d = new Decision();
+        d.toolIds.add(tool);
+        d.params.add(args);
+        d.latencyMs = 0;
+        return d;
+    }
+
+    /** Minuscules sans accents, MÊME longueur que l'original (pour extraire des sous-chaînes). */
+    static String foldKeepLength(String s) {
+        StringBuilder b = new StringBuilder(s.length());
+        for (char c : s.toLowerCase(Locale.FRENCH).toCharArray()) {
+            if (c == '’') { b.append('\''); continue; }
+            String n = Normalizer.normalize(String.valueOf(c), Normalizer.Form.NFD);
+            b.append(n.isEmpty() ? c : n.charAt(0));
+        }
+        return b.toString();
+    }
+
+    private static String numbersToDigits(String f) {
+        String out = " " + f + " ";
+        for (String[] nw : NUMBER_WORDS) {
+            out = out.replaceAll("(?<=[\\s'])" + nw[0] + "(?=\\s)", nw[1]);
+        }
+        return out.trim();
+    }
+
+    private static String stripEnd(String s) {
+        return s.replaceAll("[\\s.!]+$", "");
+    }
+
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
     /** Identifiants d'outils pertinents pour la phrase (vide = pas une commande simple). */
     public static List<String> route(String userText) {
         String f = fold(userText);
@@ -100,9 +239,7 @@ public final class LocalCommandRouter {
             int slot = GROUPS.indexOf(key);
             String cacheName = null;
             if (slot >= 0) {
-                // Le nom change si le prompt fixe ou les schémas d'outils changent
-                String prefix = msgs.getJSONObject(0).toString() + tools.toString();
-                cacheName = key.replace('+', '_') + "-" + Integer.toHexString(prefix.hashCode());
+                cacheName = cacheName(key, msgs, tools);
             } else {
                 slot = LocalLlmServer.SLOT_COUNT - 1;    // combinaison rare : slot libre
             }
@@ -115,8 +252,10 @@ public final class LocalCommandRouter {
                     .put("max_tokens", 160)
                     .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
             if (cacheName == null) body.put("id_slot", slot);
+            JSONObject templateBody = new JSONObject().put("messages", msgs).put("tools", tools)
+                    .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
             JSONObject resp = cacheName != null
-                    ? server.chatInSlot(body, slot, cacheName, 45_000)
+                    ? server.chatInSlot(body, slot, cacheName, templateBody, 45_000)
                     : server.chat(body, 45_000);
             JSONObject msg = resp.getJSONArray("choices").getJSONObject(0).getJSONObject("message");
             Decision d = new Decision();
@@ -151,6 +290,35 @@ public final class LocalCommandRouter {
             return d;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** Nom du cache : change si le prompt fixe ou les schémas d'outils changent. */
+    private static String cacheName(String key, JSONArray msgs, JSONArray tools) throws Exception {
+        String prefix = msgs.getJSONObject(0).toString() + tools.toString();
+        return key.replace('+', '_') + "-p2-" + Integer.toHexString(prefix.hashCode());
+    }
+
+    /**
+     * Démarre le serveur et recharge tous les caches déjà calculés (bloquant, hors UI).
+     * Appelé à l'ouverture de la discussion : le chargement (~7 s) se fait pendant la frappe.
+     */
+    public static void prewarm(LocalLlmServer server, ToolRegistry registry) {
+        if (server == null || registry == null || !server.isAvailable()) return;
+        if (!server.ensureStarted()) return;
+        try {
+            JSONArray msgs = messages("x");
+            java.util.Set<String> keep = new java.util.HashSet<>();
+            for (String key : GROUPS) {
+                JSONArray tools = new JSONArray();
+                for (String id : key.split("\\+")) {
+                    Tool t = registry.findById(id);
+                    if (t != null) tools.put(OpenAiToolSchemaBuilder.toOpenAiTool(t));
+                }
+                if (tools.length() > 0) keep.add(LocalLlmServer.fileFor(cacheName(key, msgs, tools)));
+            }
+            server.pruneCaches(keep);   // anciens formats / prompts modifiés
+        } catch (Exception ignored) {
         }
     }
 
@@ -231,6 +399,9 @@ public final class LocalCommandRouter {
             }
             case "timer": {
                 if (!a.has("action")) a.put("action", "start");
+                a.remove("confirm");
+                a.remove("when");     // souvent l'heure du message recopiée
+                if (a.has("label") && !f.contains(fold(a.optString("label")).split(" ")[0])) a.remove("label");
                 if ("start".equals(a.optString("action"))) {
                     // Le code fait foi : « 30 sec » ne devient jamais 30 minutes.
                     Matcher m = DURATION.matcher(f);
@@ -288,6 +459,7 @@ public final class LocalCommandRouter {
                 + "de chaque demande. "
                 + "Utilise un outil quand c'est utile ; écris les dates, heures et durées comme "
                 + "l'utilisateur les a dites (« jeudi 14h30 », « 12 minutes »). "
+                + "Ne remplis que les paramètres nécessaires, rien d'inventé. "
                 + "Si la demande est trop vague pour agir, pose UNE question courte. "
                 + "Réponds en français, brièvement.";
         return new JSONArray()

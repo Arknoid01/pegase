@@ -901,6 +901,16 @@ public class PegaseSession {
     private final java.util.concurrent.ExecutorService localLlmExecutor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
 
+    /** Démarre le modèle local et recharge ses caches en arrière-plan (ouverture de la discussion). */
+    public void prewarmLocalLlm() {
+        if (appContext == null) return;
+        final com.pegasuscorp.orbe.llm.LocalLlmServer server =
+                com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext);
+        if (!server.isAvailable()) return;
+        localLlmExecutor.execute(() ->
+                com.pegasuscorp.orbe.llm.LocalCommandRouter.prewarm(server, toolRegistry));
+    }
+
     /**
      * Commande simple → Qwen3.5-2B local ({@link com.pegasuscorp.orbe.llm.LocalCommandRouter}).
      * @return true si le tour est pris en charge (le repli cloud éventuel est fait ici).
@@ -908,6 +918,19 @@ public class PegaseSession {
     private boolean tryLocalLlmShortCircuit(ConversationManager conv, String userText,
             String payload, String displayText, SessionObserver obs) {
         if (appContext == null || userText == null || userText.trim().isEmpty()) return false;
+        if (!com.pegasuscorp.orbe.llm.LocalLlmServer.isEnabled(appContext)) return false;
+
+        // 1) Formulation évidente → outil direct, sans modèle (< 0,1 s)
+        com.pegasuscorp.orbe.llm.LocalCommandRouter.Decision quick =
+                com.pegasuscorp.orbe.llm.LocalCommandRouter.quickParse(userText);
+        if (quick != null && allowToolExecution(obs)) {
+            com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser("Local/analyseur");
+            Trace.error("local_llm", "analyseur : " + quick.toolIds + " " + quick.params);
+            executeToolInternal(quick.toolIds.get(0), quick.params.get(0), userText.trim(), obs, true);
+            return true;
+        }
+
+        // 2) Sinon modèle local (Qwen) si disponible
         final com.pegasuscorp.orbe.llm.LocalLlmServer server =
                 com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext);
         if (!server.isAvailable()) return false;
