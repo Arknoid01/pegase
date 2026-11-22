@@ -127,7 +127,7 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
         com.pegasuscorp.orbe.llm.LocalLlmServer local =
                 com.pegasuscorp.orbe.llm.LocalLlmServer.get(this);
         boolean localOn = com.pegasuscorp.orbe.llm.LocalLlmServer.isEnabled(this);
-        boolean modelOk = local.modelFile().isFile();
+        boolean modelOk = local.isModelComplete();
         contentHost.addView(hint("Commandes en local (" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL
                 + ") : " + (localOn ? "activées" : "désactivées")
                 + (modelOk ? "" : " — modèle absent (" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_FILE + ")")
@@ -138,6 +138,14 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
             com.pegasuscorp.orbe.llm.LocalLlmServer.setEnabled(this, !localOn);
             rebuildList();
         });
+        if (!modelOk) {
+            addActionButton("Télécharger le modèle local (≈1,3 Go, Wi-Fi)", () -> {
+                long id = local.startModelDownload();
+                toast(id >= 0
+                        ? "Téléchargement lancé — suis-le dans les notifications."
+                        : "Téléchargement impossible.");
+            });
+        }
 
         List<VoiceIntentLearnStore.LearnedIntent> entries = store.getEntries();
         if (entries.isEmpty()) {

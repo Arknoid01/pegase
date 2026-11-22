@@ -74,8 +74,56 @@ public final class LocalLlmServer {
         if (!on) get(ctx).stop();
     }
 
+    public static final String MODEL_URL =
+            "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/" + MODEL_FILE;
+    /** Taille attendue (contrôle d'un téléchargement incomplet). */
+    private static final long MODEL_MIN_BYTES = 1_200_000_000L;
+
+    /** Modèle dans files/models (copie manuelle) ou dans le dossier externe de l'appli (bouton). */
     public File modelFile() {
-        return new File(ModelStore.modelsDir(app), MODEL_FILE);
+        File internal = new File(ModelStore.modelsDir(app), MODEL_FILE);
+        if (internal.isFile()) return internal;
+        return downloadTarget();
+    }
+
+    /** Destination du bouton « Télécharger » (Android/data/…/files/models). */
+    public File downloadTarget() {
+        File ext = app.getExternalFilesDir("models");
+        return new File(ext != null ? ext : ModelStore.modelsDir(app), MODEL_FILE);
+    }
+
+    public boolean isModelComplete() {
+        File f = modelFile();
+        return f.isFile() && f.length() >= MODEL_MIN_BYTES;
+    }
+
+    /**
+     * Lance le téléchargement du modèle (~1,3 Go) via le DownloadManager d'Android :
+     * notification de progression système, reprise si l'appli est fermée.
+     * @return id du téléchargement, ou -1.
+     */
+    public long startModelDownload() {
+        try {
+            File target = downloadTarget();
+            if (target.isFile() && target.length() < MODEL_MIN_BYTES) {
+                //noinspection ResultOfMethodCallIgnored
+                target.delete();                     // reste d'un essai interrompu
+            }
+            android.app.DownloadManager dm = (android.app.DownloadManager)
+                    app.getSystemService(Context.DOWNLOAD_SERVICE);
+            android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(
+                    android.net.Uri.parse(MODEL_URL))
+                    .setTitle("Modèle local Pégase (" + MODEL_LABEL + ")")
+                    .setDescription("≈1,3 Go — commandes traitées sur le téléphone")
+                    .setNotificationVisibility(
+                            android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalFilesDir(app, "models", MODEL_FILE)
+                    .setAllowedOverMetered(false);           // Wi-Fi seulement
+            return dm.enqueue(req);
+        } catch (Exception e) {
+            Log.e(TAG, "download", e);
+            return -1;
+        }
     }
 
     private File slotsDir() {
@@ -91,7 +139,7 @@ public final class LocalLlmServer {
 
     /** Activé + binaire + modèle présents. */
     public boolean isAvailable() {
-        return isEnabled(app) && binary().canExecute() && modelFile().isFile();
+        return isEnabled(app) && binary().canExecute() && isModelComplete();
     }
 
     public String baseUrl() {
