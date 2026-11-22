@@ -108,6 +108,21 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
         addActionButton("Exporter le corpus (JSON)", this::exportCorpus);
         addActionButton("Tout effacer", this::confirmClearAll);
 
+        // Journal d'entraînement (distillation vers un modèle local)
+        com.pegasuscorp.orbe.diag.TrainingJournal.init(this);
+        boolean journalOn = com.pegasuscorp.orbe.diag.TrainingJournal.isEnabled(this);
+        contentHost.addView(hint("Journal d'entraînement : " + (journalOn ? "activé" : "désactivé")
+                + ". Garde chaque phrase avec les outils appelés et la réponse, pour entraîner "
+                + "un modèle local. Reste sur le téléphone, jamais effacé automatiquement."));
+        addActionButton(journalOn
+                ? "Désactiver le journal d'entraînement"
+                : "Activer le journal d'entraînement", () -> {
+            com.pegasuscorp.orbe.diag.TrainingJournal.setEnabled(this, !journalOn);
+            rebuildList();
+        });
+        addActionButton("Exporter le journal d'entraînement", this::exportTrainingJournal);
+        addActionButton("Effacer le journal d'entraînement", this::confirmClearTrainingJournal);
+
         List<VoiceIntentLearnStore.LearnedIntent> entries = store.getEntries();
         if (entries.isEmpty()) {
             contentHost.addView(emptyLabel("Aucune formulation apprise pour l'instant.\n"
@@ -181,6 +196,37 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
                     store.removeAt(index);
                     rebuildList();
                     toast("Formulation supprimée.");
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void exportTrainingJournal() {
+        new Thread(() -> {
+            String msg;
+            try {
+                java.io.File dir = getExternalFilesDir(null);
+                if (dir == null) dir = getFilesDir();
+                java.io.File out = new java.io.File(dir, "pegase-training-journal.jsonl");
+                com.pegasuscorp.orbe.diag.TrainingJournal.exportTo(out);
+                int n = com.pegasuscorp.orbe.diag.TrainingJournal.count();
+                msg = n + " tour" + (n > 1 ? "s" : "") + " exporté" + (n > 1 ? "s" : "")
+                        + " : " + out.getAbsolutePath();
+            } catch (Exception e) {
+                msg = "Export impossible.";
+            }
+            final String m = msg;
+            runOnUiThread(() -> toast(m));
+        }).start();
+    }
+
+    private void confirmClearTrainingJournal() {
+        new MaterialAlertDialogBuilder(this, R.style.Theme_Orbe_DarkDialog)
+                .setTitle("Effacer le journal d'entraînement ?")
+                .setMessage("Toutes les phrases enregistrées pour l'entraînement seront supprimées.")
+                .setPositiveButton("Effacer", (d, w) -> {
+                    com.pegasuscorp.orbe.diag.TrainingJournal.clear();
+                    toast("Journal d'entraînement effacé.");
                 })
                 .setNegativeButton("Annuler", null)
                 .show();

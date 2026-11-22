@@ -132,6 +132,7 @@ public final class ReasoningTurnCollector {
     }
 
     public void noteToolStart(String toolId, JSONObject params) {
+        TrainingJournal.noteToolStart(toolId, params);
         pendingToolId = toolId != null ? toolId.trim() : "";
         pendingParamsPreview = previewParams(pendingToolId, params);
         pendingStartedAt = System.currentTimeMillis();
@@ -142,6 +143,7 @@ public final class ReasoningTurnCollector {
     }
 
     public void noteToolEnd(String toolId, boolean ok, long latencyMs, String resultOrError) {
+        TrainingJournal.noteToolEnd(toolId, ok, resultOrError);
         String id = toolId != null ? toolId.trim() : pendingToolId;
         if (id == null || id.isEmpty()) id = "unknown";
         String params = id.equals(pendingToolId) ? pendingParamsPreview : "";

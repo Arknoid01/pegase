@@ -1260,6 +1260,7 @@ public class PegaseSession {
             beginTurnReasoning(seed != null ? seed : "");
         }
         if (turnReasoning != null) {
+            com.pegasuscorp.orbe.diag.TrainingJournal.noteRouting(localRouter);
             turnReasoning.noteToolStart(toolId, safeParams);
         }
         final long startedAt = System.currentTimeMillis();
@@ -1962,6 +1963,7 @@ public class PegaseSession {
         String msg = userMessage != null ? userMessage : "";
         currentTurnIntent = ContextAnalyzer.analyze(appContext, msg, true);
         turnReasoning = new ReasoningTurnCollector(currentTurnIntent.intent);
+        com.pegasuscorp.orbe.diag.TrainingJournal.begin(appContext, msg, currentTurnIntent.intent);
         if (appContext == null) return;
         try {
             // Même sélection que le prompt — pas un 2e scoring divergé
@@ -1983,6 +1985,7 @@ public class PegaseSession {
         long latency = conv != null ? conv.lastLlmLatencyMs() : 0L;
         int promptChars = conv != null ? conv.lastPromptChars() : 0;
         ReasoningCard card = turnReasoning.build(reply.trim(), backend, latency, promptChars);
+        com.pegasuscorp.orbe.diag.TrainingJournal.end(reply.trim(), backend);
         // Indexer sur le texte brut ET la version affichée/stockée (tronquée)
         ReasoningStore.put(reply.trim(), card);
         String stored = com.pegasuscorp.orbe.memory.ConversationHistorySanitizer
