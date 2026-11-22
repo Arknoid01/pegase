@@ -369,7 +369,8 @@ public final class LocalCommandRouter {
         List<String> drop = new ArrayList<>();
         while (it.hasNext()) {
             String k = it.next();
-            if (k.equals("action") || k.equals("start") || k.equals("duration")) continue;
+            // « start » vérifié aussi : sinon l'heure du message (« Nous sommes le… ») est recopiée
+            if (k.equals("action") || k.equals("duration")) continue;
             Object v = a.opt(k);
             if (!(v instanceof String)) continue;
             boolean seen = false;
@@ -434,6 +435,10 @@ public final class LocalCommandRouter {
             if (ask == null && name.equals("alarm") && "add".equals(args.optString("action", "add"))
                     && !args.has("hour") && !HOUR.matcher(fold(userText)).find()) {
                 ask = "À quelle heure ?";
+            }
+            if (ask == null && name.equals("agenda") && "add".equals(args.optString("action"))
+                    && args.optString("start", "").trim().isEmpty()) {
+                ask = "C'est pour quand ?";
             }
             if (ask != null) { d.clarification = ask; return d; }
             args = guard(name, args, userText);

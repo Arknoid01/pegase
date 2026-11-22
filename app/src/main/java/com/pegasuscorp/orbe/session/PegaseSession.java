@@ -205,10 +205,17 @@ public class PegaseSession {
         queues.drainSteeringInto(activeAgenticChain);
     }
 
+    /** Dernier tour terminé : texte, heure, traité en local ? (suivi de conversation) */
+    private String prevReply = "";
+    private long prevReplyAt;
+    private boolean prevWasLocal;
+    private boolean currentTurnLocal;
+
     private void beginTurn() {
         turnInFlight = true;
         turnChannel = sessionContext.channel;
         lastTurnReplyText = "";
+        currentTurnLocal = false;
         if (turnChannel == Channel.TEXT && appContext != null) {
             com.pegasuscorp.orbe.ChatProgressNotifier.onTurnStart(appContext);
         }
@@ -220,6 +227,9 @@ public class PegaseSession {
     /** Fin de tour — applique un {@link #init} différé s'il y en a un. */
     private synchronized void endTurn() {
         if (!turnInFlight) return;
+        prevReply = lastTurnReplyText != null ? lastTurnReplyText : "";
+        prevReplyAt = System.currentTimeMillis();
+        prevWasLocal = currentTurnLocal;
         if (turnChannel == Channel.TEXT && appContext != null) {
             com.pegasuscorp.orbe.ChatProgressNotifier.onTurnEnd(appContext, lastTurnReplyText);
         }
@@ -915,18 +925,53 @@ public class PegaseSession {
      * Commande simple → Qwen3.5-2B local ({@link com.pegasuscorp.orbe.llm.LocalCommandRouter}).
      * @return true si le tour est pris en charge (le repli cloud éventuel est fait ici).
      */
+    /** Question posée par le chemin local, en attente de la réponse de l'utilisateur. */
+    private String localPendingText;
+    private long localPendingAt;
+    private static final long FOLLOW_UP_WINDOW_MS = 3L * 60 * 1000;
+    private static final java.util.regex.Pattern CANCEL_FOLLOW_UP = java.util.regex.Pattern.compile(
+            "^(non|laisse tomber|annule|oublie|rien|stop|c'est bon|non merci)\\b.*",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     private boolean tryLocalLlmShortCircuit(ConversationManager conv, String userText,
             String payload, String displayText, SessionObserver obs) {
         if (appContext == null || userText == null || userText.trim().isEmpty()) return false;
         if (!com.pegasuscorp.orbe.llm.LocalLlmServer.isEnabled(appContext)) return false;
+        final String typed = userText.trim();
+        long now = System.currentTimeMillis();
+
+        // 0) Suivi de conversation
+        String text = typed;
+        if (localPendingText != null && now - localPendingAt < FOLLOW_UP_WINDOW_MS) {
+            String pending = localPendingText;
+            localPendingText = null;
+            java.util.List<String> own = com.pegasuscorp.orbe.llm.LocalCommandRouter.route(typed);
+            java.util.List<String> before = com.pegasuscorp.orbe.llm.LocalCommandRouter.route(pending);
+            if (CANCEL_FOLLOW_UP.matcher(typed).matches()) {
+                localReply(conv, typed, "D'accord, j'annule.", obs);
+                return true;
+            }
+            if (own.isEmpty() || before.containsAll(own)) {
+                // Réponse à la question locale : « mets un réveil » + « 7h30 »
+                text = pending + " " + typed;
+                Trace.error("local_llm", "suivi : " + text);
+            }   // sinon : nouvelle demande, la question est abandonnée
+        } else if (now - prevReplyAt < FOLLOW_UP_WINDOW_MS && !prevWasLocal
+                && prevReply != null && prevReply.trim().endsWith("?")
+                && (com.pegasuscorp.orbe.llm.LocalCommandRouter.route(typed).isEmpty()
+                    || typed.toLowerCase(java.util.Locale.FRENCH).matches("^(oui|non|ok|d'accord|vas-y|si)\\b.*"))) {
+            // Le cloud a posé une question : sa réponse lui revient (ne pas couper sa conversation)
+            return false;
+        }
 
         // 1) Formulation évidente → outil direct, sans modèle (< 0,1 s)
         com.pegasuscorp.orbe.llm.LocalCommandRouter.Decision quick =
-                com.pegasuscorp.orbe.llm.LocalCommandRouter.quickParse(userText);
+                com.pegasuscorp.orbe.llm.LocalCommandRouter.quickParse(text);
         if (quick != null && allowToolExecution(obs)) {
+            currentTurnLocal = true;
             com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser("Local/analyseur");
             Trace.error("local_llm", "analyseur : " + quick.toolIds + " " + quick.params);
-            executeToolInternal(quick.toolIds.get(0), quick.params.get(0), userText.trim(), obs, true);
+            executeToolInternal(quick.toolIds.get(0), quick.params.get(0), typed, obs, true);
             return true;
         }
 
@@ -934,18 +979,20 @@ public class PegaseSession {
         final com.pegasuscorp.orbe.llm.LocalLlmServer server =
                 com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext);
         if (!server.isAvailable()) return false;
-        if (com.pegasuscorp.orbe.llm.LocalCommandRouter.route(userText).isEmpty()) return false;
+        if (com.pegasuscorp.orbe.llm.LocalCommandRouter.route(text).isEmpty()) return false;
         if (!allowToolExecution(obs)) return false;   // verrouillé : chemin habituel
         final long requestId = activeRequestId;
-        final String text = userText.trim();
+        final String modelText = text;
+        currentTurnLocal = true;
         notifyLlmStart(obs);
         localLlmExecutor.execute(() -> {
             com.pegasuscorp.orbe.llm.LocalCommandRouter.Decision d =
-                    com.pegasuscorp.orbe.llm.LocalCommandRouter.decide(server, toolRegistry, text);
+                    com.pegasuscorp.orbe.llm.LocalCommandRouter.decide(server, toolRegistry, modelText);
             main.post(() -> {
                 if (requestId != activeRequestId) return;   // nouvelle demande entre-temps
                 if (d == null) {
-                    Trace.error("local_llm", "repli cloud : " + text);
+                    Trace.error("local_llm", "repli cloud : " + modelText);
+                    currentTurnLocal = false;
                     sendToCloud(conv, payload, displayText, userText, obs);
                     return;
                 }
@@ -954,18 +1001,28 @@ public class PegaseSession {
                 Trace.error("local_llm", "ok " + d.latencyMs + " ms : "
                         + (d.clarification != null ? "question" : d.toolIds));
                 if (d.clarification != null) {
-                    conv.addUserMessage(text);
-                    conv.recordToolReply(d.clarification);
-                    publishReasoningForReply(d.clarification);
-                    notifyReply(obs, d.clarification, false);
+                    // La réponse de l'utilisateur complétera cette demande (suivi local)
+                    localPendingText = modelText;
+                    localPendingAt = System.currentTimeMillis();
+                    localReply(conv, typed, d.clarification, obs);
                     return;
                 }
                 // Un appel par tour (les petits modèles enchaînent mal) ; la confirmation
                 // affichée est le texte renvoyé par l'outil.
-                executeToolInternal(d.toolIds.get(0), d.params.get(0), text, obs, true);
+                executeToolInternal(d.toolIds.get(0), d.params.get(0), typed, obs, true);
             });
         });
         return true;
+    }
+
+    /** Réponse texte du chemin local (question, annulation) dans l'historique et l'UI. */
+    private void localReply(ConversationManager conv, String userText, String reply,
+            SessionObserver obs) {
+        currentTurnLocal = true;
+        conv.addUserMessage(userText);
+        conv.recordToolReply(reply);
+        publishReasoningForReply(reply);
+        notifyReply(obs, reply, false);
     }
 
     private boolean tryOpenAppLocalShortCircuit(ConversationManager conv, String userText,
