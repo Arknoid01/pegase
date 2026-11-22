@@ -45,7 +45,7 @@ public final class LocalCommandRouter {
     private static final String[][] ROUTES = {
             {"alarm", "reveil|reveille|alarme"},
             {"timer", "minuteur|chrono|compte a rebours"},
-            {"agenda", "rendez-vous|rdv|agenda|calendrier|prevu|reunion|planning|j'ai quoi|qu'est-ce que j'ai|qu'est ce que j'ai"},
+            {"agenda", "rendez[- ]?vous|\\brdv\\b|agenda|calendrier|prevu|reunion|planning|j'ai quoi|qu'est-ce que j'ai|qu'est ce que j'ai"},
             {"weather", "\\bmeteo\\b|quel temps|pleuvoir|\\bpluie\\b|manteau|parapluie|\\bneige"},
             {"spotify", "musique|chanson|playlist|ecouter|\\bmets du\\b|\\bmets de la\\b|\\bjoue\\b|spotify"},
             {"memory", "retiens|souviens-toi|n'oublie pas|memorise|rappelle-toi"},
@@ -261,6 +261,12 @@ public final class LocalCommandRouter {
                     else if (w.equals("cette semaine")) a.put("action", "week");
                 }
                 if ("add".equals(act) && a.optString("start", "").isEmpty()) return null;
+                String now = a.optString("action", "");
+                if (now.equals("today") || now.equals("tomorrow") || now.equals("week")
+                        || now.equals("list")) {
+                    // Lecture : pas de titre / date recopiés de l'exemple de la description
+                    a.remove("start"); a.remove("end"); a.remove("title");
+                }
                 return a;
             }
             case "sms":
