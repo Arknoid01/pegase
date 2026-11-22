@@ -208,11 +208,21 @@ public class PegaseSession {
     private void beginTurn() {
         turnInFlight = true;
         turnChannel = sessionContext.channel;
+        lastTurnReplyText = "";
+        if (turnChannel == Channel.TEXT && appContext != null) {
+            com.pegasuscorp.orbe.ChatProgressNotifier.onTurnStart(appContext);
+        }
     }
+
+    /** Dernier texte de réponse du tour (pour la notification « Pégase a répondu »). */
+    private String lastTurnReplyText = "";
 
     /** Fin de tour — applique un {@link #init} différé s'il y en a un. */
     private synchronized void endTurn() {
         if (!turnInFlight) return;
+        if (turnChannel == Channel.TEXT && appContext != null) {
+            com.pegasuscorp.orbe.ChatProgressNotifier.onTurnEnd(appContext, lastTurnReplyText);
+        }
         turnInFlight = false;
         turnChannel = null;
         if (pendingSessionContext != null) {
@@ -2118,6 +2128,7 @@ public class PegaseSession {
     }
 
     private void notifyReply(SessionObserver oneOff, String text, boolean toolFired) {
+        if (text != null && !text.trim().isEmpty()) lastTurnReplyText = text;
         notify(oneOff, o -> o.onReply(text, toolFired));
         if (!toolFired) {
             endTurn();
@@ -2149,6 +2160,9 @@ public class PegaseSession {
     }
 
     private void notifyToolResult(SessionObserver oneOff, ToolResult result) {
+        if (result != null && result.text != null && !result.text.trim().isEmpty()) {
+            lastTurnReplyText = result.text;
+        }
         notify(oneOff, o -> o.onToolResult(result));
         if (activeAgenticChain == null && pendingNativeToolCall == null) {
             endTurn();
@@ -2156,6 +2170,9 @@ public class PegaseSession {
     }
 
     private void notifyToolExit(SessionObserver oneOff, ToolResult result) {
+        if (result != null && result.text != null && !result.text.trim().isEmpty()) {
+            lastTurnReplyText = result.text;
+        }
         notify(oneOff, o -> o.onToolExit(result));
         endTurn();
     }
@@ -2166,7 +2183,9 @@ public class PegaseSession {
     }
 
     private void notifyError(SessionObserver oneOff, String message) {
-        notify(oneOff, o -> o.onError(ChatSpokenErrors.toUserMessage(message)));
+        String userMsg = ChatSpokenErrors.toUserMessage(message);
+        if (userMsg != null && !userMsg.trim().isEmpty()) lastTurnReplyText = userMsg;
+        notify(oneOff, o -> o.onError(userMsg));
         endTurn();
     }
 

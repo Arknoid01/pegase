@@ -389,6 +389,7 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
     @Override
     protected void onResume() {
         super.onResume();
+        ChatProgressNotifier.onInterfaceResumed(this);
         PegaseSession.get(this).init(new SessionContext(Channel.TEXT, false));
         FloatingOrbService.hide(this);
         updateSubtitle();
@@ -400,6 +401,7 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
 
     @Override
     protected void onPause() {
+        ChatProgressNotifier.onInterfacePaused(this);
         subtitleHandler.removeCallbacks(subtitleTick);
         ChatVoiceBridge.getSharedVoice(this).stopListening();
         // Ne pas afficher l'orbe pendant la fermeture (Back) — la session

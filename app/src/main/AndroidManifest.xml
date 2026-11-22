@@ -294,7 +294,9 @@
         <activity
             android:name=".PegaseInterfaceActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:label="Pégase"
+            android:taskAffinity="com.pegasuscorp.orbe.pegase"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.Orbe.Pegase"
             android:windowSoftInputMode="adjustResize|stateHidden">
             <!-- Deep link Assistant / routines : pegase://open[/conversation|orion] -->
