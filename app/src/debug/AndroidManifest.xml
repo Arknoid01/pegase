@@ -20,5 +20,13 @@
             android:name="com.pegasuscorp.orbe.diag.DebugChatReceiver"
             android:exported="true"
             android:enabled="true" />
+
+        <!-- Relais LLM pour les bancs du PC : Orbe appelle Groq avec SA clé (jamais transmise).
+             Protégé par DUMP : seul le shell adb peut le déclencher, pas les autres applis. -->
+        <receiver
+            android:name="com.pegasuscorp.orbe.diag.DebugLlmRelayReceiver"
+            android:exported="true"
+            android:enabled="true"
+            android:permission="android.permission.DUMP" />
     </application>
 </manifest>
