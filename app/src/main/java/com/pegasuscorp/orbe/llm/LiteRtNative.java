@@ -23,6 +23,18 @@ public final class LiteRtNative {
 
     static native String nativeLastError();
 
+    /** Flux : démarre (0 en cas d'échec), lit le texte accumulé, teste la fin, puis libère. */
+    static native long nativeStreamStart(long handle, String systemJson, String historyJson,
+                                         String userJson, int maxOutputTokens, String constraintRegex);
+
+    static native String nativeStreamText(long streamId);
+
+    static native boolean nativeStreamDone(long streamId);
+
+    static native String nativeStreamError(long streamId);
+
+    static native void nativeStreamFinish(long streamId);
+
     public static String lastError() {
         try {
             return nativeLastError();

@@ -219,6 +219,65 @@ public final class LocalLlmServer {
         return litertHandle != 0;
     }
 
+    /** Verrou : le moteur LiteRT ne traite qu'une génération à la fois. */
+    private static final Object LITERT_LOCK = new Object();
+
+    /**
+     * Génération LiteRT en flux : {@code onText} reçoit le texte accumulé à chaque morceau.
+     * Bloquant. @return le texte complet.
+     */
+    private String litertStream(JSONObject body, int readTimeoutMs,
+            java.util.function.Consumer<String> onText) throws Exception {
+        if (!litertReady()) throw new java.io.IOException("LiteRT indisponible : " + LiteRtNative.lastError());
+        org.json.JSONArray msgs = body.getJSONArray("messages");
+        String sys = "";
+        org.json.JSONArray hist = new org.json.JSONArray();
+        String user = null;
+        for (int i = 0; i < msgs.length(); i++) {
+            JSONObject m = msgs.getJSONObject(i);
+            if (m.optString("role", "").equals("system") && sys.isEmpty()) {
+                sys = m.optString("content", "");
+            } else if (i == msgs.length() - 1) {
+                user = m.toString();
+            } else {
+                hist.put(m);
+            }
+        }
+        if (user == null) throw new java.io.IOException("LiteRT : pas de message utilisateur");
+        String regex = body.optString("regex", null);
+        if (regex != null && regex.isEmpty()) regex = null;
+        int max = body.optInt("max_tokens", 256);
+        synchronized (LITERT_LOCK) {
+            long id = LiteRtNative.nativeStreamStart(litertHandle,
+                    JSONObject.quote(sys), hist.toString(), user, max, regex);
+            if (id == 0) throw new java.io.IOException("LiteRT : " + LiteRtNative.lastError());
+            long deadline = System.currentTimeMillis() + readTimeoutMs;
+            String last = "";
+            try {
+                while (true) {
+                    String cur = LiteRtNative.nativeStreamText(id);
+                    if (!cur.equals(last)) {
+                        last = cur;
+                        touch();
+                        if (onText != null) onText.accept(cur);
+                    }
+                    String err = LiteRtNative.nativeStreamError(id);
+                    if (err != null) throw new java.io.IOException("LiteRT : " + err);
+                    if (LiteRtNative.nativeStreamDone(id)) break;
+                    if (System.currentTimeMillis() > deadline) {
+                        throw new java.io.IOException("LiteRT : délai dépassé");
+                    }
+                    Thread.sleep(40);
+                }
+                String fin = LiteRtNative.nativeStreamText(id);
+                if (!fin.equals(last) && onText != null) onText.accept(fin);
+                return fin;
+            } finally {
+                LiteRtNative.nativeStreamFinish(id);
+            }
+        }
+    }
+
     /**
      * Réponse LiteRT au format OpenAI (choices[0].message.content). Le système et l'historique
      * passent tels quels ; la contrainte {@code regex} remplace la grammaire GBNF de llama.cpp.
@@ -433,12 +492,7 @@ public final class LocalLlmServer {
             java.util.function.Consumer<String> onText) throws Exception {
         touch();
         if (usesLitert()) {
-            try {
-                String text = litertChat(body).getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("message").getString("content");
-                if (onText != null) onText.accept(text);
-                return text;
-            } finally { touch(); }
+            try { return litertStream(body, readTimeoutMs, onText); } finally { touch(); }
         }
         java.net.HttpURLConnection c = null;
         try {

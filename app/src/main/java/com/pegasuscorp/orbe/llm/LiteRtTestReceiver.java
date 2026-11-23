@@ -52,9 +52,14 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
                             .put(new JSONObject().put("role", "user").put("content", text)))
                             .put("max_tokens", 200);
                     long t0 = System.currentTimeMillis();
-                    JSONObject r = LocalLlmServer.get(app).chat(body, 120_000);
-                    Log.i(TAG, "CHAT " + (System.currentTimeMillis() - t0) + " ms : "
-                            + r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content"));
+                    final int[] parts = {0};
+                    final long[] firstMs = {-1};
+                    String full = LocalLlmServer.get(app).chatStream(body, 120_000, acc -> {
+                        parts[0]++;
+                        if (firstMs[0] < 0) firstMs[0] = System.currentTimeMillis() - t0;
+                    });
+                    Log.i(TAG, "CHAT " + (System.currentTimeMillis() - t0) + " ms, premier morceau "
+                            + firstMs[0] + " ms, " + parts[0] + " morceaux : " + full);
                 } catch (Throwable t) {
                     Log.e(TAG, "CHAT ECHEC " + t);
                 }
