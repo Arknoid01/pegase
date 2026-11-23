@@ -111,8 +111,8 @@ public class ContextAnalyzerTest {
         assertTrue(IntentDetector.looksLikeF1(fold));
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
         assertTrue(tools.contains(ToolTag.F1));
-        // Pas d'actualité → pas SEARCH forcé par le seul « f1/gp ».
-        assertFalse(tools.contains(ToolTag.SEARCH));
+        // Web dispo partout (retour Yannick 2026-11-23) : le LLM peut vérifier la fiche F1.
+        assertTrue(tools.contains(ToolTag.SEARCH));   // web partout depuis 2026-11-23
     }
 
     @Test
@@ -176,7 +176,8 @@ public class ContextAnalyzerTest {
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("productivity", fold);
         assertTrue(tools.contains(ToolTag.NOTEPAD));
         assertTrue(tools.contains(ToolTag.NAMED_CONTEXT));
-        assertEquals(4, tools.size());
+        assertTrue(tools.contains(ToolTag.SEARCH));
+        assertEquals(5, tools.size());
     }
 
     @Test
@@ -350,7 +351,7 @@ public class ContextAnalyzerTest {
         assertTrue(IntentDetector.looksLikeEncyclopedic(fold));
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
         assertTrue(tools.contains(ToolTag.WIKIPEDIA));
-        assertFalse(tools.contains(ToolTag.SEARCH));
+        assertTrue(tools.contains(ToolTag.SEARCH));   // web partout depuis 2026-11-23
     }
 
     @Test
@@ -373,7 +374,7 @@ public class ContextAnalyzerTest {
         EnumSet<ToolTag> tools = ContextAnalyzer.toolsFor("general", fold);
         assertTrue(tools.contains(ToolTag.WIKIDATA));
         assertTrue(tools.contains(ToolTag.WIKIPEDIA));
-        assertFalse(tools.contains(ToolTag.SEARCH));
+        assertTrue(tools.contains(ToolTag.SEARCH));   // web partout depuis 2026-11-23
     }
 
     @Test

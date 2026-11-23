@@ -63,4 +63,21 @@ public class NotepadDateHelperTest {
         assertEquals(NotepadDateHelper.tomorrow(),
                 NotepadDateHelper.parseDueDate("ajoute pain demain"));
     }
+
+    /** Bug 2026-11-23 : « le lundi 23 novembre à 18h00 » rangé au lundi suivant. */
+    @Test
+    public void resolve_explicitDayMonth_keepsThatDayAndHour() {
+        java.time.LocalDate d = java.time.LocalDate.now().plusDays(3);
+        String label = d.format(java.time.format.DateTimeFormatter.ofPattern(
+                "EEEE d MMMM yyyy", java.util.Locale.FRENCH));
+        String text = "Commande de Noël le " + label + " à 18h00";
+        NotepadDateHelper.ReminderResolution r = NotepadDateHelper.resolveReminder(
+                text, text.toLowerCase(java.util.Locale.FRENCH), "", 0, false);
+        assertEquals(d.toString(), r.dueDate);
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(r.reminderAt);
+        assertEquals(d.getDayOfMonth(), c.get(Calendar.DAY_OF_MONTH));
+        assertEquals(18, c.get(Calendar.HOUR_OF_DAY));
+        assertFalse(r.spokenWhen.contains("-"));
+    }
 }

@@ -6,25 +6,29 @@ import com.pegasuscorp.orbe.tools.ToolResult;
 
 import com.pegasuscorp.orbe.tools.Tool;
 import com.pegasuscorp.orbe.tools.ToolCallback;
-import com.pegasuscorp.orbe.tools.device.CalendarWriter;
 
 import android.content.Context;
-import android.content.Intent;
-import android.provider.CalendarContract;
 import android.text.TextUtils;
 
-import com.pegasuscorp.orbe.permissions.PermissionFlow;
+import com.pegasuscorp.orbe.notepad.NotepadDateHelper;
+import com.pegasuscorp.orbe.notepad.NotepadStore;
 
 import org.json.JSONObject;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Agenda Android — créer, lire, supprimer des événements.
- * ≠ {@link com.pegasuscorp.orbe.tools.device.AlarmTool} (réveil = sonne une fois).
+ * Agenda = le bloc-notes daté (plus de calendrier Android, choix de Yannick le 2026-11-23).
+ * Même id « agenda » pour garder le routage local et les exemples ; tout est rangé
+ * dans {@link NotepadStore} : avec une date → ce jour-là (rappel si une heure est dite),
+ * sans date → aujourd'hui.
  */
 public final class AgendaTool implements Tool {
 
@@ -42,12 +46,11 @@ public final class AgendaTool implements Tool {
 
     @Override
     public String description() {
-        return "agenda(action:\"add\"|\"list\"|\"today\"|\"tomorrow\"|\"week\"|\"delete\"|\"open\", "
-                + "title?:str, start?:str, end?:str, description?:str, location?:str, "
-                + "reminder?:int, silent?:bool, event_id?:long) — Calendrier Android. "
-                + "add : événement (start « demain 11h30 »). silent:true si permission calendrier. "
-                + "today/tomorrow/week/list : lecture. delete : par event_id ou title+when. "
-                + "open : ouvre l'app Agenda.";
+        return "agenda(action:\"add\"|\"today\"|\"tomorrow\"|\"week\"|\"delete\", "
+                + "title?:str, start?:str, location?:str) — Agenda personnel (rangé dans le "
+                + "bloc-notes, à la bonne date). add : start tel que dit (« demain 11h30 », "
+                + "« vendredi ») ; sans date → aujourd'hui. today/tomorrow/week : ce qui est prévu. "
+                + "delete : par title.";
     }
 
     @Override
@@ -55,201 +58,174 @@ public final class AgendaTool implements Tool {
         if (params == null) params = new JSONObject();
         String action = params.optString("action", "add").trim().toLowerCase(Locale.ROOT);
         if (action.isEmpty()) action = "add";
+        NotepadStore store = NotepadStore.getInstance(ctx);
+        LocalDate today = LocalDate.now(PARIS);
 
         switch (action) {
             case "list":
             case "show":
-                executeList(ctx, cb, "Agenda", CalendarQuery.today(ctx));
-                return;
             case "today":
             case "aujourdhui":
             case "aujourd'hui":
-                executeList(ctx, cb, "Aujourd'hui", CalendarQuery.today(ctx));
+                cb.onSuccessAndExit(ToolResult.text(formatDays(store, today, 1, true)));
                 return;
             case "tomorrow":
             case "demain":
-                executeList(ctx, cb, "Demain", CalendarQuery.tomorrow(ctx));
+                cb.onSuccessAndExit(ToolResult.text(formatDays(store, today.plusDays(1), 1, false)));
                 return;
             case "week":
             case "semaine":
-                executeList(ctx, cb, "Cette semaine", CalendarQuery.week(ctx));
-                return;
             case "open":
-                openCalendar(ctx, cb);
+                cb.onSuccessAndExit(ToolResult.text(formatDays(store, today, 7, true)));
                 return;
             case "delete":
-            case "remove":
-                executeDelete(ctx, params, cb);
+            case "remove": {
+                String title = firstNonEmpty(params, "title", "titre", "name", "text");
+                if (TextUtils.isEmpty(title)) {
+                    cb.onError("Dis-moi ce que je retire de l'agenda.");
+                    return;
+                }
+                int removed = store.removeContaining(title);
+                if (removed > 0) cb.onSuccessAndExit(ToolResult.text("C'est retiré : " + title + "."));
+                else cb.onError("Je n'ai rien trouvé pour « " + title + " ».");
                 return;
+            }
             case "add":
             case "create":
             case "set":
-                executeAdd(ctx, params, cb);
+                executeAdd(store, params, cb);
                 return;
             default:
-                cb.onError("Action agenda inconnue. Utilise add, today, tomorrow, week, delete, open.");
+                cb.onError("Action agenda inconnue. Utilise add, today, tomorrow, week, delete.");
         }
     }
 
-    private void executeList(Context ctx, ToolCallback cb, String header,
-            List<CalendarQuery.Event> events) {
-        if (!PermissionFlow.hasCalendar(ctx)) {
-            PermissionFlow.ensureCalendar(ctx);
-            cb.onError("J'ai besoin de la permission Calendrier pour lire ton agenda.");
-            return;
-        }
-        String body = CalendarQuery.summarizeList(events,
-                "Rien de prévu dans le calendrier.");
-        cb.onSuccessAndExit(ToolResult.text(header + " :\n" + body));
-    }
-
-    private void executeDelete(Context ctx, JSONObject params, ToolCallback cb) {
-        if (!PermissionFlow.hasCalendar(ctx)) {
-            PermissionFlow.ensureCalendar(ctx);
-            cb.onError("Permission calendrier requise pour supprimer un événement.");
-            return;
-        }
-        long eventId = params.optLong("event_id", -1);
-        if (eventId > 0) {
-            if (CalendarQuery.deleteEvent(ctx, eventId)) {
-                cb.onSuccessAndExit(ToolResult.text("Événement supprimé."));
-            } else {
-                cb.onError("Impossible de supprimer cet événement.");
-            }
-            return;
-        }
-        String title = firstNonEmpty(params, "title", "titre", "name");
+    private void executeAdd(NotepadStore store, JSONObject params, ToolCallback cb) {
+        String title = firstNonEmpty(params, "title", "titre", "name", "sujet", "text");
         if (TextUtils.isEmpty(title)) {
-            cb.onError("Indique event_id ou le titre à supprimer.");
+            cb.onError("Qu'est-ce que je note dans l'agenda ?");
             return;
         }
-        String when = firstNonEmpty(params, "start", "when", "day");
-        LocalDate day = when.contains("demain")
-                ? LocalDate.now(PARIS).plusDays(1) : LocalDate.now(PARIS);
-        long start = day.atStartOfDay(PARIS).toInstant().toEpochMilli();
-        long end = day.plusDays(1).atStartOfDay(PARIS).toInstant().toEpochMilli();
-        CalendarQuery.Event match = CalendarQuery.findByTitle(ctx, title, start, end);
-        if (match == null) {
-            cb.onError("Aucun événement « " + title + " » trouvé ce jour-là.");
-            return;
-        }
-        if (CalendarQuery.deleteEvent(ctx, match.eventId)) {
-            cb.onSuccessAndExit(ToolResult.text(
-                    "Supprimé : " + match.title + " (" + CalendarQuery.formatTime(match.beginMs) + ")."));
-        } else {
-            cb.onError("Suppression impossible.");
-        }
-    }
-
-    private void executeAdd(Context ctx, JSONObject params, ToolCallback cb) {
-        String title = firstNonEmpty(params, "title", "titre", "name", "sujet");
-        if (TextUtils.isEmpty(title)) {
-            cb.onError("Indique le titre de l'événement.");
-            return;
-        }
+        String location = firstNonEmpty(params, "location", "lieu", "place");
+        String text = location.isEmpty() || title.toLowerCase(Locale.FRENCH)
+                .contains(location.toLowerCase(Locale.FRENCH))
+                ? title : title + " (" + location + ")";
 
         String startRaw = firstNonEmpty(params, "start", "debut", "début", "when", "datetime");
         if (startRaw.isEmpty()) {
-            String date = params.optString("date", "").trim();
-            String time = params.optString("time", "").trim();
-            if (!date.isEmpty() || !time.isEmpty()) {
-                startRaw = (date + " " + time).trim();
+            startRaw = (params.optString("date", "") + " " + params.optString("time", "")).trim();
+        }
+
+        String due = LocalDate.now(PARIS).toString();
+        long reminderAt = 0;
+        if (!startRaw.isEmpty()) {
+            long ms = FrenchDateTimeParser.parseToEpochMs(startRaw);
+            if (ms > 0) {
+                LocalDateTime dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), PARIS);
+                due = dt.toLocalDate().toString();
+                if (hasTime(startRaw) && ms > System.currentTimeMillis()) reminderAt = ms;
             }
         }
-        if (startRaw.isEmpty()) {
-            cb.onError("Indique le début (ex. « demain 11h30 »).");
+        NotepadDateHelper.ReminderResolution res = new NotepadDateHelper.ReminderResolution(
+                due, reminderAt, false, "");
+        NotepadStore.Item item = store.add(text, due, reminderAt, "", res);
+        if (item == null) {
+            cb.onError("Je n'ai pas pu l'ajouter.");
             return;
         }
-
-        long startMs = FrenchDateTimeParser.parseToEpochMs(startRaw);
-        if (startMs <= 0) {
-            cb.onError("Je n'ai pas compris la date : « " + startRaw + " ».");
-            return;
+        StringBuilder reply = new StringBuilder("C'est dans l'agenda : ").append(text).append(", ")
+                .append(NotepadDateHelper.formatDateLabel(due));
+        if (reminderAt > 0) {
+            LocalDateTime dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(reminderAt), PARIS);
+            reply.append(" à ").append(hourLabel(dt)).append(" — je te le rappelle");
         }
-
-        String endRaw = firstNonEmpty(params, "end", "fin");
-        long endMs;
-        if (!endRaw.isEmpty()) {
-            endMs = FrenchDateTimeParser.parseToEpochMs(endRaw);
-            if (endMs <= startMs) endMs = startMs + 60L * 60L * 1000L;
-        } else if (params.has("duration_min")) {
-            int dur = params.optInt("duration_min", 60);
-            if (dur < 1) dur = 60;
-            endMs = startMs + dur * 60L * 1000L;
-        } else {
-            endMs = startMs + 60L * 60L * 1000L;
-        }
-
-        String description = firstNonEmpty(params, "description", "details", "détails", "note");
-        String location = firstNonEmpty(params, "location", "lieu", "place");
-        int reminder = params.has("reminder") ? params.optInt("reminder", 15) : 15;
-        if (reminder < 0) reminder = 15;
-        boolean silent = params.optBoolean("silent", true);
-
-        if (silent && PermissionFlow.hasCalendar(ctx)) {
-            long eventId = CalendarWriter.insertEvent(ctx, title, startMs, endMs,
-                    description, location, reminder);
-            if (eventId > 0) {
-                String when = FrenchDateTimeParser.formatSpoken(startMs);
-                cb.onSuccessAndExit(ToolResult.text(
-                        "Événement ajouté : " + title + (when.isEmpty() ? "." : ", " + when + ".")));
-                return;
-            }
-        }
-
-        if (!PermissionFlow.hasCalendar(ctx)) {
-            PermissionFlow.ensureCalendar(ctx);
-        }
-
-        Intent intent = new Intent(Intent.ACTION_INSERT);
-        intent.setData(CalendarContract.Events.CONTENT_URI);
-        intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMs);
-        intent.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMs);
-        intent.putExtra(CalendarContract.Events.TITLE, title);
-        if (!description.isEmpty()) {
-            intent.putExtra(CalendarContract.Events.DESCRIPTION, description);
-        }
-        if (!location.isEmpty()) {
-            intent.putExtra(CalendarContract.Events.EVENT_LOCATION, location);
-        }
-        intent.putExtra(CalendarContract.Reminders.MINUTES, reminder);
-        intent.putExtra(CalendarContract.Events.HAS_ALARM, true);
-        intent.putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, false);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        if (intent.resolveActivity(ctx.getPackageManager()) == null) {
-            cb.onError("Aucune app Agenda / Calendrier trouvée.");
-            return;
-        }
-        try {
-            ctx.startActivity(intent);
-        } catch (Exception e) {
-            cb.onError("Impossible d'ouvrir l'agenda : "
-                    + (e.getMessage() == null ? "erreur" : e.getMessage()));
-            return;
-        }
-
-        String when = FrenchDateTimeParser.formatSpoken(startMs);
-        cb.onSuccessAndExit(ToolResult.text(
-                "Événement prêt dans l'agenda : " + title
-                        + (when.isEmpty() ? "." : ", " + when + ".")
-                        + " Confirme l'enregistrement dans l'app."));
+        cb.onSuccessAndExit(ToolResult.text(reply.append(".").toString()));
     }
 
-    private static void openCalendar(Context ctx, ToolCallback cb) {
-        long now = System.currentTimeMillis();
-        Intent intent = new Intent(Intent.ACTION_VIEW)
-                .setData(CalendarContract.CONTENT_URI.buildUpon()
-                        .appendPath("time")
-                        .appendPath(String.valueOf(now))
-                        .build())
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (intent.resolveActivity(ctx.getPackageManager()) != null) {
-            ctx.startActivity(intent);
-            cb.onSuccessAndExit(ToolResult.text("J'ouvre ton agenda."));
-            return;
+    /**
+     * Liste lisible des éléments du bloc-notes sur {@code days} jours à partir de {@code from}.
+     * {@code withLate} : ajoute ce qui reste d'avant (pas fait).
+     */
+    public static String formatDays(NotepadStore store, LocalDate from, int days, boolean withLate) {
+        List<NotepadStore.Item> active = store.getActiveItems();
+        StringBuilder sb = new StringBuilder();
+        int total = 0;
+        for (int i = 0; i < days; i++) {
+            String day = from.plusDays(i).toString();
+            List<NotepadStore.Item> list = new ArrayList<>();
+            for (NotepadStore.Item it : active) {
+                if (day.equals(dueOf(it))) list.add(it);
+            }
+            if (list.isEmpty()) continue;
+            list.sort((a, b) -> Long.compare(timeKey(a), timeKey(b)));
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(capitalize(NotepadDateHelper.formatDateLabel(day))).append(" : ");
+            appendItems(sb, list);
+            total += list.size();
         }
-        cb.onError("Aucune app Agenda trouvée.");
+        List<NotepadStore.Item> late = new ArrayList<>();
+        if (withLate) {
+            String first = from.toString();
+            for (NotepadStore.Item it : active) {
+                String d = dueOf(it);
+                if (!d.isEmpty() && d.compareTo(first) < 0) late.add(it);
+            }
+        }
+        if (!late.isEmpty()) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append("Pas encore fait d'avant : ");
+            appendItems(sb, late);
+        }
+        if (total == 0 && late.isEmpty()) {
+            String label = days > 1 ? "cette semaine"
+                    : NotepadDateHelper.formatDateLabel(from.toString());
+            return "Rien de prévu " + label + ".";
+        }
+        return sb.toString();
+    }
+
+    private static void appendItems(StringBuilder sb, List<NotepadStore.Item> list) {
+        for (int i = 0; i < list.size(); i++) {
+            NotepadStore.Item it = list.get(i);
+            if (i > 0) sb.append(" ; ");
+            if (it.reminderAt > 0) {
+                LocalDateTime dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(it.reminderAt), PARIS);
+                sb.append(hourLabel(dt)).append(" ");
+            }
+            sb.append(it.text);
+        }
+        sb.append('.');
+    }
+
+    /** Date de rangement : l'échéance, sinon le jour du rappel, sinon le jour de création. */
+    private static String dueOf(NotepadStore.Item it) {
+        if (!it.dueDate.isEmpty()) return it.dueDate;
+        if (it.reminderAt > 0) {
+            return LocalDateTime.ofInstant(Instant.ofEpochMilli(it.reminderAt), PARIS)
+                    .toLocalDate().toString();
+        }
+        String c = it.created == null ? "" : it.created.trim();
+        return c.length() >= 10 && c.charAt(4) == '-' ? c.substring(0, 10) : "";
+    }
+
+    private static long timeKey(NotepadStore.Item it) {
+        return it.reminderAt > 0 ? it.reminderAt : Long.MAX_VALUE;
+    }
+
+    private static String hourLabel(LocalDateTime dt) {
+        return dt.getMinute() == 0
+                ? dt.getHour() + "h"
+                : dt.format(DateTimeFormatter.ofPattern("H'h'mm", Locale.FRENCH));
+    }
+
+    private static boolean hasTime(String raw) {
+        return raw.matches("(?is).*\\d{1,2}\\s*(h|:|heure).*") || raw.contains("midi")
+                || raw.contains("minuit");
+    }
+
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return "";
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     private static String firstNonEmpty(JSONObject params, String... keys) {

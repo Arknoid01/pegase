@@ -61,6 +61,14 @@ public final class FrenchDateTimeParser {
             return toEpoch(LocalDateTime.of(y, mo, d, clampHour(h), clampMin(mi)));
         }
 
+        // Date explicite (« dimanche 22 novembre 2026 21h06 ») : elle fait foi, pas de +1 semaine
+        LocalDate explicit = com.pegasuscorp.orbe.notepad.NotepadDateHelper.parseExplicitDate(s);
+        if (explicit != null) {
+            LocalTime t = resolveTime(s.replaceAll("\\b\\d{1,2}(er)?\\s+\\p{L}+\\s+\\d{4}\\b", " "));
+            if (t == null) t = LocalTime.of(9, 0);
+            return toEpoch(LocalDateTime.of(explicit, t));
+        }
+
         LocalDate date = resolveDay(s, now.toLocalDate());
         LocalTime time = resolveTime(s);
         if (time == null) time = LocalTime.of(9, 0);

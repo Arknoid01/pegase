@@ -210,17 +210,17 @@ public final class BriefTool implements Tool {
         addIfPresent(lines, PrefetchCache.get(ctx, PrefetchCache.KEY_NASA,
                 PrefetchCache.TTL_NASA_MS));
 
-        // Diag : skip silencieux sur fallback backend — le 120b ne doit pas la voir
-        String diagSection = "";
-        if (!isOnFallbackBackend(ctx)) {
-            String diag = PrefetchCache.get(ctx, PrefetchCache.KEY_DIAG,
-                    PrefetchCache.TTL_DIAG_SESSION_MS);
-            if (isReliableDiag(diag)) {
-                diagSection = diag.trim();
-            }
-        }
-        if (!TextUtils.isEmpty(diagSection)) {
-            lines.add(diagSection);
+        // Bilan technique (messages, outils en échec) : pas dans le brief du matin
+        // (retour Yannick 2026-11-23) — il reste dispo via l'outil diag.
+
+        // Ce qui est prévu aujourd'hui (agenda = bloc-notes daté)
+        try {
+            String today = com.pegasuscorp.orbe.tools.life.AgendaTool.formatDays(
+                    com.pegasuscorp.orbe.notepad.NotepadStore.getInstance(ctx),
+                    java.time.LocalDate.now(java.time.ZoneId.of("Europe/Paris")), 1, true);
+            if (!TextUtils.isEmpty(today) && !today.startsWith("Rien de prévu"))
+                lines.add(today.replace('\n', ' '));
+        } catch (Exception ignored) {
         }
 
         CustomRoutineStore store = CustomRoutineStore.getInstance(ctx);

@@ -94,7 +94,23 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
      * Résumé d'une ligne des outils d'un tour : « 🔧 météo ✅ · agenda ✅ · 2,1 s ».
      * Vide s'il n'y a pas d'outil.
      */
+    /** « 📱 local · Qwen3.5-2B » ou « ☁️ Groq » — d'où vient la réponse. */
+    static String sourceLabel(ReasoningCard card) {
+        if (card == null || card.backend == null || card.backend.isEmpty()) return "";
+        String b = card.backend;
+        if (b.startsWith("Local/")) return "📱 local · " + b.substring(6);
+        int slash = b.indexOf('/');
+        return "☁️ " + (slash > 0 ? b.substring(0, slash) : b);
+    }
+
     static String toolsSummary(ReasoningCard card) {
+        String source = sourceLabel(card);
+        String tools = toolsOnlySummary(card);
+        if (source.isEmpty()) return tools;
+        return tools.isEmpty() ? source : source + " · " + tools;
+    }
+
+    static String toolsOnlySummary(ReasoningCard card) {
         if (card == null || card.toolsUsed.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("🔧 ");
         long total = 0;

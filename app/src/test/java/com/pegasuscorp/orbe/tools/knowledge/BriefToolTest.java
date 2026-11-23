@@ -73,9 +73,9 @@ public class BriefToolTest {
         int w = brief.indexOf("Orages");
         int b = brief.indexOf("commandes");
         int n = brief.indexOf("NASA");
-        int d = brief.indexOf("impeccable");
         int c = brief.indexOf("Saloir");
-        assertTrue(brief, w >= 0 && b > w && n > b && d > n && c > d);
+        assertTrue(brief, w >= 0 && b > w && n > b && c > n);
+        assertFalse(brief, brief.contains("impeccable"));
     }
 
     @Test
@@ -85,7 +85,7 @@ public class BriefToolTest {
 
         String brief = BriefTool.composeBrief(ctx);
         assertTrue(brief.contains("Lyon") || brief.contains("dégagé"));
-        assertTrue(brief.contains("hésitation") || brief.contains("notepad"));
+        assertFalse(brief.contains("hésitation"));
         assertFalse(brief.toLowerCase().contains("nasa apod"));
         assertFalse(brief.toLowerCase().contains("boucherie"));
     }
@@ -151,13 +151,14 @@ public class BriefToolTest {
     }
 
     @Test
-    public void composeBrief_rasDiag_included() {
+    public void composeBrief_diagNeverIncluded() {
+        // Retour Yannick 2026-11-23 : pas de bilan technique dans le brief du matin
         PrefetchCache.put(ctx, PrefetchCache.KEY_WEATHER, "Soleil.");
         PrefetchCache.put(ctx, PrefetchCache.KEY_DIAG,
                 "Rien à signaler hier — tout s'est bien passé.");
         String brief = BriefTool.composeBrief(ctx);
         assertTrue(brief.contains("Soleil"));
-        assertTrue(brief.contains("Rien à signaler"));
+        assertFalse(brief.contains("Rien à signaler"));
     }
 
     @Test
@@ -178,7 +179,7 @@ public class BriefToolTest {
                 });
         assertNotNull(ok.get());
         assertTrue(ok.get().contains("Pluie"));
-        assertTrue(ok.get().contains("hésitation") || ok.get().contains("notepad"));
+        assertFalse(ok.get().contains("hésitation"));
     }
 
     @Test

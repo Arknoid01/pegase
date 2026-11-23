@@ -210,12 +210,15 @@ public class PegaseSession {
     private long prevReplyAt;
     private boolean prevWasLocal;
     private boolean currentTurnLocal;
+    /** Qui a décidé ce tour en local (« Local/analyseur », « Local/Qwen… ») — étiquette UI. */
+    private String currentTurnChooser = "";
 
     private void beginTurn() {
         turnInFlight = true;
         turnChannel = sessionContext.channel;
         lastTurnReplyText = "";
         currentTurnLocal = false;
+        currentTurnChooser = "";
         if (turnChannel == Channel.TEXT && appContext != null) {
             com.pegasuscorp.orbe.ChatProgressNotifier.onTurnStart(appContext);
         }
@@ -969,6 +972,7 @@ public class PegaseSession {
                 com.pegasuscorp.orbe.llm.LocalCommandRouter.quickParse(text);
         if (quick != null && allowToolExecution(obs)) {
             currentTurnLocal = true;
+            currentTurnChooser = "Local/analyseur";
             com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser("Local/analyseur");
             Trace.error("local_llm", "analyseur : " + quick.toolIds + " " + quick.params);
             executeToolInternal(quick.toolIds.get(0), quick.params.get(0), typed, obs, true);
@@ -997,6 +1001,7 @@ public class PegaseSession {
                     return;
                 }
                 String label = "Local/" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL;
+                currentTurnChooser = label;
                 com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser(label);
                 Trace.error("local_llm", "ok " + d.latencyMs + " ms : "
                         + (d.clarification != null ? "question" : d.toolIds));
@@ -2130,8 +2135,10 @@ public class PegaseSession {
             turnReasoning = new ReasoningTurnCollector("general");
         }
         ConversationManager conv = conversation();
-        String backend = conv != null ? conv.lastLlmBackend() : "";
-        long latency = conv != null ? conv.lastLlmLatencyMs() : 0L;
+        String backend = currentTurnLocal
+                ? (currentTurnChooser.isEmpty() ? "Local/code" : currentTurnChooser)
+                : (conv != null ? conv.lastLlmBackend() : "");
+        long latency = conv != null && !currentTurnLocal ? conv.lastLlmLatencyMs() : 0L;
         int promptChars = conv != null ? conv.lastPromptChars() : 0;
         ReasoningCard card = turnReasoning.build(reply.trim(), backend, latency, promptChars);
         com.pegasuscorp.orbe.diag.TrainingJournal.end(reply.trim(), backend);

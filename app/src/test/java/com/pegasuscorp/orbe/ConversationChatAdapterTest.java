@@ -13,8 +13,20 @@ import java.util.List;
 public class ConversationChatAdapterTest {
 
     private static ReasoningCard card(List<ReasoningCard.ToolStep> steps) {
-        return new ReasoningCard("Conversation", steps, 0, null, null, null, null, "test", 0, 0,
+        return card(steps, "");
+    }
+
+    private static ReasoningCard card(List<ReasoningCard.ToolStep> steps, String backend) {
+        return new ReasoningCard("Conversation", steps, 0, null, null, null, null, backend, 0, 0,
                 false, false, "");
+    }
+
+    @Test
+    public void toolsSummary_indiqueLocalOuCloud() {
+        assertEquals("📱 local · Qwen3.5-2B", ConversationChatAdapter.toolsSummary(
+                card(new ArrayList<>(), "Local/Qwen3.5-2B")));
+        assertEquals("☁️ Groq", ConversationChatAdapter.toolsSummary(
+                card(new ArrayList<>(), "Groq/openai/gpt-oss-120b")));
     }
 
     @Test

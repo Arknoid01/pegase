@@ -18,7 +18,7 @@ public final class ContextAnalyzer {
 
     private static final EnumSet<ToolTag> BASE_TOOLS = EnumSet.of(
             ToolTag.NOTEPAD, ToolTag.MEMORY, ToolTag.NAMED_CONTEXT,
-            ToolTag.DEVICE);
+            ToolTag.DEVICE, ToolTag.SEARCH);   // web partout (retour Yannick 2026-11-23)
 
     private ContextAnalyzer() {}
 

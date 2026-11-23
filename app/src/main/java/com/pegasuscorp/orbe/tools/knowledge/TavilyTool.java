@@ -59,11 +59,12 @@ public final class TavilyTool implements Tool {
 
     public String description() {
 
-        return "search(query:str, question?:str) — Recherche web Tavily (actualité). "
-                + "À utiliser SEULEMENT pour info récente, prix du jour, score, horaire, "
-                + "« aujourd'hui / ce soir / récemment ». "
-                + "Pour une définition ou un fait établi (« c'est quoi », « qui a inventé ») : "
-                + "préférer wikipedia ou wikidata (gratuit, plus fiable).";
+        return "search(query:str, question?:str) — Recherche web (plusieurs sources). "
+                + "TON OUTIL PRINCIPAL pour tout fait vérifiable : actualité, sport, résultats, "
+                + "personnes, entreprises, bourse, prix, produits, sorties, horaires, lieux, "
+                + "déclarations, « tu sais si… », « c'est vrai que… ». Dans le doute, cherche "
+                + "plutôt que répondre de mémoire (tes connaissances datent). query courte et "
+                + "précise (noms propres, année). Définition pure / concept : wikipedia possible.";
     }
 
 

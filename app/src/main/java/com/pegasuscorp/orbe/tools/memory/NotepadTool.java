@@ -77,6 +77,15 @@ public final class NotepadTool implements Tool {
                         || !due.isEmpty();
                 NotepadDateHelper.ReminderResolution res = NotepadDateHelper.resolveReminder(
                         text, fold, due, reminderAt, forceReminder);
+                if (res.dueDate.isEmpty()) {
+                    // Sans date : rangé sur la journée (l'agenda lit le bloc-notes par jour)
+                    String day = res.reminderAt > 0
+                            ? new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.FRANCE)
+                                    .format(new java.util.Date(res.reminderAt))
+                            : NotepadDateHelper.today();
+                    res = new NotepadDateHelper.ReminderResolution(day, res.reminderAt,
+                            res.appliedDefault, res.spokenWhen);
+                }
                 String tag = params.optString("projet_tag", "").trim();
                 if (tag.isEmpty()) {
                     tag = ProjectObjectStore.getInstance(ctx).bestEffortTagFor(text);
@@ -87,7 +96,8 @@ public final class NotepadTool implements Tool {
                             .append(text).append(" »");
                     if (!TextUtils.isEmpty(res.spokenWhen)) {
                         reply.append(" — je te rappelle ").append(res.spokenWhen);
-                    } else if (!res.dueDate.isEmpty()) {
+                    } else if (!res.dueDate.isEmpty()
+                            && !res.dueDate.equals(NotepadDateHelper.today())) {
                         reply.append(" pour ")
                                 .append(NotepadDateHelper.formatDateLabel(res.dueDate));
                     }

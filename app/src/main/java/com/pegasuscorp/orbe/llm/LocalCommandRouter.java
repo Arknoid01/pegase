@@ -245,7 +245,7 @@ public final class LocalCommandRouter {
                 new String[]{"minuteur de 5 min pour le thé", "timer start duration=\"5 min\" label=\"thé\""}));
         SPECS.put("agenda", new Spec(new String[]{"add", "today", "tomorrow", "week", "delete"},
                 new String[]{"title", "start", "location"},
-                "calendrier ; add = ajouter (start tel que dit) ; today/tomorrow/week = lire",
+                "agenda ; add = ajouter (start tel que dit, vide si pas de date) ; today/tomorrow/week = lire",
                 new String[]{"ajoute réunion vendredi 10h au bureau", "agenda add title=\"réunion\" start=\"vendredi 10h\" location=\"bureau\""},
                 new String[]{"j'ai des trucs aujourd'hui ?", "agenda today"}));
         SPECS.put("weather", new Spec(new String[]{}, new String[]{"city", "days"},
@@ -436,10 +436,6 @@ public final class LocalCommandRouter {
                     && !args.has("hour") && !HOUR.matcher(fold(userText)).find()) {
                 ask = "À quelle heure ?";
             }
-            if (ask == null && name.equals("agenda") && "add".equals(args.optString("action"))
-                    && args.optString("start", "").trim().isEmpty()) {
-                ask = "C'est pour quand ?";
-            }
             if (ask != null) { d.clarification = ask; return d; }
             args = guard(name, args, userText);
             if (args == null) return null;
@@ -586,7 +582,6 @@ public final class LocalCommandRouter {
                     if (w.equals("demain")) a.put("action", "tomorrow");
                     else if (w.equals("cette semaine")) a.put("action", "week");
                 }
-                if ("add".equals(act) && a.optString("start", "").isEmpty()) return null;
                 String now = a.optString("action", "");
                 if (now.equals("today") || now.equals("tomorrow") || now.equals("week")
                         || now.equals("list")) {

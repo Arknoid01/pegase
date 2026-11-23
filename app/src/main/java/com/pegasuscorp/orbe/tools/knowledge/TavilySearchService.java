@@ -73,7 +73,7 @@ public final class TavilySearchService {
             return sb.toString().trim();
         }
 
-        private static final int MAX_SNIPPET_CHARS = 360;
+        private static final int MAX_SNIPPET_CHARS = 700;
 
         /**
          * Extraits web structurés pour la synthèse LLM agentique (une seule passe après Tavily).
@@ -120,10 +120,16 @@ public final class TavilySearchService {
         JSONObject body = new JSONObject();
         body.put("query", query);
         body.put("search_depth", "advanced");
-        body.put("max_results", 5);
+        body.put("max_results", 7);
         body.put("include_answer", true);
         body.put("include_raw_content", false);
-        body.put("topic", "general");
+        // Actu récente → moteur « news » (articles datés de la semaine)
+        String qf = query.toLowerCase(java.util.Locale.FRENCH);
+        boolean recent = qf.matches(".*\\b(hier|aujourd'hui|ce matin|ce soir|cette semaine|derni[eè]re?s?"
+                + "|r[ée]sultats?|actus?|actualit[ée]s?|news|latest|yesterday|today|this week"
+                + "|d[ée]clarations?|statements?|reaction|r[ée]action)\\b.*");
+        body.put("topic", recent ? "news" : "general");
+        if (recent) body.put("days", 7);
         body.put("exclude_domains", new JSONArray()
                 .put("facebook.com")
                 .put("twitter.com")
@@ -168,6 +174,8 @@ public final class TavilySearchService {
                 String url = r.optString("url", "").trim();
                 String content = r.optString("content", "").trim();
                 if (content.isEmpty()) continue;
+                String date = r.optString("published_date", "").trim();
+                if (date.length() >= 10) content = "[" + date.substring(0, 10) + "] " + content;
                 sources.add(new SourceSnippet(title, siteFromUrl(url), content));
             }
         }

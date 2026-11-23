@@ -24,7 +24,58 @@ public final class NotepadDateHelper {
     private static final Pattern IN_HOURS = Pattern.compile(
             "(?i)dans\\s+(\\d{1,2})\\s*(?:heure|heures|h)");
 
+    /** « 23 novembre », « 1er décembre 2026 » (avec ou sans accents). */
+    private static final Pattern DAY_MONTH = Pattern.compile(
+            "(?i)\\b(\\d{1,2})(?:er)?\\s+(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t"
+            + "|septembre|octobre|novembre|d[eé]cembre)(?:\\s+(\\d{4}))?");
+    private static final Pattern ISO_DATE = Pattern.compile("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b");
+
     private NotepadDateHelper() {}
+
+    /**
+     * Date explicite dans le texte (« lundi 23 novembre 2026 », « 2026-11-23 »), sinon null.
+     * Sans année : l'année en cours, ou la suivante si la date est passée depuis plus d'un jour.
+     */
+    public static java.time.LocalDate parseExplicitDate(String text) {
+        if (text == null || text.isEmpty()) return null;
+        try {
+            Matcher iso = ISO_DATE.matcher(text);
+            if (iso.find()) {
+                return java.time.LocalDate.of(Integer.parseInt(iso.group(1)),
+                        Integer.parseInt(iso.group(2)), Integer.parseInt(iso.group(3)));
+            }
+            Matcher m = DAY_MONTH.matcher(text);
+            if (!m.find()) return null;
+            int day = Integer.parseInt(m.group(1));
+            int month = monthNumber(m.group(2).toLowerCase(Locale.FRENCH));
+            if (month < 1 || day < 1 || day > 31) return null;
+            java.time.LocalDate today = java.time.LocalDate.now();
+            if (m.group(3) != null) {
+                return java.time.LocalDate.of(Integer.parseInt(m.group(3)), month, day);
+            }
+            java.time.LocalDate d = java.time.LocalDate.of(today.getYear(), month, day);
+            if (d.isBefore(today.minusDays(1))) d = d.plusYears(1);
+            return d;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int monthNumber(String m) {
+        if (m.startsWith("janv")) return 1;
+        if (m.startsWith("f")) return 2;
+        if (m.startsWith("mars")) return 3;
+        if (m.startsWith("avr")) return 4;
+        if (m.startsWith("mai")) return 5;
+        if (m.equals("juin")) return 6;
+        if (m.startsWith("juil")) return 7;
+        if (m.startsWith("ao")) return 8;
+        if (m.startsWith("sept")) return 9;
+        if (m.startsWith("oct")) return 10;
+        if (m.startsWith("nov")) return 11;
+        if (m.startsWith("d")) return 12;
+        return -1;
+    }
 
     /** Résolution dueDate + reminderAt (+ éventuel défaut annoncé). */
     public static final class ReminderResolution {
@@ -61,6 +112,8 @@ public final class NotepadDateHelper {
 
     public static String parseDueDate(String fold) {
         if (fold == null || fold.isEmpty()) return "";
+        java.time.LocalDate explicit = parseExplicitDate(fold);
+        if (explicit != null) return explicit.toString();
         if (fold.contains("apres demain") || fold.contains("après demain")) {
             return dayAfterTomorrow();
         }
@@ -134,6 +187,11 @@ public final class NotepadDateHelper {
             if (due.isEmpty() && fold != null && fold.contains("demain")) {
                 due = tomorrow();
             }
+            if (reminderAtHint <= 0 && !due.isEmpty()) {
+                // L'heure vient du texte : le jour aussi (« lundi 23 novembre à 18h »)
+                rem = alignToDate(rem, due);
+                if (rem <= System.currentTimeMillis()) due = formatDate(new Date(rem));
+            }
             return new ReminderResolution(due, rem, false, formatSpokenWhen(rem, due));
         }
 
@@ -149,6 +207,26 @@ public final class NotepadDateHelper {
 
         rem = System.currentTimeMillis() + DEFAULT_REMINDER_OFFSET_MS;
         return new ReminderResolution("", rem, true, "dans une heure");
+    }
+
+    /** Garde l'heure de {@code ms} mais au jour {@code yyyyMmDd} ; si passé, {@code ms} inchangé. */
+    static long alignToDate(long ms, String yyyyMmDd) {
+        try {
+            Date d = new SimpleDateFormat("yyyy-MM-dd", Locale.FRANCE).parse(yyyyMmDd);
+            if (d == null) return ms;
+            Calendar src = Calendar.getInstance();
+            src.setTimeInMillis(ms);
+            Calendar cal = Calendar.getInstance();
+            cal.setTime(d);
+            cal.set(Calendar.HOUR_OF_DAY, src.get(Calendar.HOUR_OF_DAY));
+            cal.set(Calendar.MINUTE, src.get(Calendar.MINUTE));
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            long out = cal.getTimeInMillis();
+            return out > System.currentTimeMillis() ? out : ms;
+        } catch (Exception e) {
+            return ms;
+        }
     }
 
     public static long millisAtHourOnDate(String yyyyMmDd, int hourOfDay) {
@@ -209,7 +287,15 @@ public final class NotepadDateHelper {
         if (yyyyMmDd.equals(today())) return "aujourd'hui";
         if (yyyyMmDd.equals(tomorrow())) return "demain";
         if (yyyyMmDd.equals(dayAfterTomorrow())) return "après-demain";
-        return yyyyMmDd;
+        try {
+            java.time.LocalDate d = java.time.LocalDate.parse(yyyyMmDd);
+            String label = d.format(java.time.format.DateTimeFormatter.ofPattern(
+                    "EEEE d MMMM", Locale.FRENCH));
+            if (d.getYear() != java.time.LocalDate.now().getYear()) label += " " + d.getYear();
+            return label;
+        } catch (Exception e) {
+            return yyyyMmDd;
+        }
     }
 
     private static String nextWeekday(int targetDay) {

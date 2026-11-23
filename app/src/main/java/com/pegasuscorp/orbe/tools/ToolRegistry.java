@@ -242,6 +242,9 @@ public class ToolRegistry {
         StringBuilder sb = new StringBuilder();
         sb.append("\n=== OUTILS DISPONIBLES ===\n");
         sb.append("DÉFAUT tool_choice none : réponds en français sans JSON ; n'émet un outil que si la demande exige une action système ou une donnée externe fraîche.\n");
+        if (tags.contains(ToolTag.SEARCH)) {
+            sb.append("WEB D'ABORD : dès qu'une question porte sur un fait vérifiable (actu, sport, personnes, chiffres, prix, dates, produits, déclarations) ou que l'utilisateur doute de ta réponse, appelle search AVANT de répondre — n'invente jamais un fait ni une date. Simple bavardage, avis, émotion : pas de recherche.\n");
+        }
         sb.append("INTERDICTION : Ne répète jamais la description de l'outil dans ta réponse.\n");
         sb.append("RÈGLE D'OR : Si tu décides d'utiliser un outil, ta réponse doit être UNIQUEMENT le bloc JSON brut, sans aucun texte explicatif avant ou après.\n");
         sb.append("JAMAIS de JSON tronqué ni de prose mélangée au JSON — soit 100 % JSON, soit 100 % français.\n");

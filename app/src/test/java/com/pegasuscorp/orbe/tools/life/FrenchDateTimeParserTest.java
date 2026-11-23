@@ -52,4 +52,22 @@ public class FrenchDateTimeParserTest {
         assertTrue(spoken.contains("demain"));
         assertTrue(spoken.contains("11h30") || spoken.contains("11h"));
     }
+
+    /** Bug 2026-11-22 : « dimanche 22 novembre 2026 21h06 » partait au dimanche suivant. */
+    @Test
+    public void explicitDayMonthWins() {
+        long ms = FrenchDateTimeParser.parseToEpochMs("dimanche 22 novembre 2026 21h06");
+        LocalDateTime dt = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), PARIS);
+        assertEquals(LocalDate.of(2026, 11, 22), dt.toLocalDate());
+        assertEquals(21, dt.getHour());
+        assertEquals(6, dt.getMinute());
+    }
+
+    @Test
+    public void explicitDayMonthWithoutTime() {
+        long ms = FrenchDateTimeParser.parseToEpochMs("le 3 décembre 2026");
+        LocalDateTime dt = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), PARIS);
+        assertEquals(LocalDate.of(2026, 12, 3), dt.toLocalDate());
+        assertEquals(9, dt.getHour());
+    }
 }
