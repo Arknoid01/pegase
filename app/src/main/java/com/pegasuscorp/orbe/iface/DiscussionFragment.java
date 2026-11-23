@@ -79,8 +79,11 @@ import static com.pegasuscorp.orbe.iface.IfaceUi.showBottomSheet;
 public class DiscussionFragment extends Fragment {
 
     public static final int REQ_CHAT_PICK_MD = 4713;
-    public static final int REQ_CHAT_PICK_IMAGE = 4714;
-    public static final int REQ_CHAT_PICK_PDF = 4715;
+    /** Sélecteur unique : PDF, image, texte (.md, .txt, …). */
+    public static final int REQ_CHAT_PICK_DOCUMENT = 4714;
+    private static final int MAX_DOCUMENT_TEXT_CHARS = 20_000;
+
+    private enum PendingDocKind { TEXT, PDF, IMAGE }
 
     private PegaseInterfaceHost host;
     private PegaseInterfaceViewModel viewModel;
@@ -104,9 +107,9 @@ public class DiscussionFragment extends Fragment {
     private PegaseVisualStateHub.Listener visualStateListener;
 
     /** Pièce jointe vision en attente (image ou PDF) — envoi au prochain ↗. */
-    @Nullable private Uri pendingVisionUri;
-    private boolean pendingVisionPdf;
-    @Nullable private String pendingVisionName;
+    @Nullable private Uri pendingDocUri;
+    @Nullable private PendingDocKind pendingDocKind;
+    @Nullable private String pendingDocName;
 
     @Override
     public void onAttach(@NonNull Context context) {
@@ -221,7 +224,7 @@ public class DiscussionFragment extends Fragment {
         visionAttachBadge.setBackground(badgeBg);
         visionAttachBadge.setOnClickListener(v -> {
             PegaseSheets.haptic(v);
-            clearPendingVision();
+            clearPendingDocument();
             Toast.makeText(requireContext(), "Pièce jointe retirée", Toast.LENGTH_SHORT).show();
         });
         LinearLayout.LayoutParams badgeLp = matchWrap();
@@ -513,23 +516,21 @@ public class DiscussionFragment extends Fragment {
         showBottomSheet(requireContext(), "Discussion", new String[]{
                 "Envoyer",
                 "Nouvelle discussion",
-                "Joindre / contextes .md",
-                "Analyser une image",
-                "Analyser un PDF",
+                "Joindre un document",
+                "Contextes .md (plans)",
                 "Exporter la conversation",
                 "Actualiser",
                 "Rechercher dans l'historique"
         }, which -> {
             if (which == 0) sendTextChatMessage();
             else if (which == 1) confirmStartNewDiscussion();
-            else if (which == 2) showChatMdAttachMenu();
-            else if (which == 3) pickImageForVision();
-            else if (which == 4) pickPdfForVision();
-            else if (which == 5) exportConversation();
-            else if (which == 6) {
+            else if (which == 2) pickDocumentForChat();
+            else if (which == 3) showChatMdAttachMenu();
+            else if (which == 4) exportConversation();
+            else if (which == 5) {
                 lastConversationText = "";
                 refreshConversationIfNeeded();
-            } else if (which == 7) showHistorySearch();
+            } else if (which == 6) showHistorySearch();
         });
     }
 
@@ -576,7 +577,7 @@ public class DiscussionFragment extends Fragment {
         } catch (Exception ignored) {}
 
         if (chatInput != null) chatInput.setText("");
-        clearPendingVision();
+        clearPendingDocument();
         lastConversationText = "";
         refreshConversationIfNeeded();
         if (host != null) host.updateSubtitle();
@@ -703,34 +704,48 @@ public class DiscussionFragment extends Fragment {
         }
     }
 
-    private void pickImageForVision() {
-        if (!ensureOpenRouterReady()) return;
+    private void pickDocumentForChat() {
+        if (viewModel != null && viewModel.isChatSending()) {
+            Toast.makeText(requireContext(), "Attends la fin de la réponse en cours.",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         try {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("image/*");
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                    "application/pdf",
+                    "image/*",
+                    "text/*",
+                    "application/json",
+                    "application/xml",
+            });
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                     | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            startActivityForResult(intent, REQ_CHAT_PICK_IMAGE);
+            startActivityForResult(intent, REQ_CHAT_PICK_DOCUMENT);
         } catch (Exception e) {
-            Toast.makeText(requireContext(), "Sélecteur d'image indisponible",
+            Toast.makeText(requireContext(), "Sélecteur de fichiers indisponible",
                     Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void pickPdfForVision() {
-        if (!ensureOpenRouterReady()) return;
-        try {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/pdf");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            startActivityForResult(intent, REQ_CHAT_PICK_PDF);
-        } catch (Exception e) {
-            Toast.makeText(requireContext(), "Sélecteur PDF indisponible",
-                    Toast.LENGTH_SHORT).show();
+    @Nullable
+    private PendingDocKind kindFromUri(@NonNull Uri uri) {
+        Context ctx = requireContext();
+        String mime = ctx.getContentResolver().getType(uri);
+        String name = uriDisplayName(uri).toLowerCase(Locale.ROOT);
+        if ("application/pdf".equals(mime) || name.endsWith(".pdf")) {
+            return PendingDocKind.PDF;
         }
+        if ((mime != null && mime.startsWith("image/"))
+                || name.matches(".*\\.(png|jpe?g|webp|gif|bmp|heic)$")) {
+            return PendingDocKind.IMAGE;
+        }
+        if ("application/zip".equals(mime) || name.endsWith(".zip")) {
+            return null;
+        }
+        return PendingDocKind.TEXT;
     }
 
     private boolean ensureOpenRouterReady() {
@@ -748,60 +763,61 @@ public class DiscussionFragment extends Fragment {
         return true;
     }
 
-    private String visionPromptFromInput(boolean pdf) {
+    private String documentPromptFromInput(@Nullable PendingDocKind kind) {
         String typed = chatInput != null ? chatInput.getText().toString().trim() : "";
         if (!typed.isEmpty()) return typed;
-        return pdf
-                ? "Analyse ce PDF : résumé clair et points importants."
-                : "Analyse cette image : décris, lis le texte, dis l'essentiel.";
+        if (kind == PendingDocKind.PDF) {
+            return "Analyse ce PDF : résumé clair et points importants.";
+        }
+        if (kind == PendingDocKind.IMAGE) {
+            return "Analyse cette image : décris, lis le texte, dis l'essentiel.";
+        }
+        return "Analyse ce document : résume clairement et réponds à ma question si j'en pose une.";
     }
 
-    /** Attache image/PDF : badge + focus prompt — l'analyse part à l'envoi. */
-    private void attachPendingVision(Uri uri, boolean pdf) {
-        if (uri == null || getContext() == null) return;
+    /** Document en attente : analyse au prochain envoi (↗). */
+    private void attachPendingDocument(@NonNull Uri uri, @NonNull PendingDocKind kind) {
+        if (getContext() == null) return;
         try {
             requireContext().getContentResolver().takePersistableUriPermission(
                     uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (SecurityException ignored) {
         }
-        pendingVisionUri = uri;
-        pendingVisionPdf = pdf;
-        pendingVisionName = uriDisplayName(uri);
-        refreshVisionAttachBadge();
+        pendingDocUri = uri;
+        pendingDocKind = kind;
+        pendingDocName = uriDisplayName(uri);
+        refreshDocumentAttachBadge();
         if (chatInput != null) {
-            chatInput.setHint(pdf
-                    ? "Que faire de ce PDF ? (puis ↗)"
-                    : "Que faire de cette image ? (puis ↗)");
+            chatInput.setHint("Consigne pour ce document (puis ↗)");
             chatInput.requestFocus();
         }
         Toast.makeText(requireContext(),
-                (pdf ? "PDF" : "Image") + " prêt — écris ta consigne puis envoie",
+                "Document prêt — écris ta consigne puis envoie",
                 Toast.LENGTH_SHORT).show();
     }
 
-    private void clearPendingVision() {
-        pendingVisionUri = null;
-        pendingVisionPdf = false;
-        pendingVisionName = null;
-        refreshVisionAttachBadge();
+    private void clearPendingDocument() {
+        pendingDocUri = null;
+        pendingDocKind = null;
+        pendingDocName = null;
+        refreshDocumentAttachBadge();
         if (chatInput != null) {
             chatInput.setHint("Écris à Pégase…");
         }
     }
 
-    private void refreshVisionAttachBadge() {
+    private void refreshDocumentAttachBadge() {
         if (visionAttachBadge == null) return;
-        if (pendingVisionUri == null) {
+        if (pendingDocUri == null) {
             visionAttachBadge.setVisibility(View.GONE);
             visionAttachBadge.setText("");
             return;
         }
-        String name = pendingVisionName != null ? pendingVisionName : "fichier";
+        String name = pendingDocName != null ? pendingDocName : "fichier";
         if (name.length() > 28) name = name.substring(0, 25) + "…";
-        String label = pendingVisionPdf
-                ? "📄 PDF · " + name + "  ×"
-                : "🖼️ Image · " + name + "  ×";
-        visionAttachBadge.setText(label);
+        String icon = pendingDocKind == PendingDocKind.PDF ? "📄"
+                : pendingDocKind == PendingDocKind.IMAGE ? "🖼️" : "📎";
+        visionAttachBadge.setText(icon + " " + name + "  ×");
         visionAttachBadge.setVisibility(View.VISIBLE);
     }
 
@@ -810,13 +826,7 @@ public class DiscussionFragment extends Fragment {
         Context ctx = requireContext();
         String usePrompt = prompt != null ? prompt.trim() : "";
         if (usePrompt.isEmpty()) {
-            usePrompt = visionPromptFromInput(pdf);
-            // visionPromptFromInput lit encore le champ — forcer défaut si vide après clear
-            if (usePrompt.isEmpty()) {
-                usePrompt = pdf
-                        ? "Analyse ce PDF : résumé clair et points importants."
-                        : "Analyse cette image : décris, lis le texte, dis l'essentiel.";
-            }
+            usePrompt = documentPromptFromInput(pdf ? PendingDocKind.PDF : PendingDocKind.IMAGE);
         }
 
         String displayName = uriDisplayName(uri);
@@ -908,15 +918,71 @@ public class DiscussionFragment extends Fragment {
                 && resultCode == android.app.Activity.RESULT_OK
                 && data != null && data.getData() != null) {
             onChatPickMdResult(data.getData());
-        } else if (requestCode == REQ_CHAT_PICK_IMAGE
+        } else if (requestCode == REQ_CHAT_PICK_DOCUMENT
                 && resultCode == android.app.Activity.RESULT_OK
                 && data != null && data.getData() != null) {
-            attachPendingVision(data.getData(), false);
-        } else if (requestCode == REQ_CHAT_PICK_PDF
-                && resultCode == android.app.Activity.RESULT_OK
-                && data != null && data.getData() != null) {
-            attachPendingVision(data.getData(), true);
+            Uri uri = data.getData();
+            PendingDocKind kind = kindFromUri(uri);
+            if (kind == null) {
+                Toast.makeText(requireContext(),
+                        "Les archives ZIP ne sont pas encore prises en charge ici.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            if ((kind == PendingDocKind.PDF || kind == PendingDocKind.IMAGE)
+                    && !ApiKeyStore.hasOpenRouterKey(requireContext())) {
+                Toast.makeText(requireContext(),
+                        "PDF et images nécessitent une clé OpenRouter (Réglages → Clés API).",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            attachPendingDocument(uri, kind);
         }
+    }
+
+    /** Texte (.md, .txt, …) : même tour LLM que le chat, document inclus dans le message. */
+    private void startTextDocumentChat(@NonNull Uri uri, String prompt) {
+        if (getContext() == null || viewModel == null) return;
+        Context ctx = requireContext();
+        String displayName = uriDisplayName(uri);
+        String usePrompt = prompt != null ? prompt.trim() : "";
+        if (usePrompt.isEmpty()) {
+            usePrompt = documentPromptFromInput(PendingDocKind.TEXT);
+        }
+        String content;
+        try {
+            content = readChatUriUtf8(uri);
+        } catch (Exception e) {
+            Toast.makeText(ctx, "Impossible de lire ce fichier.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (TextUtils.isEmpty(content)) {
+            Toast.makeText(ctx, "Fichier vide.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (content.length() > MAX_DOCUMENT_TEXT_CHARS) {
+            content = content.substring(0, MAX_DOCUMENT_TEXT_CHARS)
+                    + "\n\n[… document tronqué à " + MAX_DOCUMENT_TEXT_CHARS + " caractères]";
+        }
+        String userLabel = "📎 Document « " + displayName + " »\n« " + usePrompt + " »";
+        String composed = usePrompt + "\n\n---\nDocument joint « " + displayName + " » :\n\n" + content;
+
+        if (!ChatSessionRegistry.get(ctx).isActive()) {
+            PegaseWakeController.setTextDiscussionActive(true);
+            VoiceWakeClient.get().stopListening(ctx);
+        }
+        ensureTurnsListener();
+        chatInput.setText("");
+        viewModel.setChatSending(true);
+        setSendButtonBusy(true);
+        if (thinkingView != null) {
+            thinkingView.reset();
+        }
+        if (host != null) host.updateSubtitle();
+        MemoryRepository.getInstance(ctx).addTurn(true, userLabel);
+        PegaseSession.get(ctx).send(composed, textSessionObserver());
+        lastConversationText = "";
+        refreshConversationIfNeeded();
     }
 
     public void onChatPickMdResult(Uri uri) {
@@ -1058,15 +1124,18 @@ public class DiscussionFragment extends Fragment {
         }
         String text = chatInput.getText().toString().trim();
 
-        // Image / PDF attaché → analyse vision avec le prompt saisi
-        if (pendingVisionUri != null) {
-            if (!ensureOpenRouterReady()) return;
-            Uri uri = pendingVisionUri;
-            boolean pdf = pendingVisionPdf;
+        if (pendingDocUri != null && pendingDocKind != null) {
+            Uri uri = pendingDocUri;
+            PendingDocKind kind = pendingDocKind;
             String prompt = text;
             chatInput.setText("");
-            clearPendingVision();
-            startVisionAnalysis(uri, pdf, prompt);
+            clearPendingDocument();
+            if (kind == PendingDocKind.TEXT) {
+                startTextDocumentChat(uri, prompt);
+                return;
+            }
+            if (!ensureOpenRouterReady()) return;
+            startVisionAnalysis(uri, kind == PendingDocKind.PDF, prompt);
             return;
         }
 
