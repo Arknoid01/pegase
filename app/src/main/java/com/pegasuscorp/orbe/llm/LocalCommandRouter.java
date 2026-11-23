@@ -386,6 +386,24 @@ public final class LocalCommandRouter {
         return g.toString();
     }
 
+    /**
+     * Même format que {@link #grammar} exprimé en expression régulière, pour la contrainte de
+     * décodage de LiteRT-LM (qui n'accepte pas le GBNF de llama.cpp).
+     */
+    static String regex(List<String> tools) {
+        StringBuilder calls = new StringBuilder();
+        for (int i = 0; i < tools.size(); i++) {
+            String t = tools.get(i);
+            Spec sp = SPECS.get(t);
+            if (i > 0) calls.append('|');
+            calls.append(t);
+            if (sp.actions.length > 0) calls.append(" (").append(String.join("|", sp.actions)).append(')');
+            calls.append("( (").append(String.join("|", sp.params)).append(")=\"[^\"\\n]{1,80}\")*");
+        }
+        String c = "(" + calls + ")";
+        return allowsAsk(tools) ? "(\\? [^\\n]{3,150}|" + c + ")" : c;
+    }
+
     /** Prompt fixe (système + exemples) puis la phrase ; l'heure est à la fin (cache réutilisable). */
     static JSONArray compactMessages(List<String> tools, String userText) throws Exception {
         StringBuilder lines = new StringBuilder();
@@ -454,6 +472,12 @@ public final class LocalCommandRouter {
             // « start » vérifié aussi : sinon l'heure du message (« Nous sommes le… ») est recopiée
             if (k.equals("action") || k.equals("duration")) continue;
             Object v = a.opt(k);
+            // Heure d'une alarme : un nombre absent de la phrase (« mets un réveil ») est inventé
+            if (tool.equals("alarm") && (k.equals("hour") || k.equals("minute")) && v instanceof Number) {
+                String num = String.valueOf(((Number) v).intValue());
+                if (!Pattern.compile("(^|[^0-9])" + num + "([^0-9]|$)").matcher(f).find()) drop.add(k);
+                continue;
+            }
             if (!(v instanceof String)) continue;
             boolean seen = false;
             for (String w : fold((String) v).split("[^a-z0-9']+")) {
@@ -485,6 +509,7 @@ public final class LocalCommandRouter {
             JSONObject body = new JSONObject()
                     .put("messages", msgs)
                     .put("grammar", grammar(tools))
+                    .put("regex", regex(tools))
                     .put("temperature", 0.2)
                     .put("max_tokens", 64)
                     .put("chat_template_kwargs", kw);

@@ -63,6 +63,11 @@ public final class LocalLlmServer {
     private static LocalLlmServer instance;
 
     private final Context app;
+
+    /** Moteur LiteRT-LM (Gemma .litertlm, GPU) au lieu de llama-server. Réglage « moteur_litert ». */
+    public static final String LITERT_MODEL_FILE = "gemma-4-E2B-it.litertlm";
+    private static final String KEY_LITERT = "moteur_litert";
+    private long litertHandle = 0;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
     private Process process;
     private ScheduledFuture<?> idleStop;
@@ -95,6 +100,14 @@ public final class LocalLlmServer {
      * « Toujours local » : le cloud est débranché, toute la discussion passe par le modèle du
      * téléphone (choix de Yannick le 2026-11-23, pour vivre avec le local).
      */
+    public static boolean isLitert(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LITERT, false);
+    }
+
+    public static void setLitert(Context ctx, boolean on) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LITERT, on).apply();
+    }
+
     public static boolean isLocalOnly(Context ctx) {
         return ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_LOCAL_ONLY, false);
@@ -182,7 +195,61 @@ public final class LocalLlmServer {
 
     /** Activé + binaire + modèle présents. */
     public boolean isAvailable() {
+        if (usesLitert()) {
+            return isEnabled(app) && new File(ModelStore.modelsDir(app), LITERT_MODEL_FILE).length() > 2_000_000_000L;
+        }
         return isEnabled(app) && binary().canExecute() && isModelComplete();
+    }
+
+    /** Vrai si le moteur LiteRT-LM remplace llama-server. */
+    public boolean usesLitert() {
+        return isLitert(app);
+    }
+
+    /** Charge le modèle LiteRT une fois (GPU). Bloquant. */
+    private synchronized boolean litertReady() {
+        if (litertHandle != 0) return true;
+        if (!isAvailable()) return false;
+        java.io.File cache = new java.io.File(app.getCacheDir(), "litert");
+        cache.mkdirs();
+        litertHandle = LiteRtNative.nativeLoad(
+                new File(ModelStore.modelsDir(app), LITERT_MODEL_FILE).getAbsolutePath(),
+                cache.getAbsolutePath(), "gpu");
+        if (litertHandle == 0) Log.e(TAG, "LiteRT : " + LiteRtNative.lastError());
+        return litertHandle != 0;
+    }
+
+    /**
+     * Réponse LiteRT au format OpenAI (choices[0].message.content). Le système et l'historique
+     * passent tels quels ; la contrainte {@code regex} remplace la grammaire GBNF de llama.cpp.
+     */
+    private JSONObject litertChat(JSONObject body) throws Exception {
+        if (!litertReady()) throw new java.io.IOException("LiteRT indisponible : " + LiteRtNative.lastError());
+        org.json.JSONArray msgs = body.getJSONArray("messages");
+        String sys = "";
+        org.json.JSONArray hist = new org.json.JSONArray();
+        String user = null;
+        for (int i = 0; i < msgs.length(); i++) {
+            JSONObject m = msgs.getJSONObject(i);
+            String role = m.optString("role", "");
+            if (role.equals("system") && sys.isEmpty()) {
+                sys = m.optString("content", "");
+            } else if (i == msgs.length() - 1) {
+                user = m.toString();
+            } else {
+                hist.put(m);
+            }
+        }
+        if (user == null) throw new java.io.IOException("LiteRT : pas de message utilisateur");
+        String regex = body.optString("regex", null);
+        if (regex != null && regex.isEmpty()) regex = null;
+        int max = body.optInt("max_tokens", 256);
+        String json = LiteRtNative.nativeGenerate(litertHandle,
+                JSONObject.quote(sys), hist.toString(), user, max, regex);
+        if (json == null) throw new java.io.IOException("LiteRT : " + LiteRtNative.lastError());
+        String text = new JSONObject(json).getJSONArray("content").getJSONObject(0).getString("text");
+        return new JSONObject().put("choices", new org.json.JSONArray().put(
+                new JSONObject().put("message", new JSONObject().put("role", "assistant").put("content", text))));
     }
 
     public String baseUrl() {
@@ -197,6 +264,7 @@ public final class LocalLlmServer {
      */
     public synchronized boolean ensureStarted() {
         touch();
+        if (usesLitert()) return litertReady();
         if (ready && process != null && process.isAlive()) return true;
         if (!isAvailable()) return false;
         if (healthy()) { ready = true; return true; }   // instance déjà lancée (redémarrage appli)
@@ -263,6 +331,7 @@ public final class LocalLlmServer {
      */
     public JSONObject chatInSlot(JSONObject body, int slot, String cacheName,
             JSONObject templateBody, int readTimeoutMs) throws Exception {
+        if (usesLitert()) return chat(body, readTimeoutMs);     // pas de cache de préfixe en LiteRT
         if (slot < 0 || slot >= SLOT_COUNT || cacheName == null) return chat(body, readTimeoutMs);
         if (ensurePrefix(slot, cacheName, templateBody)) restore(slot, cacheName);
         body.put("id_slot", slot);
@@ -345,6 +414,9 @@ public final class LocalLlmServer {
     /** POST /v1/chat/completions. Bloquant. */
     public JSONObject chat(JSONObject body, int readTimeoutMs) throws Exception {
         touch();
+        if (usesLitert()) {
+            try { return litertChat(body); } finally { touch(); }
+        }
         try {
             return HttpJson.postJson(baseUrl() + "/v1/chat/completions", null, body,
                     3_000, readTimeoutMs);
@@ -360,6 +432,14 @@ public final class LocalLlmServer {
     public String chatStream(JSONObject body, int readTimeoutMs,
             java.util.function.Consumer<String> onText) throws Exception {
         touch();
+        if (usesLitert()) {
+            try {
+                String text = litertChat(body).getJSONArray("choices").getJSONObject(0)
+                        .getJSONObject("message").getString("content");
+                if (onText != null) onText.accept(text);
+                return text;
+            } finally { touch(); }
+        }
         java.net.HttpURLConnection c = null;
         try {
             body.put("stream", true);
@@ -416,6 +496,10 @@ public final class LocalLlmServer {
 
     public synchronized void stop() {
         stopProcess();
+        if (litertHandle != 0) {
+            LiteRtNative.nativeUnload(litertHandle);
+            litertHandle = 0;
+        }
     }
 
     // ---- Interne ----

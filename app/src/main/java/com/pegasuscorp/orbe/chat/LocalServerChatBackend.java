@@ -404,6 +404,7 @@ public final class LocalServerChatBackend implements ChatBackend {
             JSONObject body = new JSONObject()
                     .put("messages", m)
                     .put("grammar", "root ::= \"non\" | \"web \" [^\\n]{3,90}\n")
+                    .put("regex", "non|web [^\\n]{3,90}")
                     .put("temperature", 0.1)
                     .put("max_tokens", 32)
                     .put("id_slot", LocalLlmServer.WEB_DECISION_SLOT)

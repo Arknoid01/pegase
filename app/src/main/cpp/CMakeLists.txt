@@ -21,11 +21,11 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_SRC ${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp)
 add_subdirectory(${LLAMA_SRC} build-llama)
 
-add_library(pegase_llm SHARED llama_jni.cpp)
+add_library(pegase_llm SHARED llama_jni.cpp litert_jni.cpp)
 
 target_include_directories(pegase_llm PRIVATE
         ${LLAMA_SRC}/include
         ${LLAMA_SRC}/ggml/include)
 
 find_library(log-lib log)
-target_link_libraries(pegase_llm llama ${log-lib})
+target_link_libraries(pegase_llm llama ${log-lib} dl)

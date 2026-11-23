@@ -134,6 +134,21 @@
         android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Orbe">
+        <!-- LiteRT-LM : accès au GPU OpenCL du fournisseur. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <receiver
+            android:name=".llm.LiteRtTestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.pegasuscorp.orbe.LITERT_TEST" />
+                <action android:name="com.pegasuscorp.orbe.LITERT_CASES" />
+                <action android:name="com.pegasuscorp.orbe.LITERT_ROUTE" />
+                <action android:name="com.pegasuscorp.orbe.LITERT_ROUTES" />
+                <action android:name="com.pegasuscorp.orbe.LITERT_SET" />
+                <action android:name="com.pegasuscorp.orbe.LITERT_CHAT" />
+            </intent-filter>
+        </receiver>
 
         <!-- MainActivity = l'ecran d'accueil. Les 3 categories/flags ci-dessous
              sont ce qui fait qu'Android la propose comme launcher. -->
