@@ -41,7 +41,8 @@ import java.util.regex.Pattern;
 public final class LocalServerChatBackend implements ChatBackend {
 
     private static final String TAG = "LocalChat";
-    private static final int MAX_TURNS = 8;
+    private static final int MAX_WINDOW = 12;
+    private static final int KEEP_AFTER_JUMP = 6;
     private static final int MAX_TURN_CHARS = 700;
     private static final int REPLY_TIMEOUT_MS = 240_000;
     /** Petites phrases sans besoin de web (évite une décision de ~3 s). */
@@ -116,10 +117,10 @@ public final class LocalServerChatBackend implements ChatBackend {
         String lastAssistant = lastAssistantText(history);
 
         String web = null;
-        if (!SMALL_TALK.matcher(user).matches() && user.length() > 3) {
-            String query = webQuery(server, user, lastAssistant);
-            if (query != null) web = runSearch(query, user);
-        }
+        int need = webNeed(user);
+        String query = need == WEB_YES ? user
+                : need == WEB_ASK ? webQuery(server, user, lastAssistant) : null;
+        if (query != null) web = runSearch(query, user);
 
         JSONArray msgs = new JSONArray();
         msgs.put(new JSONObject().put("role", "system").put("content", systemPrompt()));
@@ -154,6 +155,8 @@ public final class LocalServerChatBackend implements ChatBackend {
                     .append(UserProfileStore.getInstance(app).getUserName())
                     .append(") : ").append(web).append("]\n");
         }
+        // Pas d'heure ici ni dans le système : tout ce qui change d'un message à l'autre casse
+        // le cache du serveur (≈600 jetons relus, ≈12–15 s). La date du jour suffit.
         u.append(user);
         if (lastRole.equals("user")) {
             JSONObject prev = msgs.getJSONObject(msgs.length() - 1);
@@ -166,7 +169,7 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .put("messages", msgs)
                 .put("temperature", web != null ? 0.4 : 0.7)
                 .put("top_p", 0.9)
-                .put("max_tokens", 450)
+                .put("max_tokens", 220)
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
                 .put("cache_prompt", true)
                 .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
@@ -177,21 +180,63 @@ public final class LocalServerChatBackend implements ChatBackend {
                 main.post(() -> ((StreamOnReply) callback).onPartial(shown));
             }
         });
-        Log.i(TAG, "réponse " + (System.currentTimeMillis() - t0) + " ms, web=" + (web != null));
+        Log.i(TAG, "réponse " + (System.currentTimeMillis() - t0) + " ms, web=" + (web != null)
+                + " · " + LocalLlmServer.describeTimings(server.lastTimings));
         String out = PegasePrompt.sanitizeForDisplay(full).trim();
         if (out.isEmpty()) throw new IllegalStateException("réponse vide");
         return out;
     }
 
+    static final int WEB_NO = 0, WEB_YES = 1, WEB_ASK = 2;
+    /** Demandes de faits frais sans ambiguïté : recherche directe, sans décision du modèle. */
+    private static final Pattern WEB_SURE = Pattern.compile(
+            "\\b(prix|tarifs?|combien co[uû]te|cours de|en bourse|r[ée]sultats?|score|classement|"
+                    + "qui a gagn[ée]|vainqueur|actualit[ée]s?|news|derni[eè]res? nouvelles|"
+                    + "horaires?|ouvert ce|programme t[ée]l[ée]|sorti[e]? quand|date de sortie|"
+                    + "qu'a dit|qu'est-ce qu'a dit|d[ée]claration)",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern QUESTION = Pattern.compile(
+            "\\?|^(qui|que|quoi|quel|quelle|quels|quelles|quand|o[uù]|comment|pourquoi|combien|"
+                    + "est-ce|c'est quoi|tu sais|tu connais|dis-moi|explique|raconte|on a des|"
+                    + "il y a|y a-t-il)\\b",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Oui (fait frais évident) / non (pas une question, petite phrase) / à décider par le modèle. */
+    static int webNeed(String user) {
+        String u = user == null ? "" : user.trim();
+        if (u.length() <= 3 || SMALL_TALK.matcher(u).matches()) return WEB_NO;
+        if (WEB_SURE.matcher(u).find()) return WEB_YES;
+        if (!QUESTION.matcher(u).find()) return WEB_NO;      // affirmation, émotion, opinion
+        return WEB_ASK;
+    }
+
+    /** Précharge la consigne de discussion dans son slot (ouverture du chat, hors UI). */
+    public static void prewarm(Context ctx) {
+        try {
+            LocalLlmServer server = LocalLlmServer.get(ctx);
+            if (!server.isAvailable() || !server.ensureStarted()) return;
+            LocalServerChatBackend b = new LocalServerChatBackend(ctx);
+            JSONArray m = new JSONArray()
+                    .put(new JSONObject().put("role", "system").put("content", b.systemPrompt()))
+                    .put(new JSONObject().put("role", "user").put("content", "…"));
+            server.chat(new JSONObject().put("messages", m).put("max_tokens", 1)
+                    .put("id_slot", LocalLlmServer.CHAT_SLOT).put("cache_prompt", true)
+                    .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false)),
+                    120_000);
+            b.webQuery(server, "tu as vu le match d'hier ?", null);   // exemples de la décision en cache
+        } catch (Exception e) {
+            Log.w(TAG, "préchauffage : " + e.getMessage());
+        }
+    }
+
     private String systemPrompt() {
         UserProfileStore p = UserProfileStore.getInstance(app);
-        String now = new SimpleDateFormat("EEEE d MMMM yyyy, HH'h'mm", Locale.FRENCH)
-                .format(new Date());
+        String now = new SimpleDateFormat("EEEE d MMMM yyyy", Locale.FRENCH).format(new Date());
         StringBuilder sb = new StringBuilder();
         sb.append("Tu es ").append(p.getAssistantName()).append(", l'assistant personnel de ")
                 .append(p.getUserName()).append(", sur son téléphone. Tu le tutoies. ")
                 .append("Personnalité : ").append(p.getAssistantPersonality()).append('\n')
-                .append("Réponds en français, comme à l'oral, en 2 à 5 phrases, sans listes ni ")
+                .append("Réponds en français, comme à l'oral, en 2 ou 3 phrases courtes, sans listes ni ")
                 .append("markdown ni emojis. Reste sur ce que ").append(p.getUserName())
                 .append(" vient de dire et ne contredis pas ce qu'il affirme sur sa propre vie. ")
                 .append("Quand un bloc entre crochets donne ce que ta recherche web a trouvé, c'est ")
@@ -306,8 +351,25 @@ public final class LocalServerChatBackend implements ChatBackend {
         return null;
     }
 
-    private static List<Turn> recentTurns(List<Turn> history) {
-        int start = Math.max(0, history.size() - MAX_TURNS);
+    /** Premier tour gardé (texte), stable d'un message à l'autre tant que possible. */
+    private String anchorText;
+
+    /**
+     * Fenêtre d'historique par PALIERS : même point de départ tant qu'on reste sous
+     * {@link #MAX_WINDOW} tours, puis saut aux {@link #KEEP_AFTER_JUMP} derniers. Une fenêtre
+     * qui glisse d'un tour à chaque message changerait le début du prompt → tout relu.
+     */
+    private synchronized List<Turn> recentTurns(List<Turn> history) {
+        int start = -1;
+        if (anchorText != null) {
+            for (int i = history.size() - 1; i >= 0; i--) {
+                if (history.get(i).text.equals(anchorText)) { start = i; break; }
+            }
+        }
+        if (start < 0 || history.size() - start > MAX_WINDOW) {
+            start = Math.max(0, history.size() - KEEP_AFTER_JUMP);
+        }
+        anchorText = start < history.size() ? history.get(start).text : null;
         return new ArrayList<>(history.subList(start, history.size()));
     }
 

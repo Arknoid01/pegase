@@ -38,7 +38,7 @@ public final class LocalLlmServer {
     /** Ancien modèle (Qwen3.5-2B), supprimé une fois Gemma en place (−1,3 Go). */
     static final String LEGACY_MODEL_FILE = "Qwen3.5-2B-Q4_K_M.gguf";
     private static final int PORT = 18092;
-    private static final long IDLE_STOP_MS = 10L * 60 * 1000;
+    private static final long IDLE_STOP_MS = 20L * 60 * 1000;
     private static final long START_TIMEOUT_MS = 60_000;
     /** Slots des groupes d'outils du routeur (0–9). */
     public static final int SLOT_COUNT = 10;
@@ -46,8 +46,12 @@ public final class LocalLlmServer {
     public static final int CHAT_SLOT = 10;
     public static final int WEB_DECISION_SLOT = 11;
     private static final int TOTAL_SLOTS = 12;
-    /** Contexte partagé entre slots (--kv-unified) : la discussion peut en prendre l'essentiel. */
-    private static final int TOTAL_CTX = 16384;
+    /**
+     * 4096 jetons par slot, contexte NON partagé : avec --kv-unified, une requête sur un slot
+     * effaçait le cache des autres (mesuré : la décision web vidait la discussion → 244 jetons
+     * relus au lieu de 13). Coût ≈ +0,9 Go, il reste ≈2,6 Go libres sur le Nothing.
+     */
+    private static final int TOTAL_CTX = 4096 * 12;
 
     private static final String PREFS = "local_llm";
     private static final String KEY_ENABLED = "commands_enabled";
@@ -198,16 +202,20 @@ public final class LocalLlmServer {
             List<String> cmd = new ArrayList<>();
             cmd.add(binary().getAbsolutePath());
             cmd.add("-m"); cmd.add(modelFile().getAbsolutePath());
-            // Un slot (= un cache de préfixe) par groupe d'outils + discussion + décision web ;
-            // contexte unifié : un slot prend ce dont il a besoin. Caches de préfixe sur disque.
+            // Un slot (= un cache de préfixe) par groupe d'outils + discussion + décision web.
             cmd.add("-c"); cmd.add(String.valueOf(TOTAL_CTX));
-            cmd.add("--kv-unified");
             cmd.add("-np"); cmd.add(String.valueOf(TOTAL_SLOTS));
             cmd.add("-fa"); cmd.add("on");
             cmd.add("-ctk"); cmd.add("q8_0");
             cmd.add("-ctv"); cmd.add("q8_0");
             cmd.add("--slot-save-path"); cmd.add(slotsDir().getAbsolutePath() + "/");
+            // 4 cœurs rapides (A78, cpu4–7) : le mot d'éveil et l'interface restent sur les petits.
             cmd.add("-t"); cmd.add("4");
+            cmd.add("-C"); cmd.add("f0");
+            cmd.add("--cpu-strict"); cmd.add("1");
+            // Cache complet aussi pour les couches à fenêtre glissante (Gemma) : la discussion
+            // ne relit que le nouveau message (mesuré : 26 jetons relus au lieu de 61–73).
+            cmd.add("--swa-full");
             cmd.add("--jinja");
             cmd.add("--host"); cmd.add("127.0.0.1");
             cmd.add("--port"); cmd.add(String.valueOf(PORT));
@@ -352,6 +360,7 @@ public final class LocalLlmServer {
         java.net.HttpURLConnection c = null;
         try {
             body.put("stream", true);
+            lastTimings = null;
             c = (java.net.HttpURLConnection) new java.net.URL(baseUrl() + "/v1/chat/completions")
                     .openConnection();
             c.setConnectTimeout(3_000);
@@ -373,6 +382,7 @@ public final class LocalLlmServer {
                     String data = line.substring(5).trim();
                     if (data.equals("[DONE]")) break;
                     JSONObject ev = new JSONObject(data);
+                    if (ev.has("timings")) lastTimings = ev.optJSONObject("timings");
                     org.json.JSONArray ch = ev.optJSONArray("choices");
                     if (ch == null || ch.length() == 0) continue;
                     JSONObject delta = ch.getJSONObject(0).optJSONObject("delta");
@@ -388,6 +398,17 @@ public final class LocalLlmServer {
             if (c != null) c.disconnect();
             touch();
         }
+    }
+
+    /** Compteurs de la dernière réponse en flux (llama-server « timings »), ou null. */
+    public volatile JSONObject lastTimings;
+
+    /** « relus 32 · cache 321 · lecture 37/s · écrits 28 à 9,2/s » pour le journal. */
+    public static String describeTimings(JSONObject t) {
+        if (t == null) return "?";
+        return String.format(java.util.Locale.FRANCE, "relus %d · cache %d · lecture %.0f/s · écrits %d à %.1f/s",
+                t.optInt("prompt_n"), t.optInt("cache_n"), t.optDouble("prompt_per_second", 0),
+                t.optInt("predicted_n"), t.optDouble("predicted_per_second", 0));
     }
 
     public synchronized void stop() {

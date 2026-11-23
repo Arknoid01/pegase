@@ -923,8 +923,13 @@ public class PegaseSession {
         final com.pegasuscorp.orbe.llm.LocalLlmServer server =
                 com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext);
         if (!server.isAvailable()) return;
-        localLlmExecutor.execute(() ->
-                com.pegasuscorp.orbe.llm.LocalCommandRouter.prewarm(server, toolRegistry));
+        localLlmExecutor.execute(() -> {
+            com.pegasuscorp.orbe.llm.LocalCommandRouter.prewarm(server, toolRegistry);
+            // Mode « Toujours local » : consigne de discussion déjà lue quand le 1er message arrive
+            if (com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(appContext)) {
+                com.pegasuscorp.orbe.chat.LocalServerChatBackend.prewarm(appContext);
+            }
+        });
     }
 
     /**
