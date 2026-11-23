@@ -153,6 +153,10 @@ public final class OpenRouterVisionClient {
 
     static String analyzeBlocking(Context app, String userPrompt,
             JSONObject imagePart, JSONObject filePart) throws Exception {
+        if (com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(app)) {
+            throw new IllegalStateException("Mode « Toujours local » : la lecture d'images et de "
+                    + "PDF passe par le cloud, elle est désactivée (Réglages → Cerveau).");
+        }
         String key = ApiKeyStore.getOpenRouterKey(app);
         if (TextUtils.isEmpty(key)) {
             throw new IllegalStateException(

@@ -382,8 +382,11 @@ public class PegaseSession {
 
         notifyLlmStart(obs);
 
+        // Mode « Toujours local » : pas d'outils natifs côté modèle, la réponse s'écrit en direct.
+        boolean localOnly = appContext != null
+                && com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(appContext);
         boolean stream = sessionContext.streamingEnabled && conv.supportsStreaming()
-                && !sendOptions.nativeTools;
+                && (!sendOptions.nativeTools || localOnly);
         if (stream) {
             conv.send(payload, displayText, new ChatBackend.StreamOnReply() {
                 @Override
@@ -995,7 +998,8 @@ public class PegaseSession {
             main.post(() -> {
                 if (requestId != activeRequestId) return;   // nouvelle demande entre-temps
                 if (d == null) {
-                    Trace.error("local_llm", "repli cloud : " + modelText);
+                    Trace.error("local_llm", (com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(appContext)
+                            ? "repli discussion locale : " : "repli cloud : ") + modelText);
                     currentTurnLocal = false;
                     sendToCloud(conv, payload, displayText, userText, obs);
                     return;

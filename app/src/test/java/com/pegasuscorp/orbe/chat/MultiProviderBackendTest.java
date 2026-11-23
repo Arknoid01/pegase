@@ -98,7 +98,8 @@ public class MultiProviderBackendTest {
     public void factory_returnsMultiProviderWhenCloud() {
         com.pegasuscorp.orbe.llm.ModelStore.setUseLocalLlm(ctx, false);
         ChatBackend backend = ChatBackendFactory.create(ctx);
-        assertTrue(backend instanceof MultiProviderBackend);
+        assertTrue(backend instanceof LocalOnlySwitchBackend);
+        assertTrue(((LocalOnlySwitchBackend) backend).cloud() instanceof MultiProviderBackend);
     }
 
     @Test
@@ -107,7 +108,7 @@ public class MultiProviderBackendTest {
         ChatBackendFactory.resetForTests();
         ChatBackend a = ChatBackendFactory.create(ctx);
         ChatBackend b = ChatBackendFactory.create(ctx);
-        assertTrue(a instanceof MultiProviderBackend);
+        assertTrue(((LocalOnlySwitchBackend) a).cloud() instanceof MultiProviderBackend);
         assertSame(a, b);
         ChatBackendFactory.resetForTests();
     }

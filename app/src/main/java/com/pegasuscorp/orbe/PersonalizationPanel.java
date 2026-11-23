@@ -282,7 +282,31 @@ public class PersonalizationPanel extends FrameLayout {
         userCoordsField = addApiKeyField(context, "Coordonnées GPS (lat,lon)");
 
         body = newPage("brain", "🧠", "Cerveau",
-                "Fournisseur, modèle, clés API");
+                "Toujours local, fournisseur, modèle, clés API");
+
+        body.addView(addSubHeading(context, "Modèle du téléphone"));
+        com.pegasuscorp.orbe.llm.LocalLlmServer localSrv =
+                com.pegasuscorp.orbe.llm.LocalLlmServer.get(context);
+        addSwitchRow("Toujours local (cloud débranché)",
+                "Toute la discussion sur le téléphone avec "
+                        + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL
+                        + " : plus lent (≈20–60 s), rien n'est envoyé aux IA du cloud. "
+                        + "La recherche web reste possible (moteur privé).",
+                com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(context),
+                on -> com.pegasuscorp.orbe.llm.LocalLlmServer.setLocalOnly(context, on));
+        if (localSrv.isModelComplete()) {
+            body.addView(hintLabel(context, "Modèle "
+                    + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL + " : installé ✓"));
+        } else {
+            addActionRow("Télécharger " + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL
+                    + " (≈3 Go, Wi-Fi)", () ->
+                    android.widget.Toast.makeText(getContext(),
+                            localSrv.startModelDownload() >= 0
+                                    ? "Téléchargement lancé — suis-le dans les notifications."
+                                    : "Téléchargement impossible.",
+                            android.widget.Toast.LENGTH_LONG).show());
+        }
+        body.addView(spacer(context, (int) (8 * density)));
 
         body.addView(addSubHeading(context, "Fournisseur"));
         body.addView(hintLabel(context,

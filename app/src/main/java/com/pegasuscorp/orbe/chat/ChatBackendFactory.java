@@ -10,6 +10,8 @@ import com.pegasuscorp.orbe.llm.ModelStore;
 public final class ChatBackendFactory {
 
     private static volatile ChatBackend sharedCloudBackend;
+    private static volatile ChatBackend sharedLocalBackend;
+    private static volatile ChatBackend sharedSwitch;
 
     private ChatBackendFactory() {}
 
@@ -20,18 +22,23 @@ public final class ChatBackendFactory {
         }
         // Un seul MultiProviderBackend — file IO partagée, pas de HTTP parallèles fantômes
         // (SessionSummarizer, F1NewsSummarizer, discussion…).
-        if (sharedCloudBackend == null) {
+        if (sharedSwitch == null) {
             synchronized (ChatBackendFactory.class) {
-                if (sharedCloudBackend == null) {
+                if (sharedSwitch == null) {
                     sharedCloudBackend = new MultiProviderBackend(app);
+                    sharedLocalBackend = new LocalServerChatBackend(app);
+                    sharedSwitch = new LocalOnlySwitchBackend(app, sharedCloudBackend,
+                            sharedLocalBackend);
                 }
             }
         }
-        return sharedCloudBackend;
+        return sharedSwitch;
     }
 
     /** Tests unitaires — réinitialise le singleton cloud. */
     public static void resetForTests() {
         sharedCloudBackend = null;
+        sharedLocalBackend = null;
+        sharedSwitch = null;
     }
 }
