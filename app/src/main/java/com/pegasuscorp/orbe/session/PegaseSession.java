@@ -11,8 +11,11 @@ import com.pegasuscorp.orbe.bureau.BureauMarkdownParser;
 import com.pegasuscorp.orbe.bureau.BureauPlanningBrain;
 import com.pegasuscorp.orbe.bureau.BureauProject;
 import com.pegasuscorp.orbe.chat.AgenticChain;
+import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import com.pegasuscorp.orbe.chat.ChatBackend;
+import com.pegasuscorp.orbe.chat.ChatBackendFactory;
 import com.pegasuscorp.orbe.chat.ChatSendOptions;
+import com.pegasuscorp.orbe.llm.ModelStore;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
 import com.pegasuscorp.orbe.chat.ChatSpokenErrors;
 import com.pegasuscorp.orbe.chat.CloudModelStore;
@@ -60,6 +63,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Session conversationnelle partagée — voix et texte via {@link ChatSessionRegistry}.
@@ -108,6 +113,8 @@ public class PegaseSession {
     private ReasoningTurnCollector turnReasoning;
     /** Intent du tour — une seule analyse + un seul {@code routing_match} par message user. */
     private ContextIntent currentTurnIntent;
+    /** Texte affiché pour le tour (journal / ombre cloud), sans corps de document joint. */
+    private String currentTurnUserMessage;
 
     /**
      * FileLocation du dernier {@link #rewriteOrionPrompt} (phase plan).
@@ -2124,6 +2131,7 @@ public class PegaseSession {
 
     private void beginTurnReasoning(String userMessage) {
         String msg = userMessage != null ? userMessage : "";
+        currentTurnUserMessage = msg;
         currentTurnIntent = ContextAnalyzer.analyze(appContext, msg, true);
         turnReasoning = new ReasoningTurnCollector(currentTurnIntent.intent);
         com.pegasuscorp.orbe.diag.TrainingJournal.begin(appContext, msg, currentTurnIntent.intent);
@@ -2150,7 +2158,10 @@ public class PegaseSession {
         long latency = conv != null && !currentTurnLocal ? conv.lastLlmLatencyMs() : 0L;
         int promptChars = conv != null ? conv.lastPromptChars() : 0;
         ReasoningCard card = turnReasoning.build(reply.trim(), backend, latency, promptChars);
+        String shadowUser = currentTurnUserMessage;
+        String shadowIntent = currentTurnIntent != null ? currentTurnIntent.intent : "general";
         com.pegasuscorp.orbe.diag.TrainingJournal.end(reply.trim(), backend);
+        maybeScheduleCloudTrainingReference(shadowUser, shadowIntent);
         // Indexer sur le texte brut ET la version affichée/stockée (tronquée)
         ReasoningStore.put(reply.trim(), card);
         String stored = com.pegasuscorp.orbe.memory.ConversationHistorySanitizer
@@ -2165,6 +2176,63 @@ public class PegaseSession {
         Trace.reasoningCard(card);
         turnReasoning = null;
         currentTurnIntent = null;
+        currentTurnUserMessage = null;
+    }
+
+    /**
+     * En mode local seul : envoie la même question au cloud en arrière-plan pour une ligne
+     * {@code cloud_reference} dans le journal (sans modifier le chat).
+     */
+    private void maybeScheduleCloudTrainingReference(String userText, String intent) {
+        if (appContext == null || userText == null || userText.trim().isEmpty()) return;
+        if (!ModelStore.useLocalLlm(appContext)) return;
+        if (!com.pegasuscorp.orbe.diag.TrainingJournal.isCloudReferenceEnabled(appContext)) return;
+        if (!ApiKeyStore.hasGroqKey(appContext) && !ApiKeyStore.hasOpenRouterKey(appContext)) return;
+        final String prompt = clipCloudShadowPrompt(userText.trim());
+        final String intentCopy = intent != null ? intent : "general";
+        localLlmExecutor.execute(() -> {
+            final String[] holder = new String[1];
+            final String[] backendLabel = new String[1];
+            final CountDownLatch latch = new CountDownLatch(1);
+            try {
+                ChatBackend cloud = ChatBackendFactory.cloudDiscussion(appContext);
+                backendLabel[0] = cloud.traceBackendLabel();
+                cloud.send(Collections.emptyList(), prompt, new ChatBackend.OnReply() {
+                    @Override
+                    public void onLlmReply(LlmReply reply) {
+                        if (reply != null && reply.content != null) holder[0] = reply.content;
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onReply(String text) {
+                        holder[0] = text;
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        latch.countDown();
+                    }
+                }, ChatSendOptions.legacy());
+            } catch (Exception ignored) {
+                latch.countDown();
+            }
+            try {
+                if (!latch.await(90, TimeUnit.SECONDS)) return;
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            if (holder[0] == null || holder[0].trim().isEmpty()) return;
+            com.pegasuscorp.orbe.diag.TrainingJournal.recordCloudReference(
+                    prompt, intentCopy, holder[0].trim(),
+                    backendLabel[0] != null ? backendLabel[0] : "cloud");
+        });
+    }
+
+    private static String clipCloudShadowPrompt(String s) {
+        if (s.length() <= 1800) return s;
+        return s.substring(0, 1800) + "…";
     }
 
     private boolean isAgenticGenerationCurrent(long captured) {

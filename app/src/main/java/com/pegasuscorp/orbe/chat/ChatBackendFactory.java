@@ -15,13 +15,8 @@ public final class ChatBackendFactory {
 
     private ChatBackendFactory() {}
 
-    public static ChatBackend create(Context context) {
-        Context app = context.getApplicationContext();
-        if (ModelStore.useLocalLlm(app)) {
-            return new LocalLlmChatBackend(app);
-        }
-        // Un seul MultiProviderBackend — file IO partagée, pas de HTTP parallèles fantômes
-        // (SessionSummarizer, F1NewsSummarizer, discussion…).
+    /** Initialise les singletons discussion si besoin. */
+    private static void ensureDiscussionBackends(Context app) {
         if (sharedSwitch == null) {
             synchronized (ChatBackendFactory.class) {
                 if (sharedSwitch == null) {
@@ -32,7 +27,22 @@ public final class ChatBackendFactory {
                 }
             }
         }
+    }
+
+    public static ChatBackend create(Context context) {
+        Context app = context.getApplicationContext();
+        if (ModelStore.useLocalLlm(app)) {
+            return new LocalLlmChatBackend(app);
+        }
+        ensureDiscussionBackends(app);
         return sharedSwitch;
+    }
+
+    /** Cloud Groq/Cerebras/OpenRouter — pour ombre d'entraînement en mode « Toujours local ». */
+    public static ChatBackend cloudDiscussion(Context context) {
+        Context app = context.getApplicationContext();
+        ensureDiscussionBackends(app);
+        return sharedCloudBackend;
     }
 
     /** Tests unitaires — réinitialise le singleton cloud. */

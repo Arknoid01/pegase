@@ -55,6 +55,11 @@ public final class LocalCommandRouter {
             {"brief", "brief du matin|brief du jour|mon brief|resume ma journee|resumé ma journée|"
                     + "quoi de neuf ce matin|mon matin"},
             {"f1", "\\bf1\\b|formule 1|formula 1|grand prix|\\bgp d|\\bgp de|debrief f1|week-end f1"},
+            {"messageries", "messagerie|non lu|non lus|pas lu|qui m'a ecrit|qui ma ecrit|"
+                    + "sms non|whatsapp non|messages non"},
+            {"wikipedia", "\\bwikipedia\\b|c'est quoi|qu'est-ce que c'est|qu'est ce que c'est|"
+                    + "definition de|définition de"},
+            {"news", "actualite|actualités|actualite|les infos|fil info|titres du jour|news du jour"},
     };
     private static final Pattern REPEAT = Pattern.compile(
             "tous les|chaque|du lundi|en semaine|le week-end|les (lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)s?\\b");
@@ -103,6 +108,11 @@ public final class LocalCommandRouter {
             "(\\bf1\\b|formule 1|debrief f1|week[- ]?end f1)");
     private static final Pattern Q_REMIND = Pattern.compile(
             "^rappelle[- ]?moi\\s+(?:de |d')?(.{3,})$");
+    /** SMS / WhatsApp non lus — analyseur sans modèle. */
+    private static final Pattern Q_MSG_UNREAD = Pattern.compile(
+            "\\b(sms|message|whatsapp|messagerie)\\b.*\\b(non lus?|pas lu)\\b|"
+                    + "\\b(non lus?|pas lu)\\b.*\\b(sms|message|whatsapp|messagerie)\\b|"
+                    + "qui m'a ecrit|qui ma ecrit");
 
     /** Décision immédiate sans modèle, ou null. {@code latencyMs} = 0. */
     public static Decision quickParse(String userText) {
@@ -138,6 +148,15 @@ public final class LocalCommandRouter {
                 if (h > 23 || mi > 59 || !leftover.isEmpty()) return null;
                 a.put("hour", h).put("minute", mi);
                 return decision("alarm", a);
+            }
+            if (Q_MSG_UNREAD.matcher(fk).find()) {
+                JSONObject a = new JSONObject().put("action", "unread");
+                if (fk.contains("sms")) a.put("service", "sms");
+                else if (fk.contains("whatsapp")) a.put("service", "whatsapp");
+                else if (fk.contains("messenger") || fk.contains("messagerie")) {
+                    a.put("service", "messenger");
+                }
+                return decision("messageries", a);
             }
             // Messages / appels : jamais par l'analyseur (destinataire et texte à vérifier)
             if (fk.matches(".*\\b(message|sms|texto|ecris a|appelle|telephone)\\b.*")) return null;
@@ -234,9 +253,16 @@ public final class LocalCommandRouter {
         for (String[] r : ROUTES) {
             if (Pattern.compile(r[1]).matcher(f).find()) out.add(r[0]);
         }
+        if (Q_MSG_UNREAD.matcher(f).find()) {
+            out.add("messageries");
+            out.remove("sms");
+        }
         if (out.contains("sms") || out.contains("call")) out.add("contacts");
-        // Question de culture / web → cloud (le petit modèle sait peu de choses)
-        if (f.matches("^(qui|pourquoi|comment|combien|c'est quoi|explique).*") && !out.contains("weather")) {
+        boolean keepForQuestion = out.contains("weather") || out.contains("wikipedia")
+                || out.contains("news") || out.contains("messageries")
+                || out.contains("brief") || out.contains("f1");
+        // Question de culture → cloud discussion, sauf si un outil local pertinent est déjà routé
+        if (f.matches("^(qui|pourquoi|comment|combien|c'est quoi|explique).*") && !keepForQuestion) {
             out.clear();
         }
         // Question sur ce qu'il sait de l'utilisateur (« tu te souviens de ce que j'aime comme
@@ -308,6 +334,18 @@ public final class LocalCommandRouter {
                 "F1 ; debrief par défaut, mode quick sauf « en détail »",
                 new String[]{"debrief F1", "f1 debrief mode=\"quick\""},
                 new String[]{"où en est la F1 ?", "f1 status"}));
+        SPECS.put("messageries", new Spec(new String[]{"unread", "list", "open"},
+                new String[]{"service", "categorie"},
+                "SMS / WhatsApp / Messenger ; unread par défaut",
+                new String[]{"mes SMS non lus", "messageries unread service=\"sms\""},
+                new String[]{"qui m'a écrit", "messageries unread"}));
+        SPECS.put("wikipedia", new Spec(new String[]{}, new String[]{"query", "lang"},
+                "Wikipedia ; query = sujet demandé",
+                new String[]{"c'est quoi la photosynthèse", "wikipedia query=\"photosynthèse\""}));
+        SPECS.put("news", new Spec(new String[]{}, new String[]{"query", "count"},
+                "actualités FR ; query optionnel",
+                new String[]{"les actus du jour", "news"},
+                new String[]{"actualités sur le climat", "news query=\"climat\""}));
     }
     private static final Pattern KV = Pattern.compile("(\\w+)=\"([^\"]*)\"");
 
@@ -530,6 +568,9 @@ public final class LocalCommandRouter {
         KNOWN_ACTIONS.put("timer", new String[]{"start", "list", "recent", "open"});
         KNOWN_ACTIONS.put("agenda", new String[]{"add", "list", "today", "tomorrow", "week", "delete", "open"});
         KNOWN_ACTIONS.put("spotify", new String[]{"play", "playlist", "pause", "next", "previous", "now_playing"});
+        KNOWN_ACTIONS.put("messageries", new String[]{"unread", "list", "open"});
+        KNOWN_ACTIONS.put("brief", new String[]{"brief", "detail", "list"});
+        KNOWN_ACTIONS.put("f1", new String[]{"debrief", "status", "live", "refresh"});
     }
 
     /** Action hors de l'énumération du schéma → action la plus probable. */
@@ -637,6 +678,20 @@ public final class LocalCommandRouter {
             case "sms":
                 // Pas de texte inventé : le message doit venir de la phrase.
                 if (a.optString("message", "").trim().isEmpty()) return null;
+                return a;
+            case "messageries":
+                if (!a.has("action")) a.put("action", "unread");
+                return a;
+            case "wikipedia":
+                if (!a.has("query")) {
+                    Matcher wm = Pattern.compile(
+                            "(?i)(?:c'est quoi|qu'est-ce que c'est|qu'est ce que c'est|"
+                                    + "définition de|definition de)\\s+(.+)").matcher(userText.trim());
+                    if (wm.find()) a.put("query", stripEnd(wm.group(1)));
+                    else return null;
+                }
+                return a;
+            case "news":
                 return a;
             default:
                 return a;

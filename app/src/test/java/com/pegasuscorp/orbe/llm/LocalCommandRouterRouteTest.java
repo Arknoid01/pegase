@@ -5,6 +5,10 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.util.regex.Pattern;
+
+import java.util.regex.Pattern;
+
 /** Questions sur ce que Pégase sait de l'utilisateur : discussion, pas commande. */
 public class LocalCommandRouterRouteTest {
 
@@ -27,5 +31,20 @@ public class LocalCommandRouterRouteTest {
         java.util.List<String> r = LocalCommandRouter.route("rappelle-moi d'appeler maman demain");
         assertTrue(r.contains("notepad"));
         assertFalse(r.contains("memory"));
+    }
+
+    @Test public void c_est_quoi_garde_wikipedia() {
+        java.util.List<String> r = LocalCommandRouter.route("c'est quoi la photosynthèse ?");
+        assertTrue(r.contains("wikipedia"));
+    }
+
+    @Test public void sms_non_lus_messageries() {
+        assertTrue(LocalCommandRouter.route("mes SMS non lus").contains("messageries"));
+        String fk = LocalCommandRouter.foldKeepLength("mes SMS non lus");
+        Pattern unread = Pattern.compile(
+                "\\b(sms|message|whatsapp|messagerie)\\b.*\\b(non lus?|pas lu)\\b|"
+                        + "\\b(non lus?|pas lu)\\b.*\\b(sms|message|whatsapp|messagerie)\\b|"
+                        + "qui m'a ecrit|qui ma ecrit");
+        assertTrue("\"" + fk + "\"", unread.matcher(fk).find());
     }
 }

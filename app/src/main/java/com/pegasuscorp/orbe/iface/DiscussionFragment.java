@@ -32,6 +32,8 @@ import com.pegasuscorp.orbe.ConversationChatAdapter;
 import com.pegasuscorp.orbe.PortraitActivity;
 import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import com.pegasuscorp.orbe.chat.ChatSessionRegistry;
+import com.pegasuscorp.orbe.chat.LocalServerChatBackend;
+import com.pegasuscorp.orbe.llm.ModelStore;
 import com.pegasuscorp.orbe.chat.ChatVoiceBridge;
 import com.pegasuscorp.orbe.chat.OpenRouterVisionClient;
 import com.pegasuscorp.orbe.contextstore.ContextualFileStore;
@@ -82,6 +84,8 @@ public class DiscussionFragment extends Fragment {
     /** Sélecteur unique : PDF, image, texte (.md, .txt, …). */
     public static final int REQ_CHAT_PICK_DOCUMENT = 4714;
     private static final int MAX_DOCUMENT_TEXT_CHARS = 20_000;
+    /** Budget document en mode Gemma local (évite d'exploser le slot 4096). */
+    private static final int MAX_DOCUMENT_TEXT_CHARS_LOCAL = 6_000;
 
     private enum PendingDocKind { TEXT, PDF, IMAGE }
 
@@ -960,9 +964,14 @@ public class DiscussionFragment extends Fragment {
             Toast.makeText(ctx, "Fichier vide.", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (content.length() > MAX_DOCUMENT_TEXT_CHARS) {
-            content = content.substring(0, MAX_DOCUMENT_TEXT_CHARS)
-                    + "\n\n[… document tronqué à " + MAX_DOCUMENT_TEXT_CHARS + " caractères]";
+        boolean localLlm = ModelStore.useLocalLlm(ctx);
+        int cap = localLlm ? MAX_DOCUMENT_TEXT_CHARS_LOCAL : MAX_DOCUMENT_TEXT_CHARS;
+        if (localLlm) {
+            int overhead = usePrompt.length() + displayName.length() + 80;
+            content = LocalServerChatBackend.fitUserMessage(content, overhead);
+        } else if (content.length() > cap) {
+            content = content.substring(0, cap)
+                    + "\n\n[… document tronqué à " + cap + " caractères]";
         }
         String userLabel = "📎 Document « " + displayName + " »\n« " + usePrompt + " »";
         String composed = usePrompt + "\n\n---\nDocument joint « " + displayName + " » :\n\n" + content;
@@ -980,7 +989,7 @@ public class DiscussionFragment extends Fragment {
         }
         if (host != null) host.updateSubtitle();
         MemoryRepository.getInstance(ctx).addTurn(true, userLabel);
-        PegaseSession.get(ctx).send(composed, textSessionObserver());
+        PegaseSession.get(ctx).send(composed, userLabel, textSessionObserver());
         lastConversationText = "";
         refreshConversationIfNeeded();
     }

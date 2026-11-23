@@ -21,8 +21,20 @@ public class LocalServerChatBackendRawTest {
 
     @Test public void maxReplyTokens_explique_plus_long() {
         assertEquals(520, LocalServerChatBackend.maxReplyTokens("explique-moi la relativité", false));
+        assertEquals(520, LocalServerChatBackend.maxReplyTokens("résume ce passage", false));
+        assertEquals(640, LocalServerChatBackend.maxReplyTokens(
+                "lis\n\n---\nDocument joint « x » :\n\nhello", false));
         assertEquals(220, LocalServerChatBackend.maxReplyTokens("salut", false));
         assertEquals(280, LocalServerChatBackend.maxReplyTokens("quel prix", true));
+    }
+
+    @Test public void emotion_detecte_partage_et_tokens() {
+        String noel = "Normalement c'est mon dernier Noël en tant qu'artisan chef boucher";
+        assertTrue(LocalServerChatBackend.looksEmotionalTurn(noel));
+        assertEquals(420, LocalServerChatBackend.maxReplyTokens(noel, false));
+        assertTrue(LocalServerChatBackend.looksEmotionalTurn(
+                "Si jamais j'ai fait les commandes de Noël"));
+        assertTrue(!LocalServerChatBackend.looksEmotionalTurn("bonjour"));
     }
 
     @Test public void fitUserMessage_tronque_si_besoin() {

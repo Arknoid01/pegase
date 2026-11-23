@@ -35,6 +35,8 @@ public final class TrainingJournal {
 
     private static final String PREFS = "training_journal";
     private static final String KEY_ENABLED = "enabled";
+    /** En mode local seul : une 2ᵉ ligne JSONL avec la réponse cloud (référence d'entraînement). */
+    private static final String KEY_CLOUD_REFERENCE = "cloud_reference";
     private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
     private static final int MAX_RESULT_CHARS = 600;
     private static final int MAX_REPLY_CHARS = 2000;
@@ -72,6 +74,35 @@ public final class TrainingJournal {
         if (!enabled) {
             synchronized (LOCK) { resetTurn(); }
         }
+    }
+
+    public static boolean isCloudReferenceEnabled(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_CLOUD_REFERENCE, false);
+    }
+
+    public static void setCloudReferenceEnabled(Context ctx, boolean enabled) {
+        prefs(ctx).edit().putBoolean(KEY_CLOUD_REFERENCE, enabled).apply();
+    }
+
+    /**
+     * Réponse cloud de référence (hors UI), pour comparer au petit modèle local.
+     * Écrit une ligne distincte avec {@code kind=cloud_reference}.
+     */
+    public static void recordCloudReference(String userText, String intent, String reply,
+            String backend) {
+        if (appContext == null || !isEnabled(appContext)) return;
+        String user = userText != null ? userText.trim() : "";
+        if (user.isEmpty() || reply == null || reply.trim().isEmpty()) return;
+        JSONObject o = new JSONObject();
+        put(o, "kind", "cloud_reference");
+        put(o, "t", System.currentTimeMillis());
+        put(o, "user", clip(user, MAX_RESULT_CHARS * 2));
+        put(o, "intent", intent != null ? intent : "");
+        put(o, "backend", backend != null ? backend : "cloud");
+        put(o, "reply", clip(reply, MAX_REPLY_CHARS));
+        final File d = dir;
+        if (d == null) return;
+        IO.execute(() -> append(d, o.toString()));
     }
 
     // ---- Capture d'un tour ----

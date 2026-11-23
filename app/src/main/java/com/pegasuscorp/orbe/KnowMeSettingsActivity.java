@@ -120,6 +120,16 @@ public class KnowMeSettingsActivity extends AppCompatActivity {
             com.pegasuscorp.orbe.diag.TrainingJournal.setEnabled(this, !journalOn);
             rebuildList();
         });
+        boolean cloudRef = com.pegasuscorp.orbe.diag.TrainingJournal.isCloudReferenceEnabled(this);
+        contentHost.addView(hint("Référence cloud (mode local seul) : " + (cloudRef ? "activée" : "désactivée")
+                + ". En arrière-plan, le gros modèle répond aussi pour le journal — rien "
+                + "ne s'affiche dans le chat."));
+        addActionButton(cloudRef
+                ? "Désactiver la référence cloud pour le journal"
+                : "Activer la référence cloud pour le journal", () -> {
+            com.pegasuscorp.orbe.diag.TrainingJournal.setCloudReferenceEnabled(this, !cloudRef);
+            rebuildList();
+        });
         addActionButton("Exporter le journal d'entraînement", this::exportTrainingJournal);
         addActionButton("Effacer le journal d'entraînement", this::confirmClearTrainingJournal);
 

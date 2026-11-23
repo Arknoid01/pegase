@@ -22,6 +22,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.net.URLEncoder;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -195,10 +198,29 @@ public final class WeatherTool implements Tool {
     }
 
     private static String homeCityLabel(Context ctx, String savedCity, double lat, double lon) {
-        String place = LocationSituationReader.getCurrentPlaceLabel(ctx);
-        if (!TextUtils.isEmpty(place)) return place.trim();
         if (!TextUtils.isEmpty(savedCity)) return savedCity.trim();
+        String place = LocationSituationReader.getCurrentPlaceLabel(ctx);
+        if (!TextUtils.isEmpty(place)) return displayCityName(place.trim());
         return String.format(Locale.FRENCH, "près de toi (%.2f°, %.2f°)", lat, lon);
+    }
+
+    /** Libellé lisible dans le chat (évite « maison · Maison » en double). */
+    static String displayCityName(String cityName) {
+        if (TextUtils.isEmpty(cityName)) return "ici";
+        String c = cityName.trim();
+        String low = c.toLowerCase(Locale.FRENCH);
+        if (low.startsWith("maison") || low.equals("chez moi") || low.equals("chez-moi")) {
+            return "chez toi";
+        }
+        int sep = c.indexOf(" · ");
+        if (sep > 0 && c.substring(0, sep).toLowerCase(Locale.FRENCH).equals("maison")) {
+            return "chez toi";
+        }
+        if (sep > 0) {
+            String right = c.substring(sep + 3).trim();
+            if (!right.isEmpty()) return right;
+        }
+        return c;
     }
 
     private static ResolvedLocation geocodeCity(
@@ -326,6 +348,14 @@ public final class WeatherTool implements Tool {
     }
 
     private String buildSummary(String city, int days, JSONObject w) throws Exception {
+        return formatSummary(displayCityName(city), days, w);
+    }
+
+    /**
+     * Texte affiché dans le chat (surtout mode local qui recopie l'outil tel quel).
+     * Multi-jours : lignes à puces, dates en français, pas de ISO brut.
+     */
+    static String formatSummary(String city, int days, JSONObject w) throws Exception {
         JSONObject daily = w.getJSONObject("daily");
         JSONArray codes = daily.getJSONArray("weathercode");
         JSONArray maxTemps = daily.getJSONArray("temperature_2m_max");
@@ -333,27 +363,70 @@ public final class WeatherTool implements Tool {
         JSONArray precip = daily.getJSONArray("precipitation_sum");
         JSONArray dates = daily.getJSONArray("time");
 
+        String place = displayCityName(city != null ? city : "ici");
+        boolean multi = days > 1;
         StringBuilder sb = new StringBuilder();
+        if (multi) {
+            sb.append("Météo ").append(place).append(" — ").append(days).append(" jours :\n\n");
+            if (!forecastHasSnow(codes, days)) {
+                sb.append("Pas de neige prévue sur cette période.\n\n");
+            }
+        }
+
         for (int i = 0; i < days && i < codes.length(); i++) {
             int code = codes.getInt(i);
             double tMax = maxTemps.getDouble(i);
             double tMin = minTemps.getDouble(i);
             double rain = precip.getDouble(i);
             String date = dates.getString(i);
-
-            String label = i == 0 ? "Aujourd'hui" : i == 1 ? "Demain" : "Le " + date;
+            String label = dayLabel(i, date);
             String desc = weatherCodeToFrench(code);
 
-            sb.append(label).append(" à ").append(city).append(" : ")
-                    .append(desc).append(", ")
-                    .append(Math.round(tMin)).append("°C à ").append(Math.round(tMax)).append("°C");
-            if (rain > 1) sb.append(", ").append(Math.round(rain)).append("mm de pluie");
-            sb.append(". ");
+            if (multi) {
+                if (i > 0) sb.append('\n');
+                sb.append("• ").append(label).append(" — ").append(desc).append(", ")
+                        .append(Math.round(tMin)).append("–").append(Math.round(tMax)).append(" °C");
+                if (rain > 1) sb.append(", ").append(Math.round(rain)).append(" mm");
+            } else {
+                sb.append(label).append(" à ").append(place).append(" : ")
+                        .append(desc).append(", ")
+                        .append(Math.round(tMin)).append("°C à ").append(Math.round(tMax)).append("°C");
+                if (rain > 1) sb.append(", ").append(Math.round(rain)).append(" mm de pluie");
+                sb.append('.');
+            }
         }
         return sb.toString().trim();
     }
 
-    private String weatherCodeToFrench(int code) {
+    static String dayLabel(int index, String isoDate) {
+        if (index == 0) return "Aujourd'hui";
+        if (index == 1) return "Demain";
+        if (isoDate != null && !isoDate.isEmpty()) {
+            try {
+                LocalDate d = LocalDate.parse(isoDate);
+                String wd = d.format(DateTimeFormatter.ofPattern("EEEE", Locale.FRENCH));
+                String dm = d.format(DateTimeFormatter.ofPattern("d MMM", Locale.FRENCH));
+                if (!wd.isEmpty()) {
+                    return Character.toUpperCase(wd.charAt(0)) + wd.substring(1) + " " + dm;
+                }
+            } catch (DateTimeParseException ignored) {
+            }
+        }
+        return "Le " + (isoDate != null ? isoDate : "?");
+    }
+
+    static boolean forecastHasSnow(JSONArray codes, int days) {
+        if (codes == null) return false;
+        int n = Math.min(days, codes.length());
+        for (int i = 0; i < n; i++) {
+            int code = codes.optInt(i, -1);
+            if (code >= 71 && code <= 77) return true;
+            if (code >= 85 && code <= 86) return true;
+        }
+        return false;
+    }
+
+    private static String weatherCodeToFrench(int code) {
         if (code == 0) return "ciel dégagé";
         if (code <= 2) return "partiellement nuageux";
         if (code == 3) return "couvert";

@@ -48,11 +48,25 @@ public final class LocalServerChatBackend implements ChatBackend {
     private static final int CHAT_PROMPT_MAX_CHARS = 13_000;
     private static final int REPLY_MAX_TOKENS_SHORT = 220;
     private static final int REPLY_MAX_TOKENS_WEB = 280;
+    /** Partage de vie, émotion, doute — un peu plus de place pour empathie + relance. */
+    private static final int REPLY_MAX_TOKENS_EMOTION = 420;
     private static final int REPLY_MAX_TOKENS_EXPLAIN = 520;
+    private static final int REPLY_MAX_TOKENS_DOCUMENT = 640;
+    /** Tour personnel / émotionnel (hors petites phrases d'accueil). */
+    static final Pattern EMOTIONAL_TURN = Pattern.compile(
+            "\\b(j'ai peur|je stress|j'en ai (assez|marre)|ça me (fait|stress|inqui)|"
+                    + "triste|content|heureux|déçu|déprime|inquiet|angoiss|émotion|"
+                    + "si jamais|j'espère (pas|que)|je pense (arrêter|changer|quitter)|"
+                    + "dernier .{0,25}(noël|fois)|plus en tant que|pré.?commande|"
+                    + "c'est un pari|dur pour moi|pas facile pour moi|reconversion)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern EXPLAIN_ASK = Pattern.compile(
             "\\b(explique|expliques|d[ée]taille|d[ée]veloppe|raconte|en d[ée]tail|"
-                    + "comment [çc]a marche|pourquoi .* en profondeur)\\b",
+                    + "comment [çc]a marche|pourquoi .* en profondeur|"
+                    + "r[ée]sume|r[ée]sume-moi|synth[èe]se|synth[ée]tise)\\b",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern DOCUMENT_ATTACHED = Pattern.compile(
+            "---\\s*\\nDocument joint", Pattern.CASE_INSENSITIVE);
     private static final int REPLY_TIMEOUT_MS = 240_000;
     /** Petites phrases sans besoin de web (évite une décision de ~3 s). */
     private static final Pattern SMALL_TALK = Pattern.compile(
@@ -186,6 +200,7 @@ public final class LocalServerChatBackend implements ChatBackend {
         if (query != null) web = runSearch(query, question);
         lastWebQuery = web != null ? query : null;
         String memories = memoriesFor(user);
+        boolean emotional = looksEmotionalTurn(user);
 
         JSONArray msgs = new JSONArray();
         msgs.put(new JSONObject().put("role", "system").put("content", systemPrompt()));
@@ -217,7 +232,13 @@ public final class LocalServerChatBackend implements ChatBackend {
         StringBuilder u = new StringBuilder(pendingSystem);
         if (memories != null) {
             u.append("[Tes souvenirs sur ").append(UserProfileStore.getInstance(app).getUserName())
-                    .append(", à utiliser seulement si c'est utile : ").append(memories).append("]\n");
+                    .append(", à utiliser seulement si c'est vraiment pertinent pour ce message : ")
+                    .append(memories).append("]\n");
+        }
+        if (emotional && web == null) {
+            u.append("[Tour personnel ou émotionnel : prends ton temps, 4 à 6 phrases, ")
+                    .append("réagis à ce qu'il vient de dire, relance avec une question courte ")
+                    .append("ou une invitation à en dire plus.]\n");
         }
         if (web != null) {
             u.append("[Ce que TA recherche web vient de trouver (pas dit par ")
@@ -237,7 +258,7 @@ public final class LocalServerChatBackend implements ChatBackend {
 
         JSONObject body = new JSONObject()
                 .put("messages", msgs)
-                .put("temperature", web != null ? 0.4 : 0.7)
+                .put("temperature", web != null ? 0.4 : (emotional ? 0.78 : 0.7))
                 .put("top_p", 0.9)
                 .put("max_tokens", maxReplyTokens(user, web != null))
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
@@ -313,8 +334,10 @@ public final class LocalServerChatBackend implements ChatBackend {
         sb.append("Tu es ").append(p.getAssistantName()).append(", l'assistant personnel de ")
                 .append(p.getUserName()).append(", sur son téléphone. Tu le tutoies. ")
                 .append("Personnalité : ").append(p.getAssistantPersonality()).append('\n')
-                .append("Réponds en français, comme à l'oral ; en général 2 ou 3 phrases courtes")
-                .append(" (un peu plus si on te demande d'expliquer en détail), sans listes ni ")
+                .append("Réponds en français, comme à l'oral. Fait simple : 2 ou 3 phrases courtes ; ")
+                .append("partage de vie, émotion ou doute : 4 à 6 phrases chaleureuses, empathie, ")
+                .append("et souvent une question ou une relance en fin pour continuer la discussion. ")
+                .append("Un peu plus long si besoin (explications détaillées sur demande). Sans listes, ")
                 .append("markdown ni emojis. Reste sur ce que ").append(p.getUserName())
                 .append(" vient de dire et ne contredis pas ce qu'il affirme sur sa propre vie. ")
                 .append("Quand un bloc entre crochets donne ce que ta recherche web a trouvé, c'est ")
@@ -324,7 +347,8 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .append("(« 2,126 € », pas « 2126 euros »). Tu es une IA : tu n'as ni journée, ni ")
                 .append("activités, ni souvenirs personnels ; ne t'invente jamais de vie ou ")
                 .append("d'expérience, ramène plutôt la conversation sur lui. Ce que tu sais de lui ")
-                .append("vient seulement de cette consigne et des souvenirs entre crochets : s'il te ")
+                .append("vient seulement de cette consigne et des souvenirs entre crochets : cite un souvenir ")
+                .append("seulement s'il colle vraiment au sujet du moment (sinon ignore-le). S'il te ")
                 .append("demande si tu te souviens de quelque chose qui n'y est pas, dis honnêtement ")
                 .append("que tu ne sais pas et propose qu'il te le dise. Tu ne peux pas agir (réveil, message, brief, "
                 + "sms, F1…) dans cette réponse : ne dis JAMAIS « c'est fait » ou « je l'ai noté » pour une action ; ")
@@ -508,8 +532,18 @@ public final class LocalServerChatBackend implements ChatBackend {
         return t.length() <= max ? t : t.substring(0, max) + "…";
     }
 
+    static boolean looksEmotionalTurn(String user) {
+        if (user == null || user.trim().isEmpty()) return false;
+        String t = user.trim();
+        if (SMALL_TALK.matcher(t).matches()) return false;
+        if (t.length() < 12) return false;
+        return EMOTIONAL_TURN.matcher(t).find();
+    }
+
     static int maxReplyTokens(String user, boolean hasWeb) {
+        if (user != null && DOCUMENT_ATTACHED.matcher(user).find()) return REPLY_MAX_TOKENS_DOCUMENT;
         if (user != null && EXPLAIN_ASK.matcher(user).find()) return REPLY_MAX_TOKENS_EXPLAIN;
+        if (user != null && looksEmotionalTurn(user)) return REPLY_MAX_TOKENS_EMOTION;
         if (hasWeb) return REPLY_MAX_TOKENS_WEB;
         return REPLY_MAX_TOKENS_SHORT;
     }
@@ -528,7 +562,7 @@ public final class LocalServerChatBackend implements ChatBackend {
     }
 
     /** Tronque un message utilisateur trop long pour tenir dans le slot 4096. */
-    static String fitUserMessage(String user, int usedChars) {
+    public static String fitUserMessage(String user, int usedChars) {
         if (user == null) return "";
         int budget = CHAT_PROMPT_MAX_CHARS - usedChars - 400;
         if (budget < 1500) budget = 1500;
