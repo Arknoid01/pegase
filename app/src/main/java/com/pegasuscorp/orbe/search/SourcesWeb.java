@@ -83,7 +83,17 @@ public final class SourcesWeb {
         String url = "https://api.search.brave.com/res/v1/web/search?q=" + enc(question)
                 + "&country=fr&search_lang=fr&ui_lang=fr-FR&count=" + n
                 + "&extra_snippets=true&safesearch=moderate";
-        JSONObject j = new JSONObject(get(url, h, 10_000));
+        String corps;
+        try {
+            corps = get(url, h, 10_000);
+        } catch (IllegalStateException e) {
+            // saturé (429) ou panne passagère (5xx) : une seule nouvelle tentative
+            String m = String.valueOf(e.getMessage());
+            if (!m.contains("429") && !m.matches(".*HTTP 5\\d\\d.*")) throw e;
+            Thread.sleep(1_000);
+            corps = get(url, h, 10_000);
+        }
+        JSONObject j = new JSONObject(corps);
         List<Resultat> out = new ArrayList<>();
         JSONObject web = j.optJSONObject("web");
         JSONArray res = web != null ? web.optJSONArray("results") : null;

@@ -29,4 +29,6 @@ public final class Collecte {
     /** Dossier déjà fait sans le web (refus de confidentialité, calcul local). */
     public Dossier direct;
     public long msRecherche, msPages;
+    /** Octets téléchargés pour lire les pages (budget data). */
+    public long octetsPages;
 }

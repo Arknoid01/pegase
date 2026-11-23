@@ -96,9 +96,22 @@ public final class MoteurPrive {
     public static Dossier chercher(Context ctx, String question) throws Exception {
         MoteurRecherche.Reglages r = new MoteurRecherche.Reglages();
         r.cleBrave = ApiKeyStore.getBraveKey(ctx);
+        r.termesPrives = ReglagesRecherche.termesPrives(ctx);
+        if (ReglagesRecherche.reseauFacture(ctx)) {   // 4G : moitié moins de pages, pages plus courtes
+            r.nPages = ReglagesRecherche.PAGES_4G;
+            r.maxOctetsPage = ReglagesRecherche.OCTETS_4G;
+        }
         final MultilingualEmbedder e = embedder(ctx);
         try {
-            return new MoteurRecherche(r, e::embed).chercher(question);
+            long t0 = System.currentTimeMillis();
+            Dossier d = new MoteurRecherche(r, e::embed).chercher(question);
+            // Pas la question dans le journal système : seulement les mesures
+            Log.i(TAG, "recherche " + (System.currentTimeMillis() - t0) + " ms, web=" + d.sourceWeb
+                    + ", pages=" + d.pagesLues + "/" + r.nPages + ", " + (d.octetsPages / 1024) + " Ko"
+                    + (r.nPages == ReglagesRecherche.PAGES_4G ? " (4G)" : " (Wi-Fi)")
+                    + (d.retire.isEmpty() ? "" : ", retiré : " + d.retire.size())
+                    + (d.refus != null ? ", REFUS (trop personnel)" : d.abstention ? ", abstention" : ""));
+            return d;
         } finally {
             MAIN.removeCallbacks(LIBERER);
             MAIN.postDelayed(LIBERER, INACTIF_MS);

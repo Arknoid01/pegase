@@ -43,6 +43,12 @@ public final class TavilyTool implements Tool {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
+    /** Réponse quand la demande ne contient presque que des données personnelles. */
+
+    static final String REFUS_PRIVE = "Je ne lance pas cette recherche sur le web : une fois "
+
+            + "tes infos personnelles retirées, il ne reste rien d'utile à chercher.";
+
     private final Handler main = new Handler(Looper.getMainLooper());
 
 
@@ -90,6 +96,22 @@ public final class TavilyTool implements Tool {
         final String finalQuestion = question;
 
         final boolean prive = com.pegasuscorp.orbe.search.MoteurPrive.pret(ctx);
+
+        // Confidentialité (étape C) : AUCUN moteur ne reçoit e-mail, téléphone, adresse, IBAN,
+
+        // ni les termes privés (nom du profil + liste des réglages) — Tavily compris.
+
+        final java.util.List<String> termes =
+
+                com.pegasuscorp.orbe.search.ReglagesRecherche.termesPrives(ctx);
+
+        final String requeteTavily = com.pegasuscorp.orbe.search.Confidentialite.nettoyer(
+
+                query, termes, new java.util.ArrayList<>());
+
+        final String questionTavily = com.pegasuscorp.orbe.search.Confidentialite.nettoyer(
+
+                finalQuestion, termes, new java.util.ArrayList<>());
 
         if (!prive && !ApiKeyStore.hasTavilyKey(ctx)) {
 
@@ -139,9 +161,25 @@ public final class TavilyTool implements Tool {
 
             }
 
+            // Requête trop personnelle une fois nettoyée : on ne l'envoie NULLE PART
+
+            if ((dossier != null && dossier.refus != null) || (dossier == null && requeteTavily == null)) {
+
+                main.post(() -> cb.onSuccess(ToolResult.text(REFUS_PRIVE,
+
+                        "[Recherche web non lancée : la demande ne contient presque que des "
+
+                                + "informations personnelles. Réponds sans le web ou demande une "
+
+                                + "formulation sans données perso.]")));
+
+                return;
+
+            }
+
             // 2) Tavily en secours (abstention, échec, ou moteur privé pas prêt)
 
-            if (!ApiKeyStore.hasTavilyKey(ctx)) {
+            if (!ApiKeyStore.hasTavilyKey(ctx) || requeteTavily == null) {
 
                 final com.pegasuscorp.orbe.search.Dossier d = dossier;
 
@@ -169,7 +207,7 @@ public final class TavilyTool implements Tool {
 
             try {
 
-                TavilySearchService.Bundle bundle = TavilySearchService.search(ctx, query);
+                TavilySearchService.Bundle bundle = TavilySearchService.search(ctx, requeteTavily);
 
                 if (!bundle.hasContent()) {
 
@@ -183,7 +221,7 @@ public final class TavilyTool implements Tool {
 
                 String display = bundle.fallbackSpeech();
 
-                String llmContext = bundle.toLlmContext(finalQuestion)
+                String llmContext = bundle.toLlmContext(questionTavily != null ? questionTavily : requeteTavily)
 
                         + (prive ? "\n[moteur : Tavily (secours du moteur privé)]" : "\n[moteur : Tavily]");
 

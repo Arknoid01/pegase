@@ -22,10 +22,13 @@ public final class LecteurPages {
 
     public static final String UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36";
-    private static final int MAX_OCTETS = 600_000;
-
-    /** [titre, texte] ; texte vide si illisible. */
+    /** [titre, texte, octets lus] ; texte vide si illisible. */
     public static String[] lire(String url, int connectMs, int readMs) {
+        return lire(url, connectMs, readMs, ReglagesRecherche.OCTETS_WIFI);
+    }
+
+    /** {@code maxOctets} : on arrête de lire au-delà (budget data, réseau facturé). */
+    public static String[] lire(String url, int connectMs, int readMs, int maxOctets) {
         try {
             String u = url;
             for (int saut = 0; saut <= 3; saut++) {
@@ -47,25 +50,25 @@ public final class LecteurPages {
                 String type = c.getContentType() == null ? "" : c.getContentType().toLowerCase();
                 if (code != 200 || !type.contains("html")) {
                     c.disconnect();
-                    return new String[]{"", ""};
+                    return new String[]{"", "", "0"};
                 }
-                byte[] corps = lireBorne(c.getInputStream());
+                byte[] corps = lireBorne(c.getInputStream(), maxOctets);
                 c.disconnect();
                 String html = new String(corps, charset(type, corps));
-                return new String[]{titre(html), extraireArticle(html)};
+                return new String[]{titre(html), extraireArticle(html), String.valueOf(corps.length)};
             }
         } catch (Exception ignored) {
         }
-        return new String[]{"", ""};
+        return new String[]{"", "", "0"};
     }
 
-    private static byte[] lireBorne(InputStream in) throws Exception {
+    private static byte[] lireBorne(InputStream in, int maxOctets) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[16384];
         int n;
         while ((n = in.read(buf)) > 0) {
             out.write(buf, 0, n);
-            if (out.size() > MAX_OCTETS) break;
+            if (out.size() > maxOctets) break;
         }
         in.close();
         return out.toByteArray();

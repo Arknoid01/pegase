@@ -30,7 +30,9 @@ public final class MoteurRecherche {
     public static final class Reglages {
         public String cleBrave = "";
         public List<String> termesPrives = Collections.emptyList();
-        public int nPages = 8;
+        public int nPages = ReglagesRecherche.PAGES_WIFI;
+        /** Taille maximale lue par page (budget data). */
+        public int maxOctetsPage = ReglagesRecherche.OCTETS_WIFI;
         /** Budget lecture des pages (le PC : 4 s pour toutes). */
         public int msPages = 4_000;
     }
@@ -149,15 +151,23 @@ public final class MoteurRecherche {
         // Lecture des pages en parallèle, budget total msPages
         Map<String, Future<String[]>> lus = new LinkedHashMap<>();
         for (SourcesWeb.Resultat r : hits) {
-            lus.put(r.url, POOL.submit((Callable<String[]>) () -> LecteurPages.lire(r.url, 3_000, reglages.msPages)));
+            lus.put(r.url, POOL.submit((Callable<String[]>) () ->
+                    LecteurPages.lire(r.url, 3_000, reglages.msPages, reglages.maxOctetsPage)));
         }
         long limite = System.currentTimeMillis() + reglages.msPages;
         Map<String, String[]> textes = new LinkedHashMap<>();
         for (Map.Entry<String, Future<String[]>> e : lus.entrySet()) {
             long reste = Math.max(1, limite - System.currentTimeMillis());
             String[] r = attendre(e.getValue(), reste);
-            if (r != null) textes.put(e.getKey(), r);
-            else e.getValue().cancel(true);
+            if (r != null) {
+                textes.put(e.getKey(), r);
+                try {
+                    col.octetsPages += Long.parseLong(r[2]);
+                } catch (Exception ignored) {
+                }
+            } else {
+                e.getValue().cancel(true);
+            }
         }
         if (!wiki.isEmpty()) {
             SourcesWeb.Resultat w = wiki.get(0);

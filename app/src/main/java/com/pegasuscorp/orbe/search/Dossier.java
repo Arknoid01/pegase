@@ -60,6 +60,8 @@ public final class Dossier {
     /** Source web principale utilisée (brave, bing…) ; vide si aucune. */
     public String sourceWeb = "";
     public long msRecherche, msPages, msTri;
+    /** Octets téléchargés pour lire les pages. */
+    public long octetsPages;
 
     /** Réponse extraite (phrase sourcée) — remplie par {@link Extraction#extractive}. */
     public String reponse = "";

@@ -87,6 +87,7 @@ public class PersonalizationPanel extends FrameLayout {
     private EditText geminiKeyField;
     private EditText tavilyKeyField;
     private EditText braveKeyField;
+    private EditText termesPrivesField;
     private EditText newsKeyField;
     private EditText spotifyClientIdField;
     private EditText userCityField;
@@ -310,6 +311,11 @@ public class PersonalizationPanel extends FrameLayout {
         body.addView(hintLabel(context,
                 "Recherche privée (prioritaire) : api-dashboard.search.brave.com — pages lues sur le téléphone"));
         braveKeyField = addApiKeyField(context, "Clé Brave Search (BSA...)");
+        termesPrivesField = addApiKeyField(context,
+                "Termes privés, jamais envoyés aux moteurs (séparés par des virgules)");
+        body.addView(hintLabel(context,
+                "Ton nom du profil est ajouté d'office. E-mail, téléphone, adresse, IBAN : toujours retirés. "
+                        + "En 4G : 4 pages lues au lieu de 8."));
         if (com.pegasuscorp.orbe.search.MoteurPrive.modeleInstalle(context)) {
             body.addView(hintLabel(context, "Modèle de recherche privée : installé ✓"));
         } else {
@@ -994,6 +1000,10 @@ public class PersonalizationPanel extends FrameLayout {
         if (userCoordsField != null) userCoordsField.setText(ApiKeyStore.getUserCoords(getContext()));
         if (tavilyKeyField != null) tavilyKeyField.setText(ApiKeyStore.getTavilyKey(getContext()));
         if (braveKeyField != null) braveKeyField.setText(ApiKeyStore.getBraveKey(getContext()));
+        if (termesPrivesField != null) {
+            termesPrivesField.setText(
+                    com.pegasuscorp.orbe.search.ReglagesRecherche.termesSaisis(getContext()));
+        }
         if (newsKeyField != null) newsKeyField.setText(ApiKeyStore.getNewsApiKey(getContext()));
         if (spotifyClientIdField != null) {
             spotifyClientIdField.setText(ApiKeyStore.getSpotifyClientId(getContext()));
@@ -1081,6 +1091,10 @@ public class PersonalizationPanel extends FrameLayout {
         ApiKeyStore.setUserCoords(getContext(), userCoordsField != null ? userCoordsField.getText().toString() : "");
         ApiKeyStore.setTavilyKey(getContext(), tavilyKeyField.getText().toString());
         if (braveKeyField != null) ApiKeyStore.setBraveKey(getContext(), braveKeyField.getText().toString());
+        if (termesPrivesField != null) {
+            com.pegasuscorp.orbe.search.ReglagesRecherche.setTermesSaisis(getContext(),
+                    termesPrivesField.getText().toString());
+        }
         ApiKeyStore.setNewsApiKey(getContext(), newsKeyField.getText().toString());
         if (spotifyClientIdField != null) {
             ApiKeyStore.setSpotifyClientId(getContext(), spotifyClientIdField.getText().toString());

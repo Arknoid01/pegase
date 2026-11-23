@@ -118,6 +118,7 @@ public final class Assemblage {
         for (Collecte.Page p : col.pages) if (!p.texte.isEmpty()) d.pagesLues++;
         d.msRecherche = col.msRecherche;
         d.msPages = col.msPages;
+        d.octetsPages = col.octetsPages;
         d.msTri = tTri;
         return d;
     }
