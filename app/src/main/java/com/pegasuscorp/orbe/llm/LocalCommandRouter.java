@@ -216,6 +216,13 @@ public final class LocalCommandRouter {
         if (f.matches("^(qui|pourquoi|comment|combien|c'est quoi|explique).*") && !out.contains("weather")) {
             out.clear();
         }
+        // Question sur ce qu'il sait de l'utilisateur (« tu te souviens de ce que j'aime comme
+        // musique ? ») → discussion avec les souvenirs, pas une commande Spotify.
+        if (f.matches("^(tu te souviens|te souviens-tu|tu te rappelles|tu sais ce que|tu sais quel|"
+                + "est-ce que tu sais|est-ce que tu te souviens|qu'est-ce que j'aime|"
+                + "qu'est ce que j'aime|c'est quoi mon|c'est quoi ma|quel est mon|quelle est ma).*")) {
+            out.clear();
+        }
         return new ArrayList<>(out);
     }
 

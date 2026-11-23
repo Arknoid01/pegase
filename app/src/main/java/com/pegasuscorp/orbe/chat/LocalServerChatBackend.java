@@ -118,9 +118,20 @@ public final class LocalServerChatBackend implements ChatBackend {
 
         String web = null;
         int need = webNeed(user);
-        String query = need == WEB_YES ? user
-                : need == WEB_ASK ? webQuery(server, user, lastAssistant) : null;
-        if (query != null) web = runSearch(query, user);
+        String query;
+        String question = user;
+        if (need == WEB_ASK && lastWebQuery != null && FOLLOW_UP.matcher(user).find()) {
+            // « des explications à ça ? » juste après une recherche : même sujet, nouvel angle.
+            // Le moteur cherche avec la QUESTION : elle doit porter le sujet, pas « ça ».
+            query = lastWebQuery + " — " + user;
+            question = query;
+        } else {
+            query = need == WEB_YES ? user
+                    : need == WEB_ASK ? webQuery(server, user, lastAssistant) : null;
+        }
+        if (query != null) web = runSearch(query, question);
+        lastWebQuery = web != null ? query : null;
+        String memories = memoriesFor(user);
 
         JSONArray msgs = new JSONArray();
         msgs.put(new JSONObject().put("role", "system").put("content", systemPrompt()));
@@ -150,6 +161,10 @@ public final class LocalServerChatBackend implements ChatBackend {
             }
         }
         StringBuilder u = new StringBuilder(pendingSystem);
+        if (memories != null) {
+            u.append("[Tes souvenirs sur ").append(UserProfileStore.getInstance(app).getUserName())
+                    .append(", à utiliser seulement si c'est utile : ").append(memories).append("]\n");
+        }
         if (web != null) {
             u.append("[Ce que TA recherche web vient de trouver (pas dit par ")
                     .append(UserProfileStore.getInstance(app).getUserName())
@@ -181,6 +196,7 @@ public final class LocalServerChatBackend implements ChatBackend {
             }
         });
         Log.i(TAG, "réponse " + (System.currentTimeMillis() - t0) + " ms, web=" + (web != null)
+                + ", souvenirs=" + (memories != null)
                 + " · " + LocalLlmServer.describeTimings(server.lastTimings));
         String out = PegasePrompt.sanitizeForDisplay(full).trim();
         if (out.isEmpty()) throw new IllegalStateException("réponse vide");
@@ -188,6 +204,12 @@ public final class LocalServerChatBackend implements ChatBackend {
     }
 
     static final int WEB_NO = 0, WEB_YES = 1, WEB_ASK = 2;
+    /** Requête de la dernière recherche réussie (relances « et pourquoi ? »). */
+    private volatile String lastWebQuery;
+    private static final Pattern FOLLOW_UP = Pattern.compile(
+            "\\b(explications?|pourquoi|comment [cç]a|plus de d[ée]tails|en savoir plus|"
+                    + "et (lui|elle|eux|apr[eè]s)|quoi d'autre|c'est vrai|depuis quand|la suite)\\b",
+            Pattern.CASE_INSENSITIVE);
     /** Demandes de faits frais sans ambiguïté : recherche directe, sans décision du modèle. */
     private static final Pattern WEB_SURE = Pattern.compile(
             "\\b(prix|tarifs?|combien co[uû]te|cours de|en bourse|r[ée]sultats?|score|classement|"
@@ -242,7 +264,13 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .append("Quand un bloc entre crochets donne ce que ta recherche web a trouvé, c'est ")
                 .append("toi qui l'as cherché (dis « d'après ce que j'ai trouvé ») : appuie-toi dessus ")
                 .append("et n'invente aucun chiffre, nom ni fait qui n'y figure pas ; si tu ne sais ")
-                .append("pas, dis-le simplement. Tu ne peux pas agir (réveil, message…) dans cette réponse : ")
+                .append("pas, dis-le simplement. Recopie les nombres exactement comme dans la source ")
+                .append("(« 2,126 € », pas « 2126 euros »). Tu es une IA : tu n'as ni journée, ni ")
+                .append("activités, ni souvenirs personnels ; ne t'invente jamais de vie ou ")
+                .append("d'expérience, ramène plutôt la conversation sur lui. Ce que tu sais de lui ")
+                .append("vient seulement de cette consigne et des souvenirs entre crochets : s'il te ")
+                .append("demande si tu te souviens de quelque chose qui n'y est pas, dis honnêtement ")
+                .append("que tu ne sais pas et propose qu'il te le dise. Tu ne peux pas agir (réveil, message…) dans cette réponse : ")
                 .append("s'il le demande, dis-lui de le formuler comme une commande.\n");
         List<String> projects = p.getProjectsList();
         if (projects != null && !projects.isEmpty()) {
@@ -325,7 +353,7 @@ public final class LocalServerChatBackend implements ChatBackend {
             JSONObject params = new JSONObject().put("query", query).put("question", question);
             main.post(() -> tool.execute(app, params, new ToolCallback() {
                 @Override public void onSuccess(ToolResult result) {
-                    out[0] = result != null ? result.text : null;
+                    out[0] = result == null ? null : compactSearch(result);
                     done.countDown();
                 }
                 @Override public void onConfirmNeeded(String q, Runnable ok, Runnable cancel) {
@@ -340,7 +368,47 @@ public final class LocalServerChatBackend implements ChatBackend {
         } catch (Exception e) {
             return null;
         }
-        return out[0] != null ? clip(out[0], 1500) : null;
+        return out[0];
+    }
+
+    /**
+     * Réponse extraite + passages sourcés (contexte LLM du moteur), sans les consignes du
+     * cloud, plafonné : chaque jeton du prompt coûte ~25 ms à lire sur le téléphone.
+     */
+    static String compactSearch(ToolResult r) {
+        String ctx = r.llmContext;
+        if (ctx == null || ctx.trim().isEmpty()) return clip(r.text, 600);
+        StringBuilder sb = new StringBuilder();
+        for (String line : ctx.split("\n")) {
+            String l = line.trim();
+            if (l.isEmpty() || l.startsWith("[") || l.startsWith("Question :")) continue;
+            if (l.startsWith("Source ")) l = clip(l, 350);
+            sb.append(l).append(' ');
+            if (sb.length() > 1100) break;
+        }
+        String out = sb.toString().trim();
+        return out.isEmpty() ? clip(r.text, 600) : clip(out, 1200);
+    }
+
+    /** Jusqu'à 3 souvenirs pertinents (recherche sémantique locale, MiniLM), ou null. */
+    private String memoriesFor(String user) {
+        try {
+            List<com.pegasuscorp.orbe.memory.MemoryEntry> mem =
+                    com.pegasuscorp.orbe.memory.MemoryRepository.getInstance(app)
+                            .getRelevantMemoriesSemantic(user, new ArrayList<>(), new ArrayList<>(), 3,
+                                    com.pegasuscorp.orbe.memory.MemoryRepository.SEMANTIC_MIN_SCORE + 0.06f);
+            if (mem == null || mem.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder();
+            for (com.pegasuscorp.orbe.memory.MemoryEntry m : mem) {
+                if (m.content == null || m.content.trim().isEmpty()) continue;
+                if (sb.length() > 0) sb.append(" ; ");
+                sb.append(clip(m.content, 220));
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (Exception e) {
+            Log.w(TAG, "souvenirs : " + e.getMessage());
+            return null;
+        }
     }
 
     private static String lastAssistantText(List<Turn> history) {
