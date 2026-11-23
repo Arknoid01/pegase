@@ -73,16 +73,6 @@ public final class TavilyTool implements Tool {
 
     public void execute(Context ctx, JSONObject params, ToolCallback cb) {
 
-        if (!ApiKeyStore.hasTavilyKey(ctx)) {
-
-            cb.onError("Clé Tavily manquante — saisis-la dans les réglages pour la recherche web.");
-
-            return;
-
-        }
-
-
-
         String query = params.optString("query", "").trim();
 
         if (query.isEmpty()) {
@@ -97,11 +87,85 @@ public final class TavilyTool implements Tool {
 
         if (question.isEmpty()) question = query;
 
-
-
         final String finalQuestion = question;
 
+        final boolean prive = com.pegasuscorp.orbe.search.MoteurPrive.pret(ctx);
+
+        if (!prive && !ApiKeyStore.hasTavilyKey(ctx)) {
+
+            cb.onError("Recherche web non configurée — ajoute une clé Brave (recherche privée) "
+
+                    + "ou Tavily dans les réglages.");
+
+            return;
+
+        }
+
         io.execute(() -> {
+
+            // 1) Moteur privé (Brave + lecture des pages sur le téléphone), décidé le 2026-11-23 :
+
+            //    meilleur sur l'actu et les fausses prémisses, rien d'inventé. Question en
+
+            //    langage naturel (« question ») : c'est avec elle que le moteur a été mesuré.
+
+            com.pegasuscorp.orbe.search.Dossier dossier = null;
+
+            if (prive) {
+
+                try {
+
+                    dossier = com.pegasuscorp.orbe.search.MoteurPrive.chercher(ctx, finalQuestion);
+
+                } catch (Throwable e) {   // y compris les erreurs fatales : on bascule sur Tavily
+
+                    android.util.Log.w("TavilyTool", "moteur privé : " + e);
+
+                }
+
+                if (dossier != null && !dossier.abstention && !dossier.passages.isEmpty()) {
+
+                    final com.pegasuscorp.orbe.search.Dossier d = dossier;
+
+                    main.post(() -> cb.onSuccess(ToolResult.text(d.reponse,
+
+                            com.pegasuscorp.orbe.search.MoteurRecherche.contexteLlm(d)
+
+                                    + "\n[moteur : recherche privée (" + d.sourceWeb + ")]")));
+
+                    return;
+
+                }
+
+            }
+
+            // 2) Tavily en secours (abstention, échec, ou moteur privé pas prêt)
+
+            if (!ApiKeyStore.hasTavilyKey(ctx)) {
+
+                final com.pegasuscorp.orbe.search.Dossier d = dossier;
+
+                main.post(() -> {
+
+                    if (d != null) {
+
+                        cb.onSuccess(ToolResult.text(d.reponse,
+
+                                com.pegasuscorp.orbe.search.MoteurRecherche.contexteLlm(d)
+
+                                        + "\n[moteur : recherche privée, sans réponse ; pas de Tavily]"));
+
+                    } else {
+
+                        cb.onError("Recherche impossible pour le moment.");
+
+                    }
+
+                });
+
+                return;
+
+            }
 
             try {
 
@@ -119,7 +183,9 @@ public final class TavilyTool implements Tool {
 
                 String display = bundle.fallbackSpeech();
 
-                String llmContext = bundle.toLlmContext(finalQuestion);
+                String llmContext = bundle.toLlmContext(finalQuestion)
+
+                        + (prive ? "\n[moteur : Tavily (secours du moteur privé)]" : "\n[moteur : Tavily]");
 
                 main.post(() -> cb.onSuccess(ToolResult.text(display, llmContext)));
 

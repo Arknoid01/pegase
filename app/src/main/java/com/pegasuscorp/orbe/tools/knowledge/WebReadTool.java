@@ -95,7 +95,7 @@ public final class WebReadTool implements Tool {
         throw new IllegalStateException("Trop de redirections.");
     }
 
-    static void checkUrl(String url) throws Exception {
+    public static void checkUrl(String url) throws Exception {
         URL u = new URL(url);
         if (!"https".equalsIgnoreCase(u.getProtocol())) {
             throw new IllegalStateException("Seules les pages https sont lues.");

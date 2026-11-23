@@ -86,6 +86,7 @@ public class PersonalizationPanel extends FrameLayout {
     private EditText openRouterKeyField;
     private EditText geminiKeyField;
     private EditText tavilyKeyField;
+    private EditText braveKeyField;
     private EditText newsKeyField;
     private EditText spotifyClientIdField;
     private EditText userCityField;
@@ -303,10 +304,23 @@ public class PersonalizationPanel extends FrameLayout {
         cerebrasKeyField = addApiKeyField(context, "Clé Cerebras");
         openRouterKeyField = addApiKeyField(context, "Clé OpenRouter (sk-or-...)");
         body.addView(hintLabel(context,
-                "Vision (image / PDF) : même clé OpenRouter — menu Discussion → Analyser."));
+                "Documents (PDF / image) : clé OpenRouter — Discussion → Joindre un document."));
         body.addView(hintLabel(context, "Gemini (hors rotation) : aistudio.google.com"));
         geminiKeyField = addApiKeyField(context, "Clé Gemini (AIza...)");
-        body.addView(hintLabel(context, "Recherche : tavily.com · Actualités : newsapi.org"));
+        body.addView(hintLabel(context,
+                "Recherche privée (prioritaire) : api-dashboard.search.brave.com — pages lues sur le téléphone"));
+        braveKeyField = addApiKeyField(context, "Clé Brave Search (BSA...)");
+        if (com.pegasuscorp.orbe.search.MoteurPrive.modeleInstalle(context)) {
+            body.addView(hintLabel(context, "Modèle de recherche privée : installé ✓"));
+        } else {
+            addActionRow("Télécharger le modèle de recherche (≈250 Mo, Wi-Fi)", () ->
+                    android.widget.Toast.makeText(getContext(),
+                            com.pegasuscorp.orbe.search.MoteurPrive.telecharger(getContext())
+                                    ? "Téléchargement lancé — suis-le dans les notifications."
+                                    : "Téléchargement impossible.",
+                            android.widget.Toast.LENGTH_LONG).show());
+        }
+        body.addView(hintLabel(context, "Recherche de secours : tavily.com · Actualités : newsapi.org"));
         tavilyKeyField = addApiKeyField(context, "Clé Tavily (tvly-...)");
         newsKeyField = addApiKeyField(context, "Clé NewsAPI (pub_...)");
         body.addView(hintLabel(context, "NASA : api.nasa.gov"));
@@ -979,6 +993,7 @@ public class PersonalizationPanel extends FrameLayout {
         if (userCityField != null) userCityField.setText(ApiKeyStore.getUserCity(getContext()));
         if (userCoordsField != null) userCoordsField.setText(ApiKeyStore.getUserCoords(getContext()));
         if (tavilyKeyField != null) tavilyKeyField.setText(ApiKeyStore.getTavilyKey(getContext()));
+        if (braveKeyField != null) braveKeyField.setText(ApiKeyStore.getBraveKey(getContext()));
         if (newsKeyField != null) newsKeyField.setText(ApiKeyStore.getNewsApiKey(getContext()));
         if (spotifyClientIdField != null) {
             spotifyClientIdField.setText(ApiKeyStore.getSpotifyClientId(getContext()));
@@ -1065,6 +1080,7 @@ public class PersonalizationPanel extends FrameLayout {
         ApiKeyStore.setUserCity(getContext(), userCityField != null ? userCityField.getText().toString() : "");
         ApiKeyStore.setUserCoords(getContext(), userCoordsField != null ? userCoordsField.getText().toString() : "");
         ApiKeyStore.setTavilyKey(getContext(), tavilyKeyField.getText().toString());
+        if (braveKeyField != null) ApiKeyStore.setBraveKey(getContext(), braveKeyField.getText().toString());
         ApiKeyStore.setNewsApiKey(getContext(), newsKeyField.getText().toString());
         if (spotifyClientIdField != null) {
             ApiKeyStore.setSpotifyClientId(getContext(), spotifyClientIdField.getText().toString());

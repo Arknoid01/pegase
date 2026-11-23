@@ -14,6 +14,8 @@ public final class ApiKeyStore {
     private static final String KEY_GROQ   = "groq_api_key";
     private static final String KEY_GEMINI = "gemini_api_key";
     private static final String KEY_TAVILY = "tavily_api_key";
+    /** Brave Search API : web du moteur de recherche privé (prioritaire sur Tavily). */
+    private static final String KEY_BRAVE  = "brave_search_api_key";
     private static final String KEY_NEWS   = "newsapi_api_key";
     private static final String KEY_NASA   = "nasa_api_key";
     private static final String KEY_API_FOOTBALL = "api_football_key";
@@ -75,6 +77,17 @@ public final class ApiKeyStore {
     public static void setGeminiKey(Context context, String key) {
         prefs(context)
                 .edit().putString(KEY_GEMINI, key == null ? "" : key.trim()).apply();
+    }
+
+    public static String getBraveKey(Context context) {
+        return prefs(context).getString(KEY_BRAVE, "").replace("\uFEFF", "").trim();
+    }
+    public static void setBraveKey(Context context, String key) {
+        prefs(context).edit().putString(KEY_BRAVE,
+                key == null ? "" : key.replace("\uFEFF", "").trim()).apply();
+    }
+    public static boolean hasBraveKey(Context context) {
+        return !TextUtils.isEmpty(getBraveKey(context));
     }
 
     public static String getTavilyKey(Context context) {
