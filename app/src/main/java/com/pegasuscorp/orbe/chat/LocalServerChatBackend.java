@@ -44,6 +44,15 @@ public final class LocalServerChatBackend implements ChatBackend {
     private static final int MAX_WINDOW = 12;
     private static final int KEEP_AFTER_JUMP = 6;
     private static final int MAX_TURN_CHARS = 700;
+    /** Budget prompt discussion (slot 4096 jetons ≈ 12–14k car. utiles). */
+    private static final int CHAT_PROMPT_MAX_CHARS = 13_000;
+    private static final int REPLY_MAX_TOKENS_SHORT = 220;
+    private static final int REPLY_MAX_TOKENS_WEB = 280;
+    private static final int REPLY_MAX_TOKENS_EXPLAIN = 520;
+    private static final Pattern EXPLAIN_ASK = Pattern.compile(
+            "\\b(explique|expliques|d[ée]taille|d[ée]veloppe|raconte|en d[ée]tail|"
+                    + "comment [çc]a marche|pourquoi .* en profondeur)\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final int REPLY_TIMEOUT_MS = 240_000;
     /** Petites phrases sans besoin de web (évite une décision de ~3 s). */
     private static final Pattern SMALL_TALK = Pattern.compile(
@@ -79,9 +88,15 @@ public final class LocalServerChatBackend implements ChatBackend {
     public void send(List<Turn> history, String userMessage, OnReply callback,
             ChatSendOptions options) {
         final List<Turn> hist = history != null ? new ArrayList<>(history) : new ArrayList<>();
+        // Sans historique = tâche de fond (résumé de session, tri des spams SMS, éditeur de
+        // mémoire, traduction…) : réponse BRUTE. Surtout pas de recherche web (le texte d'un SMS
+        // partirait chez Brave), ni personnalité, ni souvenirs, ni limite de 2-3 phrases.
+        // La discussion passe toujours par ConversationManager, dont l'historique contient au
+        // moins le tour en cours.
+        final boolean raw = hist.isEmpty();
         io.execute(() -> {
             try {
-                String reply = reply(hist, userMessage, callback);
+                String reply = raw ? rawReply(userMessage) : reply(hist, userMessage, callback);
                 main.post(() -> callback.onReply(reply));
             } catch (Exception e) {
                 Log.w(TAG, "échec", e);
@@ -98,6 +113,45 @@ public final class LocalServerChatBackend implements ChatBackend {
         if (chain != null && callback != null) {
             callback.onLlmReply(LlmReply.text(chain.lastToolResult()));
         }
+    }
+
+    /** Plafond d'un prompt de tâche de fond (≈3 300 jetons, slot de 4 096). */
+    static final int RAW_MAX_CHARS = 11_000;
+
+    /** Tâche de fond : le prompt tel quel, emplacement dédié, sans flux. */
+    private String rawReply(String prompt) throws Exception {
+        LocalLlmServer server = LocalLlmServer.get(app);
+        if (!server.isAvailable()) {
+            throw new IllegalStateException("le modèle " + LocalLlmServer.MODEL_LABEL
+                    + " n'est pas installé (Réglages → Cerveau)");
+        }
+        if (!server.ensureStarted()) throw new IllegalStateException("démarrage impossible");
+        JSONArray msgs = new JSONArray().put(new JSONObject().put("role", "user")
+                .put("content", clipRaw(prompt)));
+        JSONObject body = new JSONObject()
+                .put("messages", msgs)
+                .put("temperature", 0.2)
+                .put("max_tokens", 700)
+                .put("id_slot", LocalLlmServer.BACKGROUND_SLOT)
+                .put("cache_prompt", true)
+                .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
+        long t0 = System.currentTimeMillis();
+        JSONObject r = server.chat(body, REPLY_TIMEOUT_MS);
+        String out = r.getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").optString("content", "").trim();
+        Log.i(TAG, "tâche de fond " + (System.currentTimeMillis() - t0) + " ms, "
+                + (prompt != null ? prompt.length() : 0) + " car.");
+        if (out.isEmpty()) throw new IllegalStateException("réponse vide");
+        return out;
+    }
+
+    /** Garde le début (consignes) et la fin (le plus récent) d'un prompt trop long. */
+    static String clipRaw(String prompt) {
+        if (prompt == null) return "";
+        if (prompt.length() <= RAW_MAX_CHARS) return prompt;
+        int head = RAW_MAX_CHARS / 3;
+        int tail = RAW_MAX_CHARS - head - 20;
+        return prompt.substring(0, head) + "\n[…]\n" + prompt.substring(prompt.length() - tail);
     }
 
     private String reply(List<Turn> history, String userMessage, OnReply callback) throws Exception {
@@ -172,6 +226,7 @@ public final class LocalServerChatBackend implements ChatBackend {
         }
         // Pas d'heure ici ni dans le système : tout ce qui change d'un message à l'autre casse
         // le cache du serveur (≈600 jetons relus, ≈12–15 s). La date du jour suffit.
+        user = fitUserMessage(user, estimatePromptChars(msgs, u, memories, web));
         u.append(user);
         if (lastRole.equals("user")) {
             JSONObject prev = msgs.getJSONObject(msgs.length() - 1);
@@ -184,7 +239,7 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .put("messages", msgs)
                 .put("temperature", web != null ? 0.4 : 0.7)
                 .put("top_p", 0.9)
-                .put("max_tokens", 220)
+                .put("max_tokens", maxReplyTokens(user, web != null))
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
                 .put("cache_prompt", true)
                 .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
@@ -258,7 +313,8 @@ public final class LocalServerChatBackend implements ChatBackend {
         sb.append("Tu es ").append(p.getAssistantName()).append(", l'assistant personnel de ")
                 .append(p.getUserName()).append(", sur son téléphone. Tu le tutoies. ")
                 .append("Personnalité : ").append(p.getAssistantPersonality()).append('\n')
-                .append("Réponds en français, comme à l'oral, en 2 ou 3 phrases courtes, sans listes ni ")
+                .append("Réponds en français, comme à l'oral ; en général 2 ou 3 phrases courtes")
+                .append(" (un peu plus si on te demande d'expliquer en détail), sans listes ni ")
                 .append("markdown ni emojis. Reste sur ce que ").append(p.getUserName())
                 .append(" vient de dire et ne contredis pas ce qu'il affirme sur sa propre vie. ")
                 .append("Quand un bloc entre crochets donne ce que ta recherche web a trouvé, c'est ")
@@ -270,8 +326,9 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .append("d'expérience, ramène plutôt la conversation sur lui. Ce que tu sais de lui ")
                 .append("vient seulement de cette consigne et des souvenirs entre crochets : s'il te ")
                 .append("demande si tu te souviens de quelque chose qui n'y est pas, dis honnêtement ")
-                .append("que tu ne sais pas et propose qu'il te le dise. Tu ne peux pas agir (réveil, message…) dans cette réponse : ")
-                .append("s'il le demande, dis-lui de le formuler comme une commande.\n");
+                .append("que tu ne sais pas et propose qu'il te le dise. Tu ne peux pas agir (réveil, message, brief, "
+                + "sms, F1…) dans cette réponse : ne dis JAMAIS « c'est fait » ou « je l'ai noté » pour une action ; ")
+                .append("propose plutôt une commande claire (« mets un réveil à 7h », « brief du matin », …).\n");
         List<String> projects = p.getProjectsList();
         if (projects != null && !projects.isEmpty()) {
             sb.append("Ses projets : ").append(String.join(", ",
@@ -449,5 +506,36 @@ public final class LocalServerChatBackend implements ChatBackend {
         if (s == null) return "";
         String t = s.trim();
         return t.length() <= max ? t : t.substring(0, max) + "…";
+    }
+
+    static int maxReplyTokens(String user, boolean hasWeb) {
+        if (user != null && EXPLAIN_ASK.matcher(user).find()) return REPLY_MAX_TOKENS_EXPLAIN;
+        if (hasWeb) return REPLY_MAX_TOKENS_WEB;
+        return REPLY_MAX_TOKENS_SHORT;
+    }
+
+    static int estimatePromptChars(JSONArray msgs, StringBuilder prefix, String memories, String web) {
+        int n = prefix.length();
+        if (memories != null) n += memories.length();
+        if (web != null) n += web.length();
+        try {
+            for (int i = 0; i < msgs.length(); i++) {
+                n += msgs.getJSONObject(i).optString("content", "").length();
+            }
+        } catch (Exception ignored) {
+        }
+        return n;
+    }
+
+    /** Tronque un message utilisateur trop long pour tenir dans le slot 4096. */
+    static String fitUserMessage(String user, int usedChars) {
+        if (user == null) return "";
+        int budget = CHAT_PROMPT_MAX_CHARS - usedChars - 400;
+        if (budget < 1500) budget = 1500;
+        if (user.length() <= budget) return user;
+        int head = budget / 3;
+        int tail = budget - head - 24;
+        return user.substring(0, head) + "\n[… texte raccourci …]\n"
+                + user.substring(user.length() - tail);
     }
 }

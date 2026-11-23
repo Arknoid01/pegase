@@ -45,13 +45,16 @@ public final class LocalLlmServer {
     /** Slot de la discussion locale, et slot de la décision « recherche web ou non ». */
     public static final int CHAT_SLOT = 10;
     public static final int WEB_DECISION_SLOT = 11;
-    private static final int TOTAL_SLOTS = 12;
+    /** Tâches de fond (résumés, tri SMS, mémoire) : ne touchent pas au cache de la discussion. */
+    public static final int BACKGROUND_SLOT = 12;
+    private static final int TOTAL_SLOTS = 13;
     /**
      * 4096 jetons par slot, contexte NON partagé : avec --kv-unified, une requête sur un slot
      * effaçait le cache des autres (mesuré : la décision web vidait la discussion → 244 jetons
-     * relus au lieu de 13). Coût ≈ +0,9 Go, il reste ≈2,6 Go libres sur le Nothing.
+     * relus au lieu de 13). Coût ≈ +1 Go, il reste ≈2,5 Go libres sur le Nothing.
      */
-    private static final int TOTAL_CTX = 4096 * 12;
+    private static final int TOTAL_SLOTS_FOR_CTX = 13;
+    private static final int TOTAL_CTX = 4096 * TOTAL_SLOTS_FOR_CTX;
 
     private static final String PREFS = "local_llm";
     private static final String KEY_ENABLED = "commands_enabled";

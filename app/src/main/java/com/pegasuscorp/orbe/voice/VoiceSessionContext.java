@@ -12,7 +12,8 @@ import java.util.Locale;
  */
 public final class VoiceSessionContext {
 
-    private static final long FOLLOW_UP_TIMEOUT_MS = 120_000;
+    /** Relance vocale (« et demain ? ») : 5 min pour laisser le Gemma local finir une recherche. */
+    private static final long FOLLOW_UP_TIMEOUT_MS = 300_000;
 
     private static VoiceSessionContext instance;
 

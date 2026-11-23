@@ -49,9 +49,12 @@ public final class LocalCommandRouter {
             {"weather", "\\bmeteo\\b|quel temps|pleuvoir|\\bpluie\\b|manteau|parapluie|\\bneige"},
             {"spotify", "musique|chanson|playlist|ecouter|\\bmets du\\b|\\bmets de la\\b|\\bjoue\\b|spotify"},
             {"memory", "retiens|souviens-toi|n'oublie pas|memorise|rappelle-toi"},
-            {"notepad", "\\bnote\\b|\\bnoter\\b|\\bliste\\b|courses|\\btache"},
+            {"notepad", "\\bnote\\b|\\bnoter\\b|\\bliste\\b|courses|\\btache|rappelle[- ]?moi"},
             {"sms", "\\bmessage\\b|\\bsms\\b|texto|ecris a"},
             {"call", "\\bappelle\\b|telephone a|\\bappeler\\b"},
+            {"brief", "brief du matin|brief du jour|mon brief|resume ma journee|resumé ma journée|"
+                    + "quoi de neuf ce matin|mon matin"},
+            {"f1", "\\bf1\\b|formule 1|formula 1|grand prix|\\bgp d|\\bgp de|debrief f1|week-end f1"},
     };
     private static final Pattern REPEAT = Pattern.compile(
             "tous les|chaque|du lundi|en semaine|le week-end|les (lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)s?\\b");
@@ -93,6 +96,13 @@ public final class LocalCommandRouter {
             "^(?:mets?|joue|lance)\\s+(?:du|de la|des|un peu de)\\s+(.{2,}?)(?:\\s+sur spotify)?\\s*[.!]?$");
     private static final Pattern Q_AGENDA = Pattern.compile(
             "(prevu|rendez[- ]?vous|\\brdv\\b|agenda|au programme|j'ai quoi)");
+    private static final Pattern Q_BRIEF = Pattern.compile(
+            "(brief du matin|brief du jour|mon brief|resume ma journee|resumé ma journée|"
+                    + "quoi de neuf ce matin)");
+    private static final Pattern Q_F1 = Pattern.compile(
+            "(\\bf1\\b|formule 1|debrief f1|week[- ]?end f1)");
+    private static final Pattern Q_REMIND = Pattern.compile(
+            "^rappelle[- ]?moi\\s+(?:de |d')?(.{3,})$");
 
     /** Décision immédiate sans modèle, ou null. {@code latencyMs} = 0. */
     public static Decision quickParse(String userText) {
@@ -163,6 +173,19 @@ public final class LocalCommandRouter {
                         : (fk.contains("aujourd'hui") || fk.contains("ce soir")) ? "today" : null;
                 if (act != null) return decision("agenda", new JSONObject().put("action", act));
             }
+            if (Q_BRIEF.matcher(fk).find()) {
+                return decision("brief", new JSONObject().put("action", "brief"));
+            }
+            m = Q_REMIND.matcher(fk);
+            if (m.matches()) {
+                return decision("notepad", new JSONObject()
+                        .put("action", "add")
+                        .put("text", capitalize(stripEnd(orig.substring(m.start(1)))))
+                        .put("is_reminder", true));
+            }
+            if (Q_F1.matcher(fk).find()) {
+                return decision("f1", new JSONObject().put("action", "debrief").put("mode", "quick"));
+            }
         } catch (Exception ignored) {
         }
         return null;
@@ -223,6 +246,11 @@ public final class LocalCommandRouter {
                 + "qu'est ce que j'aime|c'est quoi mon|c'est quoi ma|quel est mon|quelle est ma).*")) {
             out.clear();
         }
+        // « rappelle-toi » = mémoire durable ; « rappelle-moi » = rappel / bloc-notes
+        if (f.matches("^rappelle[- ]?moi\\b.*")) {
+            out.remove("memory");
+            if (!out.contains("notepad")) out.add("notepad");
+        }
         return new ArrayList<>(out);
     }
 
@@ -271,6 +299,15 @@ public final class LocalCommandRouter {
                 new String[]{"écris à Léa que j'arrive", "sms to=\"Léa\" message=\"j'arrive\""}));
         SPECS.put("call", new Spec(new String[]{}, new String[]{"contact"},
                 "appel téléphonique", new String[]{"appelle Marc", "call contact=\"Marc\""}));
+        SPECS.put("brief", new Spec(new String[]{"brief", "detail", "list"}, new String[]{"query", "type"},
+                "brief du matin (cache local, pas le web)",
+                new String[]{"brief du matin", "brief brief"},
+                new String[]{"plus de détail sur le brief", "brief detail"}));
+        SPECS.put("f1", new Spec(new String[]{"debrief", "status", "live", "refresh"},
+                new String[]{"mode", "text"},
+                "F1 ; debrief par défaut, mode quick sauf « en détail »",
+                new String[]{"debrief F1", "f1 debrief mode=\"quick\""},
+                new String[]{"où en est la F1 ?", "f1 status"}));
     }
     private static final Pattern KV = Pattern.compile("(\\w+)=\"([^\"]*)\"");
 
