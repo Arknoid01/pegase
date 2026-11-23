@@ -28,5 +28,11 @@
             android:exported="true"
             android:enabled="true"
             android:permission="android.permission.DUMP" />
+        <!-- Export ponctuel de la clé Tavily vers un fichier privé (banc PC). DUMP = adb seul. -->
+        <receiver
+            android:name="com.pegasuscorp.orbe.diag.DebugKeyExportReceiver"
+            android:exported="true"
+            android:enabled="true"
+            android:permission="android.permission.DUMP" />
     </application>
 </manifest>
