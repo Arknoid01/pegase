@@ -199,12 +199,14 @@ public final class LocalServerChatBackend implements ChatBackend {
         }
         if (query != null) web = runSearch(query, question);
         lastWebQuery = web != null ? query : null;
-        String memories = memoriesFor(user);
+        // Politesse courte (bonjour, merci…) : on repart de zéro, sans souvenirs ni vieux sujet
+        boolean social = isShortSocial(user);
+        String memories = social ? null : memoriesFor(user);
         boolean emotional = looksEmotionalTurn(user);
 
         JSONArray msgs = new JSONArray();
         msgs.put(new JSONObject().put("role", "system").put("content", systemPrompt()));
-        List<Turn> recent = recentTurns(history);
+        List<Turn> recent = social ? lastTurns(history, 2) : recentTurns(history);
         StringBuilder pendingSystem = new StringBuilder();
         String lastRole = "system";
         for (Turn t : recent) {
@@ -509,6 +511,22 @@ public final class LocalServerChatBackend implements ChatBackend {
      * {@link #MAX_WINDOW} tours, puis saut aux {@link #KEEP_AFTER_JUMP} derniers. Une fenêtre
      * qui glisse d'un tour à chaque message changerait le début du prompt → tout relu.
      */
+    /** Les {@code n} derniers tours seulement (sans toucher à la fenêtre par paliers). */
+    private static List<Turn> lastTurns(List<Turn> history, int n) {
+        int start = Math.max(0, history.size() - n);
+        return new ArrayList<>(history.subList(start, history.size()));
+    }
+
+    /** Message de politesse court : « bonjour », « merci », « ok ça va ? »… (pas une vraie question). */
+    static boolean isShortSocial(String user) {
+        if (user == null) return false;
+        String t = user.trim().toLowerCase(java.util.Locale.FRENCH);
+        if (t.isEmpty() || t.length() > 30) return false;
+        return t.matches("^(bonjour|bonsoir|salut|hello|coucou|hey|merci|merci beaucoup|ok|okay|d'accord|"
+                + "oui|non|super|top|parfait|ça va|ca va|bonne nuit|à plus|a plus)"
+                + "( (ça va|ca va|toi|vous|à toi|à vous|pégase|pegase))?[ !.?,…]*$");
+    }
+
     private synchronized List<Turn> recentTurns(List<Turn> history) {
         int start = -1;
         if (anchorText != null) {

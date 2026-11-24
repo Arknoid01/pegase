@@ -948,12 +948,19 @@ public class VoiceService extends Service {
 
         Notification n = buildNotification(title, text);
         if (!foregroundStarted) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-            } else {
-                startForeground(NOTIF_ID, n);
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+                } else {
+                    startForeground(NOTIF_ID, n);
+                }
+                foregroundStarted = true;
+            } catch (SecurityException e) {
+                // Android 14 : premier plan « micro » refusé hors état éligible. On ne plante plus
+                // le processus voix ; l'écoute reprendra au prochain essai.
+                Log.w(TAG, "FGS micro refusé — écoute reportée", e);
+                return;
             }
-            foregroundStarted = true;
         } else {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.notify(NOTIF_ID, n);
