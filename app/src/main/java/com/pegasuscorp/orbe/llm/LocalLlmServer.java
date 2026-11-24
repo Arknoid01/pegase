@@ -13,7 +13,9 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -38,7 +40,7 @@ public final class LocalLlmServer {
     /** Ancien modèle (Qwen3.5-2B), supprimé une fois Gemma en place (−1,3 Go). */
     static final String LEGACY_MODEL_FILE = "Qwen3.5-2B-Q4_K_M.gguf";
     private static final int PORT = 18092;
-    private static final long IDLE_STOP_MS = 20L * 60 * 1000;
+    private static final long IDLE_STOP_MS = 10L * 60 * 1000;
     private static final long START_TIMEOUT_MS = 60_000;
     /** Slots des groupes d'outils du routeur (0–9). */
     public static final int SLOT_COUNT = 10;
@@ -67,6 +69,12 @@ public final class LocalLlmServer {
     /** Moteur LiteRT-LM (Gemma .litertlm, GPU) au lieu de llama-server. Réglage « moteur_litert ». */
     public static final String LITERT_MODEL_FILE = "gemma-4-E2B-it.litertlm";
     private static final String KEY_LITERT = "moteur_litert";
+    // Serveur distant (Nord via Tailscale) : URL + clé API ; vide = désactivé.
+    private static final String KEY_REMOTE_URL = "remote_url";
+    private static final String KEY_REMOTE_KEY = "remote_key";
+    private volatile boolean remoteActive = false;
+    private volatile String remoteBase = null;
+    private volatile String remoteKey = null;
     private long litertHandle = 0;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
     private Process process;
@@ -106,6 +114,24 @@ public final class LocalLlmServer {
 
     public static void setLitert(Context ctx, boolean on) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LITERT, on).apply();
+    }
+
+    public static String getRemoteUrl(Context ctx) {
+        String u = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_REMOTE_URL, "");
+        return u == null || u.trim().isEmpty() ? null : u.trim().replaceAll("/+$", "");
+    }
+
+    public static String getRemoteKey(Context ctx) {
+        return ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_REMOTE_KEY, "");
+    }
+
+    /** URL vide ou null = serveur distant désactivé (repli local seul). */
+    public static void setRemote(Context ctx, String url, String key) {
+        ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_REMOTE_URL, url == null ? "" : url.trim())
+                .putString(KEY_REMOTE_KEY, key == null ? "" : key.trim()).apply();
     }
 
     public static boolean isLocalOnly(Context ctx) {
@@ -312,7 +338,33 @@ public final class LocalLlmServer {
     }
 
     public String baseUrl() {
+        if (remoteActive && remoteBase != null) return remoteBase;
         return "http://127.0.0.1:" + PORT;
+    }
+
+    /** En-têtes d'authentification pour le serveur distant, ou null en local. */
+    private Map<String, String> authHeaders() {
+        if (!remoteActive || remoteKey == null || remoteKey.isEmpty()) return null;
+        Map<String, String> m = new HashMap<>();
+        m.put("Authorization", "Bearer " + remoteKey);
+        return m;
+    }
+
+    /** Gemma 4 : sans ceci la réflexion part dans reasoning_content et content reste vide (vu en test). */
+    private static void disableThinking(JSONObject body) {
+        try {
+            body.put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean remoteHealthy(String url) {
+        try {
+            JSONObject h = HttpJson.get(url + "/health", null, 1500, 1500);
+            return "ok".equals(h.optString("status"));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ---- Cycle de vie ----
@@ -323,6 +375,20 @@ public final class LocalLlmServer {
      */
     public synchronized boolean ensureStarted() {
         touch();
+        String rUrl = getRemoteUrl(app);
+        if (rUrl != null) {
+            if (remoteHealthy(rUrl)) {
+                remoteBase = rUrl;
+                remoteKey = getRemoteKey(app);
+                remoteActive = true;
+                ready = true;
+                return true;
+            }
+            Log.w(TAG, "serveur distant injoignable, repli sur le modèle local");
+        }
+        remoteActive = false;
+        remoteBase = null;
+        remoteKey = null;
         if (usesLitert()) return litertReady();
         if (ready && process != null && process.isAlive()) return true;
         if (!isAvailable()) return false;
@@ -391,6 +457,7 @@ public final class LocalLlmServer {
     public JSONObject chatInSlot(JSONObject body, int slot, String cacheName,
             JSONObject templateBody, int readTimeoutMs) throws Exception {
         if (usesLitert()) return chat(body, readTimeoutMs);     // pas de cache de préfixe en LiteRT
+        if (remoteActive) return chat(body, readTimeoutMs);     // pas de cache de slots distant
         if (slot < 0 || slot >= SLOT_COUNT || cacheName == null) return chat(body, readTimeoutMs);
         if (ensurePrefix(slot, cacheName, templateBody)) restore(slot, cacheName);
         body.put("id_slot", slot);
@@ -473,12 +540,16 @@ public final class LocalLlmServer {
     /** POST /v1/chat/completions. Bloquant. */
     public JSONObject chat(JSONObject body, int readTimeoutMs) throws Exception {
         touch();
-        if (usesLitert()) {
+        if (usesLitert() && !remoteActive) {
             try { return litertChat(body); } finally { touch(); }
         }
+        if (remoteActive) disableThinking(body);
         try {
-            return HttpJson.postJson(baseUrl() + "/v1/chat/completions", null, body,
+            return HttpJson.postJson(baseUrl() + "/v1/chat/completions", authHeaders(), body,
                     3_000, readTimeoutMs);
+        } catch (Exception e) {
+            if (remoteActive) { remoteActive = false; ready = false; }   // distant tombé : repli au prochain appel
+            throw e;
         } finally {
             touch();
         }
@@ -491,12 +562,13 @@ public final class LocalLlmServer {
     public String chatStream(JSONObject body, int readTimeoutMs,
             java.util.function.Consumer<String> onText) throws Exception {
         touch();
-        if (usesLitert()) {
+        if (usesLitert() && !remoteActive) {
             try { return litertStream(body, readTimeoutMs, onText); } finally { touch(); }
         }
         java.net.HttpURLConnection c = null;
         try {
             body.put("stream", true);
+            if (remoteActive) disableThinking(body);
             lastTimings = null;
             c = (java.net.HttpURLConnection) new java.net.URL(baseUrl() + "/v1/chat/completions")
                     .openConnection();
@@ -505,6 +577,8 @@ public final class LocalLlmServer {
             c.setDoOutput(true);
             c.setRequestMethod("POST");
             c.setRequestProperty("Content-Type", "application/json");
+            Map<String, String> auth = authHeaders();
+            if (auth != null) for (Map.Entry<String, String> e : auth.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
             try (java.io.OutputStream os = c.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
@@ -531,6 +605,9 @@ public final class LocalLlmServer {
                 }
             }
             return acc.toString();
+        } catch (Exception e) {
+            if (remoteActive) { remoteActive = false; ready = false; }   // distant tombé : repli au prochain appel
+            throw e;
         } finally {
             if (c != null) c.disconnect();
             touch();

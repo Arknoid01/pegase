@@ -391,8 +391,8 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         super.onResume();
         ChatProgressNotifier.onInterfaceResumed(this);
         PegaseSession.get(this).init(new SessionContext(Channel.TEXT, false));
-        // Modèle local chargé pendant que l'utilisateur tape (≈7 s cachées)
-        PegaseSession.get(this).prewarmLocalLlm();
+        // TEST à froid : préchauffage retiré (le modèle se charge au 1er message)
+        // PegaseSession.get(this).prewarmLocalLlm();
         FloatingOrbService.hide(this);
         updateSubtitle();
         subtitleHandler.removeCallbacks(subtitleTick);
@@ -410,13 +410,9 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         // sera finalisée dans onDestroy / onInterfaceClosed.
         if (!isFinishing()
                 && android.provider.Settings.canDrawOverlays(this)) {
-            // AlwaysOn copilote gagne : un chat texte/copilote actif ne doit pas
-            // basculer l'orbe en mode VOICE (sinon tap → MainActivity au lieu de la bulle).
-            if (com.pegasuscorp.orbe.copilot.CopilotPrefs.isAlwaysOn(this)) {
-                FloatingOrbService.showCopilot(this);
-            } else if (ChatVoiceBridge.isChatActive()) {
-                FloatingOrbService.show(this);
-            }
+            // Orbe texte permanente hors de l'app (tap = bulle pop-up).
+            // Le mode voix reste sur l'appui long de l'accueil, jamais ici.
+            FloatingOrbService.showTextOrb(this);
         }
         super.onPause();
     }

@@ -54,6 +54,7 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
                     long t0 = System.currentTimeMillis();
                     final int[] parts = {0};
                     final long[] firstMs = {-1};
+                    LocalLlmServer.get(app).ensureStarted(); // test debug : démarre llama-server si besoin
                     String full = LocalLlmServer.get(app).chatStream(body, 120_000, acc -> {
                         parts[0]++;
                         if (firstMs[0] < 0) firstMs[0] = System.currentTimeMillis() - t0;
@@ -198,7 +199,8 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
                         .put("messages", LocalCommandRouter.compactMessages(tools, text))
                         .put("regex", LocalCommandRouter.regex(tools))
                         .put("temperature", 0.2)
-                        .put("max_tokens", 64);
+                        .put("max_tokens", 64)
+                        .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
                 long t0 = System.currentTimeMillis();
                 String out;
                 try {

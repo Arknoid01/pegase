@@ -322,12 +322,10 @@ public class FloatingOrbService extends Service {
             if (currentMode == OverlayMode.COPILOT) {
                 toggleBubble(!bubbleExpanded);
             } else {
-                Intent i = new Intent(this, MainActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                        .putExtra("resume_chat", true);
-                startActivity(i);
+                // Mode voix : le tap ouvre la bulle de discussion (pop-up), pas l'accueil.
+                currentMode = OverlayMode.COPILOT;
+                applyModeLayout();
+                toggleBubble(true);
             }
         }, () -> {
             if (currentMode == OverlayMode.COPILOT) {
@@ -713,6 +711,13 @@ public class FloatingOrbService extends Service {
 
     public static void showCopilot(Context ctx) {
         if (!CopilotPrefs.isAlwaysOn(ctx)) return;
+        if (!android.provider.Settings.canDrawOverlays(ctx)) return;
+        if (com.pegasuscorp.orbe.intentions.PegaseModeStore.isAutoDriveActive(ctx)) return;
+        show(ctx, OverlayMode.COPILOT);
+    }
+
+    /** Orbe texte (bulle pop-up) visible hors de l'app, sans réglage copilote « toujours actif ». */
+    public static void showTextOrb(Context ctx) {
         if (!android.provider.Settings.canDrawOverlays(ctx)) return;
         if (com.pegasuscorp.orbe.intentions.PegaseModeStore.isAutoDriveActive(ctx)) return;
         show(ctx, OverlayMode.COPILOT);

@@ -7,4 +7,9 @@
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>
     </domain-config>
+    <!-- Serveur distant (Nord, Tailscale) : le tunnel WireGuard chiffre déjà le trafic,
+         donc HTTP en clair vers cette seule adresse Tailscale. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.88.121.15</domain>
+    </domain-config>
 </network-security-config>
