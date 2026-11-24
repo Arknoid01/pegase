@@ -909,6 +909,8 @@ public class FloatingOrbService extends Service {
         void setActive(boolean active) {
             if (this.active == active) return;
             this.active = active;
+            // couleur de l'orbe : vert cristal pendant la réflexion
+            rebuildStaticPaints();
             invalidate();
         }
 
@@ -964,9 +966,16 @@ public class FloatingOrbService extends Service {
             int coreA = discreet ? (0x70 + (int) (lift * 0x50)) : (0xD0 + (int) (lift * 0x2F));
             int midA = discreet ? (0x48 + (int) (lift * 0x40)) : 0xFF;
             int edgeA = discreet ? (0x28 + (int) (lift * 0x28)) : 0xFF;
-            int core = Color.argb(Math.min(255, coreA), 0xD0, 0xFF, 0xFE);
-            int mid = Color.argb(Math.min(255, midA), 0x35, 0xD0, 0xDD);
-            int edge = Color.argb(Math.min(255, edgeA), 0x0B, 0x7D, 0x8F);
+            // Cristal cyan au repos, vert cristal pendant la réflexion
+            int core = active
+                    ? Color.argb(Math.min(255, coreA), 0xD8, 0xFF, 0xE6)
+                    : Color.argb(Math.min(255, coreA), 0xD0, 0xFF, 0xFE);
+            int mid = active
+                    ? Color.argb(Math.min(255, midA), 0x3D, 0xE0, 0x8C)
+                    : Color.argb(Math.min(255, midA), 0x35, 0xD0, 0xDD);
+            int edge = active
+                    ? Color.argb(Math.min(255, edgeA), 0x0B, 0x7A, 0x4A)
+                    : Color.argb(Math.min(255, edgeA), 0x0B, 0x7D, 0x8F);
             paint.setShader(new RadialGradient(cx, cy, Math.max(1f, r),
                     new int[]{core, mid, edge},
                     new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
@@ -1084,6 +1093,7 @@ public class FloatingOrbService extends Service {
                 arcPaint.setAlpha(70);
                 c.drawArc(arcRect, thinkAngle + 180f, 50f, false, arcPaint);
             }
+
         }
     }
 

@@ -138,7 +138,12 @@ public final class CopilotBubblePanel extends FrameLayout {
             if (hasFocus) showKeyboard();
         });
         input.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
+            // Envoi : bouton « Envoyer » du clavier, ou touche Entrée (sans Maj)
+            boolean enterKey = event != null
+                    && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                    && !event.isShiftPressed();
+            if (actionId == EditorInfo.IME_ACTION_SEND || enterKey) {
                 submitInput();
                 return true;
             }
@@ -268,28 +273,186 @@ public final class CopilotBubblePanel extends FrameLayout {
     public void addAssistantMessage(String text) {
         setStatus(null);
         dismissWelcome();
-        addBubble(text, false);
+        if (TextUtils.isEmpty(text)) return;
+        // Forme Eva : texte sans bulle ; le partiel déjà affiché est réutilisé
+        if (revealTarget != null) revealReset(null);
+        int count = messagesHost.getChildCount();
+        TextView target;
+        if (count > 0 && Boolean.FALSE.equals(messagesHost.getChildAt(count - 1).getTag())
+                && messagesHost.getChildAt(count - 1) instanceof TextView) {
+            target = (TextView) messagesHost.getChildAt(count - 1);
+        } else {
+            target = createBubbleView("", false);
+            target.setTag(false);
+            messagesHost.addView(target, bubbleLp(false));
+        }
+        // Écriture simulée : la réponse complète s'écrit mot à mot, à vitesse constante
+        revealReset(target);
+        revealFull = text;
+        revealConstant = true;
+        revealArrivals.add(new long[] {System.currentTimeMillis() - REVEAL_DELAY_MS, text.length()});
+        target.post(revealTick);
+        addDetailsRow(text);
+        scrollToBottom();
+    }
+
+    /** Bouton « ⋯ » sous la réponse : déplie les sources et les outils (carte du tour). */
+    private void addDetailsRow(String replyText) {
+        TextView details = new TextView(getContext());
+        details.setTextSize(12);
+        details.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
+        details.setPadding(0, dp(2), 0, dp(4));
+        details.setVisibility(View.GONE);
+
+        TextView toggle = new TextView(getContext());
+        toggle.setText("⋯");
+        toggle.setTextSize(14);
+        toggle.setTextColor(OrbeTokens.COLOR_MUTED_TEXT);
+        toggle.setPadding(0, 0, dp(6), dp(2));
+        toggle.setOnClickListener(v -> {
+            if (details.getVisibility() == View.VISIBLE) {
+                details.setVisibility(View.GONE);
+                return;
+            }
+            details.setText(detailsText(replyText));
+            details.setVisibility(View.VISIBLE);
+        });
+
+        messagesHost.addView(toggle, bubbleLp(false));
+        messagesHost.addView(details, bubbleLp(false));
+    }
+
+    /** Texte des sources et outils d'une réponse, ou un message si rien n'a été noté. */
+    private static String detailsText(String replyText) {
+        com.pegasuscorp.orbe.diag.ReasoningCard card =
+                com.pegasuscorp.orbe.diag.ReasoningStore.findForReply(replyText);
+        StringBuilder sb = new StringBuilder();
+        if (card != null && card.webSources != null && !card.webSources.isEmpty()) {
+            sb.append("Sources\n");
+            for (String s : card.webSources) sb.append("• ").append(s).append('\n');
+        }
+        if (card != null && card.toolsUsed != null && !card.toolsUsed.isEmpty()) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append("Outils\n");
+            for (com.pegasuscorp.orbe.diag.ReasoningCard.ToolStep t : card.toolsUsed) {
+                sb.append("• ").append(t.name).append(t.ok ? "" : " (échec)").append('\n');
+            }
+        }
+        if (card != null) {
+            if (card.memoriesUsed != null && !card.memoriesUsed.isEmpty()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append("Souvenirs utilisés\n");
+                for (String m : card.memoriesUsed) sb.append("• ").append(m).append('\n');
+            }
+            if (card.profileUsed != null && !card.profileUsed.isEmpty()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append("Profil utilisé\n");
+                for (String p : card.profileUsed) sb.append("• ").append(p).append('\n');
+            }
+            if (card.backend != null && !card.backend.isEmpty()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append("Modèle : ").append(card.backend);
+                if (card.latencyMs > 0) sb.append(" · ").append(card.latencyMs / 1000).append(" s");
+                sb.append('\n');
+            }
+        }
+        if (sb.length() == 0) {
+            return card == null
+                    ? "Détails indisponibles pour cette réponse."
+                    : "Réponse directe : aucune source, aucun outil ni souvenir utilisé.";
+        }
+        return sb.toString().trim();
+    }
+
+    // --- Écriture progressive de la réponse en cours (mots entiers, décalage 500 ms) ---
+    private TextView revealTarget;
+    private String revealFull = "";
+    private int revealLen = 0;
+    private float revealF = 0f;
+    /** Vrai pour l'écriture simulée de la réponse finale : vitesse constante, pas de rattrapage. */
+    private boolean revealConstant = false;
+    private final java.util.ArrayList<long[]> revealArrivals = new java.util.ArrayList<>();
+    private static final long REVEAL_DELAY_MS = 500L;
+    private static final int REVEAL_FRAME_MS = 16;
+
+    private final Runnable revealTick = new Runnable() {
+        @Override public void run() {
+            TextView t = revealTarget;
+            if (t == null) return;
+            int mature = matureLength(System.currentTimeMillis());
+            int target = Math.min(revealFull.length(), mature);
+            if (revealLen < target) {
+                float backlog = target - revealF;
+                float step = revealConstant
+                        ? 1.0f  // ≈ 60 car./s, comme une frappe régulière
+                        : Math.max(0.045f * REVEAL_FRAME_MS, backlog * REVEAL_FRAME_MS / 180f);
+                revealF = Math.min(target, revealF + step);
+                revealLen = (int) revealF;
+                t.setText(revealFull.substring(0, revealLen));
+                scrollToBottom();
+            }
+            if (revealLen < revealFull.length()) t.postDelayed(this, REVEAL_FRAME_MS);
+        }
+    };
+
+    private int matureLength(long now) {
+        int len = 0;
+        for (long[] a : revealArrivals) {
+            if (a[0] <= now - REVEAL_DELAY_MS) len = (int) a[1];
+            else break;
+        }
+        return len;
+    }
+
+    /** Repart de zéro sur une nouvelle cible (ou arrête l'écriture si null). */
+    private void revealReset(TextView target) {
+        if (revealTarget != null) revealTarget.removeCallbacks(revealTick);
+        revealTarget = target;
+        revealFull = "";
+        revealLen = 0;
+        revealF = 0f;
+        revealConstant = false;
+        revealArrivals.clear();
+        if (target != null) target.setText("");
+    }
+
+    /** Coupe au dernier espace : un mot en cours d'écriture n'est pas montré. */
+    private static String wholeWords(String s) {
+        if (s.isEmpty() || Character.isWhitespace(s.charAt(s.length() - 1))) return s;
+        for (int i = s.length() - 1; i >= 0; i--) {
+            if (Character.isWhitespace(s.charAt(i))) return s.substring(0, i + 1);
+        }
+        return "";
     }
 
     public void updateAssistantPartial(String text) {
         if (TextUtils.isEmpty(text)) return;
         setStatus("…");
         int count = messagesHost.getChildCount();
+        TextView target = null;
         if (count > 0) {
             View last = messagesHost.getChildAt(count - 1);
-            Object tag = last.getTag();
-            if (TAG_WELCOME.equals(tag)) {
-                addBubble(text, false);
-                scrollToBottom();
-                return;
-            }
-            if (Boolean.FALSE.equals(tag) && last instanceof TextView) {
-                ((TextView) last).setText(text);
-                scrollToBottom();
-                return;
+            if (Boolean.FALSE.equals(last.getTag()) && last instanceof TextView) {
+                target = (TextView) last;
             }
         }
-        addBubble(text, false);
+        if (target == null) {
+            target = createBubbleView("", false);
+            target.setTag(false);
+            messagesHost.addView(target, bubbleLp(false));
+        }
+        if (target != revealTarget) revealReset(target);
+        String cut = wholeWords(text);
+        if (!cut.startsWith(revealFull)) revealReset(target);
+        revealFull = cut;
+        long now = System.currentTimeMillis();
+        if (revealArrivals.isEmpty()
+                || cut.length() > revealArrivals.get(revealArrivals.size() - 1)[1]) {
+            revealArrivals.add(new long[] {now, cut.length()});
+        }
+        target.removeCallbacks(revealTick);
+        target.post(revealTick);
+        scrollToBottom();
     }
 
     public void setStatus(String status) {
@@ -348,19 +511,31 @@ public final class CopilotBubblePanel extends FrameLayout {
         bubble.setText(text);
         bubble.setTextSize(13);
         bubble.setTextColor(OrbeTokens.COLOR_TEXT);
-        bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
-        bubble.setBackground(bubbleBg(user));
+        if (user) {
+            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+            bubble.setBackground(bubbleBg(true));
+        } else {
+            // réponse de Pégase : texte sur le fond, sans bulle (couleurs inchangées)
+            bubble.setPadding(0, dp(2), 0, dp(2));
+        }
         return bubble;
     }
 
     private LinearLayout.LayoutParams bubbleLp(boolean user) {
+        if (!user) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.START;
+            lp.topMargin = dp(4);
+            lp.bottomMargin = dp(4);
+            return lp;
+        }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
-        lp.gravity = user ? Gravity.END : Gravity.START;
+        lp.gravity = Gravity.END;
         lp.topMargin = dp(4);
         lp.bottomMargin = dp(4);
-        if (user) lp.leftMargin = dp(24);
-        else lp.rightMargin = dp(24);
+        lp.leftMargin = dp(24);
         return lp;
     }
 
