@@ -156,9 +156,8 @@ public class DiscussionFragment extends Fragment {
             refreshMemoryBanner();
             return true;
         });
-        LinearLayout.LayoutParams bannerLp = matchWrap();
-        bannerLp.bottomMargin = dp(ctx, 6);
-        root.addView(memoryBannerView, bannerLp);
+        // Bandeau mémoire retiré de l'écran de discussion (demande de Yannick, 2026-11-24).
+        // La vue reste créée (refreshMemoryBanner) mais n'est plus ajoutée à la mise en page.
         refreshMemoryBanner();
 
         contextGaugeView = new TextView(ctx);
@@ -181,6 +180,11 @@ public class DiscussionFragment extends Fragment {
         conversationList.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         conversationAdapter = new ConversationChatAdapter();
         conversationList.setAdapter(conversationAdapter);
+        // Pas de fondu à chaque mise à jour du texte en cours d'écriture (sinon « clignotement »)
+        if (conversationList.getItemAnimator() instanceof androidx.recyclerview.widget.SimpleItemAnimator) {
+            ((androidx.recyclerview.widget.SimpleItemAnimator) conversationList.getItemAnimator())
+                    .setSupportsChangeAnimations(false);
+        }
         root.addView(conversationList, matchWeight());
 
         thinkingView = new ThinkingView(ctx);
@@ -421,11 +425,11 @@ public class DiscussionFragment extends Fragment {
         refreshMemoryBanner();
         refreshContextGauge();
         List<PegaseInterfaceData.ChatMessageUi> messages =
-                withPendingSteering(PegaseInterfaceData.conversationMessages(requireContext()));
+                withLivePartial(withPendingSteering(PegaseInterfaceData.conversationMessages(requireContext())));
         String signature = conversationSignature(messages);
         if (signature.equals(lastConversationText)) return;
         lastConversationText = signature;
-        conversationAdapter.submit(messages);
+        conversationAdapter.submit(messages, !livePartialText.isEmpty());
         if (conversationEmptyView != null) {
             conversationEmptyView.setVisibility(messages.isEmpty() ? View.VISIBLE : View.GONE);
         }
@@ -434,6 +438,18 @@ public class DiscussionFragment extends Fragment {
         if (visible) {
             conversationList.post(this::scrollConversationToEnd);
         }
+    }
+
+    /** Texte de la réponse en cours d'écriture (streaming), affiché en fin de fil. */
+    private String livePartialText = "";
+
+    /** Ajoute la réponse en cours d'écriture comme message de Pégase (vide = rien). */
+    private List<PegaseInterfaceData.ChatMessageUi> withLivePartial(
+            List<PegaseInterfaceData.ChatMessageUi> messages) {
+        if (livePartialText == null || livePartialText.isEmpty()) return messages;
+        List<PegaseInterfaceData.ChatMessageUi> out = new ArrayList<>(messages);
+        out.add(new PegaseInterfaceData.ChatMessageUi(false, "Pégase", livePartialText, ""));
+        return out;
     }
 
     /**
@@ -1213,8 +1229,23 @@ public class DiscussionFragment extends Fragment {
             }
 
             @Override
+            public void onPartial(String accumulated) {
+                runOnUi(() -> {
+                    if (!isAdded() || conversationAdapter == null) return;
+                    if (host != null && !host.isDiscussionTabVisible()) return;
+                    livePartialText = accumulated == null ? "" : accumulated;
+                    // léger : ne reconstruit que le message en cours ; complet seulement au 1er morceau
+                    if (!conversationAdapter.updateLive(livePartialText)) {
+                        refreshConversationIfNeeded();
+                    }
+                    scrollConversationToEnd();
+                });
+            }
+
+            @Override
             public void onReply(String reply, boolean toolFired) {
                 runOnUi(() -> {
+                    livePartialText = "";
                     lastConversationText = "";
                     refreshConversationIfNeeded();
                     if (toolFired) return;

@@ -82,7 +82,8 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         PegaseInterfaceState.attach(this);
         viewModel = new ViewModelProvider(this).get(PegaseInterfaceViewModel.class);
-        PegaseSession.get(this).init(new SessionContext(Channel.TEXT, false));
+        // Streaming activé : la réponse s'écrit au fil de la génération (texte mot à mot)
+        PegaseSession.get(this).init(new SessionContext(Channel.TEXT, true));
 
         if (!android.provider.Settings.canDrawOverlays(this)) {
             new androidx.appcompat.app.AlertDialog.Builder(this)
@@ -191,14 +192,23 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
         root.addView(viewPager, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        final boolean[] imeShown = {false};
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
             int bottom = Math.max(bars.bottom, ime.bottom);
             root.setPadding(pad + bars.left, bars.top + pad, pad + bars.right, bottom + pad);
-            if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            boolean imeNow = insets.isVisible(WindowInsetsCompat.Type.ime());
+            // Ouverture effective seulement : un simple changement de hauteur (panneau emoji,
+            // etc.) ne doit pas redonner le focus, sinon le clavier se réinitialise et se ferme.
+            boolean imeOpened = imeNow && !imeShown[0];
+            if (imeNow != imeShown[0]) {
+                // défilement à l'ouverture comme à la fermeture du clavier
+                imeShown[0] = imeNow;
                 DiscussionFragment disc = findDiscussionFragment();
                 if (disc != null) disc.scrollConversationToEnd();
+            }
+            if (imeOpened) {
                 // Ne recentrer Orion que si l'onglet Orion est actif
                 // (sinon le typeField Orion vole le focus de « Écris à Pégase… »).
                 onKeyboardVisible();
@@ -390,7 +400,7 @@ public class PegaseInterfaceActivity extends AppCompatActivity implements Pegase
     protected void onResume() {
         super.onResume();
         ChatProgressNotifier.onInterfaceResumed(this);
-        PegaseSession.get(this).init(new SessionContext(Channel.TEXT, false));
+        PegaseSession.get(this).init(new SessionContext(Channel.TEXT, true));
         // TEST à froid : préchauffage retiré (le modèle se charge au 1er message)
         // PegaseSession.get(this).prewarmLocalLlm();
         FloatingOrbService.hide(this);

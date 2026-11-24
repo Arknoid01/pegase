@@ -34,11 +34,34 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
     private final List<PegaseInterfaceData.ChatMessageUi> items = new ArrayList<>();
     private final Set<Integer> expanded = new HashSet<>();
 
+    /** Vrai si le dernier élément est la réponse de Pégase en cours d'écriture. */
+    private boolean liveLast = false;
+
     public void submit(List<PegaseInterfaceData.ChatMessageUi> messages) {
+        submit(messages, false);
+    }
+
+    /** @param live le dernier message est la réponse en cours (mise à jour légère possible). */
+    public void submit(List<PegaseInterfaceData.ChatMessageUi> messages, boolean live) {
         items.clear();
         expanded.clear();
         if (messages != null) items.addAll(messages);
+        liveLast = live && !items.isEmpty();
         notifyDataSetChanged();
+    }
+
+    /**
+     * Mise à jour légère du texte en cours d'écriture : ne remet à jour que ce seul message,
+     * au lieu de reconstruire toute la liste à chaque morceau. False si ce n'est pas possible.
+     */
+    public boolean updateLive(String text) {
+        int last = items.size() - 1;
+        if (!liveLast || last < 0) return false;
+        PegaseInterfaceData.ChatMessageUi old = items.get(last);
+        items.set(last, new PegaseInterfaceData.ChatMessageUi(false, old.speaker,
+                text == null ? "" : text, old.timeLabel));
+        notifyItemChanged(last);
+        return true;
     }
 
     @Override
@@ -62,7 +85,9 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
         if (holder instanceof UserHolder) {
             ((UserHolder) holder).bind(msg);
         } else if (holder instanceof PegaseHolder) {
-            ((PegaseHolder) holder).bind(msg, position, expanded.contains(position),
+            PegaseHolder ph = (PegaseHolder) holder;
+            ph.setLive(liveLast && position == items.size() - 1);
+            ph.bind(msg, position, expanded.contains(position),
                     () -> {
                         int pos = holder.getBindingAdapterPosition();
                         if (pos == RecyclerView.NO_POSITION) return;
@@ -172,10 +197,100 @@ public final class ConversationChatAdapter extends RecyclerView.Adapter<Recycler
             copy = itemView.findViewById(R.id.message_copy);
         }
 
+        /** Texte réellement affiché. Pendant la génération (live), seuls les mots entiers sont montrés. */
+        private String shownFull = "";
+        private int shownLen = 0;
+        private float shownF = 0f;
+        private boolean live = false;
+        /** Réception des morceaux : {instant (ms), longueur utile}. Sert au décalage. */
+        private final ArrayList<long[]> arrivals = new ArrayList<>();
+        private static final int REVEAL_FRAME_MS = 16;
+        private static final long LIVE_DELAY_MS = 500L;
+
+        void setLive(boolean isLive) { live = isLive; }
+
+        /** Longueur déjà « mature » : arrivée il y a au moins LIVE_DELAY_MS. */
+        private int matureLength(long now) {
+            int len = 0;
+            for (long[] a : arrivals) {
+                if (a[0] <= now - LIVE_DELAY_MS) len = (int) a[1];
+                else break;
+            }
+            return len;
+        }
+
+        private final Runnable revealTick = new Runnable() {
+            @Override public void run() {
+                int target = live
+                        ? Math.min(shownFull.length(), matureLength(System.currentTimeMillis()))
+                        : shownFull.length();
+                if (shownLen < target) {
+                    float backlog = target - shownF;
+                    // rythme doux : ~45 car./s minimum, rattrapage étalé
+                    float step = Math.max(0.045f * REVEAL_FRAME_MS, backlog * REVEAL_FRAME_MS / 180f);
+                    shownF = Math.min(target, shownF + step);
+                    shownLen = (int) shownF;
+                    body.setText(shownFull.substring(0, shownLen));
+                    if (live) {
+                        // suivre le texte qui grandit : garder le bas du message visible
+                        body.post(() -> {
+                            if (!(itemView.getParent() instanceof RecyclerView)) return;
+                            RecyclerView rv = (RecyclerView) itemView.getParent();
+                            int over = itemView.getBottom() - (rv.getHeight() - rv.getPaddingBottom());
+                            if (over > 0) rv.scrollBy(0, over);
+                        });
+                    }
+                }
+                // on continue tant que du texte attend son tour (décalage ou rattrapage)
+                if (shownLen < shownFull.length()) body.postDelayed(this, REVEAL_FRAME_MS);
+            }
+        };
+
+        /** Coupe au dernier espace : un mot en cours d'écriture n'est pas montré. */
+        private static String wholeWords(String s) {
+            if (s.isEmpty() || Character.isWhitespace(s.charAt(s.length() - 1))) return s;
+            int sp = -1;
+            for (int i = s.length() - 1; i >= 0; i--) {
+                if (Character.isWhitespace(s.charAt(i))) { sp = i; break; }
+            }
+            return sp < 0 ? "" : s.substring(0, sp + 1);
+        }
+
+        /**
+         * Affiche le texte. En génération (live) : mots entiers, avec un décalage de 500 ms.
+         * Hors génération (réponse finale, historique) : affichage immédiat.
+         */
+        void showText(String text) {
+            String full = text == null ? "" : text;
+            body.removeCallbacks(revealTick);
+            if (!live) {
+                arrivals.clear();
+                shownFull = full;
+                shownLen = full.length();
+                shownF = shownLen;
+                body.setText(full);
+                return;
+            }
+            String cut = wholeWords(full);
+            if (!cut.startsWith(shownFull)) {
+                // nouveau message dans cette vue : repartir de zéro
+                arrivals.clear();
+                shownLen = 0;
+                shownF = 0f;
+                body.setText("");
+            }
+            shownFull = cut;
+            long now = System.currentTimeMillis();
+            if (arrivals.isEmpty() || cut.length() > arrivals.get(arrivals.size() - 1)[1]) {
+                arrivals.add(new long[] {now, cut.length()});
+            }
+            body.post(revealTick);
+        }
+
         void bind(PegaseInterfaceData.ChatMessageUi msg, int position, boolean isExpanded,
                 Runnable onToggle) {
             name.setText(msg.speaker);
-            body.setText(msg.text);
+            showText(msg.text);
             time.setText(msg.timeLabel);
             time.setVisibility(msg.timeLabel == null || msg.timeLabel.isEmpty()
                     ? View.GONE : View.VISIBLE);

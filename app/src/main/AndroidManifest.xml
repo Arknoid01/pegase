@@ -314,7 +314,8 @@
             android:taskAffinity="com.pegasuscorp.orbe.pegase"
             android:launchMode="singleTask"
             android:theme="@style/Theme.Orbe.Pegase"
-            android:windowSoftInputMode="adjustResize|stateHidden">
+            android:windowSoftInputMode="adjustResize|stateHidden"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|smallestScreenSize|uiMode">
             <!-- Deep link Assistant / routines : pegase://open[/conversation|orion] -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
