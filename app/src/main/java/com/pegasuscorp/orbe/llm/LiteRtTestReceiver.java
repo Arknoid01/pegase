@@ -51,6 +51,8 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
                             .put(new JSONObject().put("role", "system").put("content", "Tu es Pégase. Réponds en français, en 2 phrases."))
                             .put(new JSONObject().put("role", "user").put("content", text)))
                             .put("max_tokens", 200);
+                    // Option de test : --ef temperature 0 (glouton) / 0.7 ; absent = défauts du modèle.
+                    if (intent.hasExtra("temperature")) body.put("temperature", intent.getFloatExtra("temperature", -1f));
                     long t0 = System.currentTimeMillis();
                     final int[] parts = {0};
                     final long[] firstMs = {-1};

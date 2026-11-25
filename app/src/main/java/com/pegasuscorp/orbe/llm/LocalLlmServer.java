@@ -237,6 +237,22 @@ public final class LocalLlmServer {
         return "llama · " + MODEL_LABEL;
     }
 
+    // Échantillonnage demandé par l'appelant (format OpenAI) ; -1 = défauts du modèle LiteRT.
+    private static float temperatureOf(JSONObject body) {
+        float t = (float) body.optDouble("temperature", -1);
+        Log.i(TAG, "LiteRT échantillonnage : temperature=" + t
+                + " top_p=" + body.optDouble("top_p", -1) + " top_k=" + body.optInt("top_k", -1));
+        return t;
+    }
+
+    private static float topPOf(JSONObject body) {
+        return (float) body.optDouble("top_p", -1);
+    }
+
+    private static int topKOf(JSONObject body) {
+        return body.optInt("top_k", -1);
+    }
+
     /** Vrai si le moteur LiteRT-LM remplace llama-server. */
     public boolean usesLitert() {
         return isLitert(app);
@@ -284,8 +300,9 @@ public final class LocalLlmServer {
         if (regex != null && regex.isEmpty()) regex = null;
         int max = body.optInt("max_tokens", 256);
         synchronized (LITERT_LOCK) {
-            long id = LiteRtNative.nativeStreamStart(litertHandle,
-                    JSONObject.quote(sys), hist.toString(), user, max, regex);
+            long id = LiteRtNative.nativeStreamStartSampled(litertHandle,
+                    JSONObject.quote(sys), hist.toString(), user, max, regex,
+                    temperatureOf(body), topPOf(body), topKOf(body));
             if (id == 0) throw new java.io.IOException("LiteRT : " + LiteRtNative.lastError());
             long deadline = System.currentTimeMillis() + readTimeoutMs;
             String last = "";
@@ -339,8 +356,9 @@ public final class LocalLlmServer {
         String regex = body.optString("regex", null);
         if (regex != null && regex.isEmpty()) regex = null;
         int max = body.optInt("max_tokens", 256);
-        String json = LiteRtNative.nativeGenerate(litertHandle,
-                JSONObject.quote(sys), hist.toString(), user, max, regex);
+        String json = LiteRtNative.nativeGenerateSampled(litertHandle,
+                JSONObject.quote(sys), hist.toString(), user, max, regex,
+                temperatureOf(body), topPOf(body), topKOf(body));
         if (json == null) throw new java.io.IOException("LiteRT : " + LiteRtNative.lastError());
         String text = new JSONObject(json).getJSONArray("content").getJSONObject(0).getString("text");
         return new JSONObject().put("choices", new org.json.JSONArray().put(

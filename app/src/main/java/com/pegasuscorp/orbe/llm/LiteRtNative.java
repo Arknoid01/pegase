@@ -17,15 +17,27 @@ public final class LiteRtNative {
 
     static native void nativeUnload(long handle);
 
-    /** Retourne la réponse JSON brute de LiteRT, ou null. */
-    static native String nativeGenerate(long handle, String systemJson, String historyJson,
-                                        String userJson, int maxOutputTokens, String constraintRegex);
+    /**
+     * Retourne la réponse JSON brute de LiteRT, ou null.
+     * temperature &lt; 0 : réglages par défaut du modèle ; 0 : glouton ; topP/topK &lt;= 0 : 0,95 / 64.
+     */
+    static native String nativeGenerateSampled(long handle, String systemJson, String historyJson,
+                                        String userJson, int maxOutputTokens, String constraintRegex,
+                                        float temperature, float topP, int topK);
+
+    /** Sans réglage d'échantillonnage (défauts du modèle). */
+    static String nativeGenerate(long handle, String systemJson, String historyJson,
+                                 String userJson, int maxOutputTokens, String constraintRegex) {
+        return nativeGenerateSampled(handle, systemJson, historyJson, userJson, maxOutputTokens,
+                constraintRegex, -1f, -1f, -1);
+    }
 
     static native String nativeLastError();
 
     /** Flux : démarre (0 en cas d'échec), lit le texte accumulé, teste la fin, puis libère. */
-    static native long nativeStreamStart(long handle, String systemJson, String historyJson,
-                                         String userJson, int maxOutputTokens, String constraintRegex);
+    static native long nativeStreamStartSampled(long handle, String systemJson, String historyJson,
+                                         String userJson, int maxOutputTokens, String constraintRegex,
+                                         float temperature, float topP, int topK);
 
     static native String nativeStreamText(long streamId);
 

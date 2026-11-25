@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 
 #include <cstddef>
+#include <chrono>
 #include <mutex>
 #include <string>
 
@@ -33,6 +34,17 @@ typedef int (*f_send_stream)(void*, const char*, const char*, const void*, f_str
 typedef int (*f_chunk_text)(const StreamChunk*, const char**);
 typedef int (*f_chunk_final)(const StreamChunk*, bool*);
 typedef int (*f_chunk_error)(const StreamChunk*, const char**);
+// Échantillonnage (facultatif : absent des vieilles versions de la bibliothèque).
+typedef int (*f_sp_create)(int, void**);
+typedef int (*f_sp_set_float)(void*, float);
+typedef int (*f_sp_set_int)(void*, int);
+typedef int (*f_obj_create)(void**);
+typedef int (*f_set_obj)(void*, const void*);
+// Lecture des réglages par défaut du fichier .litertlm.
+typedef int (*f_lf_create)(const char*, void**);
+typedef int (*f_lf_get_int)(const void*, int*);
+typedef int (*f_lf_get_float)(const void*, float*);
+typedef int (*f_lf_get_bool)(const void*, bool*);
 
 struct Api {
     void* lib = nullptr;
@@ -59,6 +71,26 @@ struct Api {
     f_chunk_text chunk_text = nullptr;
     f_chunk_final chunk_final = nullptr;
     f_chunk_error chunk_error = nullptr;
+    // Échantillonnage (facultatif)
+    f_sp_create sp_create = nullptr;
+    f_sp_set_float sp_set_temperature = nullptr;
+    f_sp_set_float sp_set_top_p = nullptr;
+    f_sp_set_int sp_set_top_k = nullptr;
+    f_sp_set_int sp_set_seed = nullptr;
+    f_del sp_delete = nullptr;
+    f_obj_create sc_create = nullptr;
+    f_set_obj sc_set_sampler = nullptr;
+    f_del sc_delete = nullptr;
+    f_set_obj cc_set_session = nullptr;
+    // Lecture du fichier modèle (facultatif)
+    f_lf_create lf_create = nullptr;
+    f_del lf_delete = nullptr;
+    f_lf_get_int lf_type = nullptr;
+    f_lf_get_float lf_temperature = nullptr;
+    f_lf_get_int lf_top_k = nullptr;
+    f_lf_get_float lf_top_p = nullptr;
+    f_lf_get_bool lf_thinking = nullptr;
+    bool sampling_ok = false;
 };
 
 std::mutex g_mutex;          // une seule génération à la fois
@@ -105,8 +137,88 @@ bool ensure_api() {
         && bind(l, a.chunk_text, "litert_lm_stream_chunk_get_text")
         && bind(l, a.chunk_final, "litert_lm_stream_chunk_is_final")
         && bind(l, a.chunk_error, "litert_lm_stream_chunk_get_error");
-    if (!ok) LLOGE("%s", g_last_error.c_str());
+    if (!ok) { LLOGE("%s", g_last_error.c_str()); return ok; }
+    // Facultatifs : sans eux, le modèle garde ses réglages par défaut.
+    std::string saved = g_last_error;
+    a.sampling_ok = bind(l, a.sp_create, "litert_lm_sampler_params_create")
+        && bind(l, a.sp_set_temperature, "litert_lm_sampler_params_set_temperature")
+        && bind(l, a.sp_set_top_p, "litert_lm_sampler_params_set_top_p")
+        && bind(l, a.sp_set_top_k, "litert_lm_sampler_params_set_top_k")
+        && bind(l, a.sp_set_seed, "litert_lm_sampler_params_set_seed")
+        && bind(l, a.sp_delete, "litert_lm_sampler_params_delete")
+        && bind(l, a.sc_create, "litert_lm_session_config_create")
+        && bind(l, a.sc_set_sampler, "litert_lm_session_config_set_sampler_params")
+        && bind(l, a.sc_delete, "litert_lm_session_config_delete")
+        && bind(l, a.cc_set_session, "litert_lm_conversation_config_set_session_config");
+    if (!a.sampling_ok) LLOGE("échantillonnage indisponible : %s", g_last_error.c_str());
+    bool lf_ok = bind(l, a.lf_create, "litert_lm_loaded_file_create")
+        && bind(l, a.lf_delete, "litert_lm_loaded_file_delete")
+        && bind(l, a.lf_type, "litert_lm_loaded_file_sampler_type")
+        && bind(l, a.lf_temperature, "litert_lm_loaded_file_sampler_temperature")
+        && bind(l, a.lf_top_k, "litert_lm_loaded_file_sampler_top_k")
+        && bind(l, a.lf_top_p, "litert_lm_loaded_file_sampler_top_p")
+        && bind(l, a.lf_thinking, "litert_lm_loaded_file_supports_thinking");
+    if (!lf_ok) a.lf_create = nullptr;
+    g_last_error = saved;
     return ok;
+}
+
+// kLiteRtLmSamplerType : TopK = 1, TopP = 2, Greedy = 3.
+// Le type Greedy n'est pas pris en charge par le moteur GPU (mesuré : « clCreateSubBuffer :
+// Invalid buffer size ») → le glouton passe par TopK avec top_k = 1.
+const int kSamplerTopK = 1;
+const int kSamplerTopP = 2;
+
+// Applique l'échantillonnage à une configuration de conversation.
+// temperature < 0 : réglages par défaut du modèle ; 0 : glouton (déterministe).
+void apply_sampling(void* cc, float temperature, float top_p, int top_k) {
+    Api& a = g_api;
+    if (temperature < 0 || !a.sampling_ok) return;
+    void* sp = nullptr;
+    bool greedy = temperature == 0.0f;
+    if (a.sp_create(greedy ? kSamplerTopK : kSamplerTopP, &sp) != 0 || !sp) {
+        LLOGE("sampler_params_create a échoué");
+        return;
+    }
+    if (greedy) {
+        a.sp_set_top_k(sp, 1);
+        a.sp_set_temperature(sp, 1.0f);
+    } else {
+        a.sp_set_top_k(sp, top_k > 0 ? top_k : 64);
+        a.sp_set_top_p(sp, (top_p > 0 && top_p <= 1) ? top_p : 0.95f);
+        a.sp_set_temperature(sp, temperature);
+    }
+    // Graine par défaut = 0 : la même question donnait mot pour mot la même réponse
+    // (mesuré à température 1,5). Nouvelle graine à chaque génération.
+    a.sp_set_seed(sp, static_cast<int>(
+            std::chrono::steady_clock::now().time_since_epoch().count() & 0x7fffffff));
+    void* sc = nullptr;
+    if (a.sc_create(&sc) == 0 && sc) {
+        int s1 = a.sc_set_sampler(sc, sp);
+        int s2 = a.cc_set_session(cc, sc);
+        if (s1 != 0 || s2 != 0) LLOGE("échantillonnage refusé (codes %d, %d)", s1, s2);
+        a.sc_delete(sc);
+    }
+    a.sp_delete(sp);
+}
+
+// Journalise les réglages par défaut inscrits dans le fichier modèle.
+void log_model_defaults(const std::string& path) {
+    Api& a = g_api;
+    if (!a.lf_create) return;
+    void* lf = nullptr;
+    if (a.lf_create(path.c_str(), &lf) != 0 || !lf) { LLOGE("loaded_file_create a échoué"); return; }
+    int type = -1, top_k = -1;
+    float temp = -1, top_p = -1;
+    bool thinking = false;
+    a.lf_type(lf, &type);
+    a.lf_temperature(lf, &temp);
+    a.lf_top_k(lf, &top_k);
+    a.lf_top_p(lf, &top_p);
+    a.lf_thinking(lf, &thinking);
+    LLOGI("défauts du modèle : type=%d temperature=%.2f top_k=%d top_p=%.2f reflexion=%d",
+          type, temp, top_k, top_p, thinking ? 1 : 0);
+    a.lf_delete(lf);
 }
 
 std::string jstr(JNIEnv* env, jstring s) {
@@ -193,6 +305,7 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeLoad(JNIEnv* env, jclass, jstri
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!ensure_api()) return 0;
     std::string m = jstr(env, model), cache = jstr(env, cacheDir), be = jstr(env, backend);
+    log_model_defaults(m);
     void* settings = nullptr;
     if (g_api.settings_create(m.c_str(), be.c_str(), nullptr, nullptr, &settings) != 0) {
         g_last_error = "settings_create a échoué";
@@ -221,10 +334,11 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeUnload(JNIEnv*, jclass, jlong h
 // systemJson : chaîne JSON du texte système ; historyJson : tableau JSON des messages précédents ;
 // userJson : objet JSON du message courant. Retourne la réponse JSON brute, ou null.
 JNIEXPORT jstring JNICALL
-Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeGenerate(JNIEnv* env, jclass, jlong handle,
+Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeGenerateSampled(JNIEnv* env, jclass, jlong handle,
                                                           jstring systemJson, jstring historyJson,
                                                           jstring userJson, jint maxOutput,
-                                                          jstring constraintRegex) {
+                                                          jstring constraintRegex, jfloat temperature,
+                                                          jfloat topP, jint topK) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!handle || !ensure_api()) return nullptr;
     std::string sys = jstr(env, systemJson), hist = jstr(env, historyJson), user = jstr(env, userJson);
@@ -235,6 +349,7 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeGenerate(JNIEnv* env, jclass, j
     a.cc_create(&cc);
     a.cc_set_system(cc, sys.c_str());
     a.cc_set_messages(cc, hist.c_str());
+    apply_sampling(cc, temperature, topP, topK);
     void* conv = nullptr;
     int st = a.conv_create(reinterpret_cast<void*>(handle), cc, &conv);
     a.cc_delete(cc);
@@ -270,9 +385,9 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeGenerate(JNIEnv* env, jclass, j
 
 // Démarre une génération en flux. Retourne un identifiant de flux (0 en cas d'échec).
 JNIEXPORT jlong JNICALL
-Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeStreamStart(JNIEnv* env, jclass, jlong handle,
+Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeStreamStartSampled(JNIEnv* env, jclass, jlong handle,
         jstring systemJson, jstring historyJson, jstring userJson, jint maxOutput,
-        jstring constraintRegex) {
+        jstring constraintRegex, jfloat temperature, jfloat topP, jint topK) {
     if (!handle || !ensure_api()) return 0;
     std::string sys = jstr(env, systemJson), hist = jstr(env, historyJson), user = jstr(env, userJson);
     std::string regex = jstr(env, constraintRegex);
@@ -281,6 +396,7 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeStreamStart(JNIEnv* env, jclass
     a.cc_create(&cc);
     a.cc_set_system(cc, sys.c_str());
     a.cc_set_messages(cc, hist.c_str());
+    apply_sampling(cc, temperature, topP, topK);
     void* conv = nullptr;
     int st = a.conv_create(reinterpret_cast<void*>(handle), cc, &conv);
     a.cc_delete(cc);
