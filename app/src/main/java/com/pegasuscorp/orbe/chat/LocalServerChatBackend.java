@@ -90,7 +90,7 @@ public final class LocalServerChatBackend implements ChatBackend {
 
     @Override
     public String traceBackendLabel() {
-        return "Local/" + LocalLlmServer.MODEL_LABEL;
+        return "Local/" + LocalLlmServer.get(app).engineLabel();
     }
 
     @Override

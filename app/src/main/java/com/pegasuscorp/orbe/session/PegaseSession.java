@@ -1016,7 +1016,7 @@ public class PegaseSession {
                     sendToCloud(conv, payload, displayText, userText, obs);
                     return;
                 }
-                String label = "Local/" + com.pegasuscorp.orbe.llm.LocalLlmServer.MODEL_LABEL;
+                String label = "Local/" + com.pegasuscorp.orbe.llm.LocalLlmServer.get(appContext).engineLabel();
                 currentTurnChooser = label;
                 com.pegasuscorp.orbe.diag.TrainingJournal.noteChooser(label);
                 Trace.error("local_llm", "ok " + d.latencyMs + " ms : "

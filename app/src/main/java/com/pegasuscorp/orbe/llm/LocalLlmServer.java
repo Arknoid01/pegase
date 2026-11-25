@@ -227,6 +227,16 @@ public final class LocalLlmServer {
         return isEnabled(app) && binary().canExecute() && isModelComplete();
     }
 
+    /**
+     * Moteur qui répond réellement (pour l'étiquette sous les réponses et le journal) :
+     * le Nord distant, LiteRT (E2B) ou llama-server local ({@link #MODEL_LABEL}).
+     */
+    public String engineLabel() {
+        if (remoteActive) return "Nord · Gemma 4 E4B";
+        if (usesLitert()) return "LiteRT · Gemma 4 E2B";
+        return "llama · " + MODEL_LABEL;
+    }
+
     /** Vrai si le moteur LiteRT-LM remplace llama-server. */
     public boolean usesLitert() {
         return isLitert(app);
