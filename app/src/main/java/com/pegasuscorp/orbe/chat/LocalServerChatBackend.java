@@ -5,6 +5,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.pegasuscorp.orbe.chatbot.ChatbotEngine;
+import com.pegasuscorp.orbe.chatbot.ChatbotStore;
+import com.pegasuscorp.orbe.chatbot.ChatbotVoice;
 import com.pegasuscorp.orbe.llm.LocalLlmServer;
 import com.pegasuscorp.orbe.llm.PegasePrompt;
 import com.pegasuscorp.orbe.memory.UserProfileStore;
@@ -169,6 +172,22 @@ public final class LocalServerChatBackend implements ChatBackend {
     }
 
     private String reply(List<Turn> history, String userMessage, OnReply callback) throws Exception {
+        String user = userMessage != null ? userMessage.trim() : "";
+        // Chatbot hybride d'abord (règles + banque par sens + fiches, ≈15 ms) : une réponse
+        // connue sort tout de suite, une idée est reformulée par l'E2B (plan-chatbot-hybride.md).
+        ChatbotEngine bot = null;
+        ChatbotEngine.Decision cb = null;
+        if (chatbotEligible(user)) {
+            bot = ChatbotStore.of(app).get();
+            if (bot != null) {
+                cb = bot.decide(user);
+                Log.i(TAG, "chatbot " + cb + (cb.ideas.isEmpty() ? "" : " idées=" + cb.ideas.size()));
+                if ("forte".equals(cb.zone) && !cb.reply.isEmpty()) {
+                    lastWebQuery = null;
+                    return cb.reply;
+                }
+            }
+        }
         LocalLlmServer server = LocalLlmServer.get(app);
         if (!server.isAvailable()) {
             throw new IllegalStateException("le modèle " + LocalLlmServer.MODEL_LABEL
@@ -181,11 +200,12 @@ public final class LocalServerChatBackend implements ChatBackend {
         if (!history.isEmpty() && history.get(history.size() - 1).fromUser) {
             history.remove(history.size() - 1);
         }
-        String user = userMessage != null ? userMessage.trim() : "";
         String lastAssistant = lastAssistantText(history);
 
+        final boolean reformulate = cb != null && "moyenne".equals(cb.zone) && !cb.ideas.isEmpty();
+
         String web = null;
-        int need = webNeed(user);
+        int need = reformulate ? WEB_NO : webNeed(user);
         String query;
         String question = user;
         if (need == WEB_ASK && lastWebQuery != null && FOLLOW_UP.matcher(user).find()) {
@@ -201,12 +221,18 @@ public final class LocalServerChatBackend implements ChatBackend {
         lastWebQuery = web != null ? query : null;
         // Politesse courte (bonjour, merci…) : on repart de zéro, sans souvenirs ni vieux sujet
         boolean social = isShortSocial(user);
-        String memories = social ? null : memoriesFor(user);
-        boolean emotional = looksEmotionalTurn(user);
+        String memories = social || reformulate ? null : memoriesFor(user);
+        boolean emotional = !reformulate && looksEmotionalTurn(user);
 
         JSONArray msgs = new JSONArray();
-        msgs.put(new JSONObject().put("role", "system").put("content", systemPrompt()));
-        List<Turn> recent = social ? lastTurns(history, 2) : recentTurns(history);
+        // Reformulation : prompt court et 3 échanges (le grand prompt faisait broder l'E2B :
+        // faits ajoutés, 4-6 phrases). LiteRT repart d'une conversation neuve à chaque appel,
+        // changer de système ne coûte rien.
+        msgs.put(new JSONObject().put("role", "system").put("content", reformulate
+                ? ChatbotVoice.persona(UserProfileStore.getInstance(app).getUserName())
+                : systemPrompt()));
+        List<Turn> recent = reformulate ? lastTurns(history, 6)
+                : social ? lastTurns(history, 2) : recentTurns(history);
         StringBuilder pendingSystem = new StringBuilder();
         String lastRole = "system";
         for (Turn t : recent) {
@@ -249,8 +275,16 @@ public final class LocalServerChatBackend implements ChatBackend {
         }
         // Pas d'heure ici ni dans le système : tout ce qui change d'un message à l'autre casse
         // le cache du serveur (≈600 jetons relus, ≈12–15 s). La date du jour suffit.
+        if (cb != null && !reformulate && web == null) {
+            u.append(ChatbotVoice.factsLine(cb.facts));     // zone faible : faits des fiches
+        }
         user = fitUserMessage(user, estimatePromptChars(msgs, u, memories, web));
-        u.append(user);
+        if (reformulate) {
+            u.append(ChatbotVoice.ideasPrompt(
+                    UserProfileStore.getInstance(app).getUserName(), user, cb));
+        } else {
+            u.append(user);
+        }
         if (lastRole.equals("user")) {
             JSONObject prev = msgs.getJSONObject(msgs.length() - 1);
             prev.put("content", prev.getString("content") + "\n" + u);
@@ -260,9 +294,11 @@ public final class LocalServerChatBackend implements ChatBackend {
 
         JSONObject body = new JSONObject()
                 .put("messages", msgs)
-                .put("temperature", web != null ? 0.4 : (emotional ? 0.78 : 0.7))
+                .put("temperature", reformulate ? ChatbotVoice.TEMP_IDEES
+                        : web != null ? 0.4 : (emotional ? 0.78 : 0.7))
                 .put("top_p", 0.9)
-                .put("max_tokens", maxReplyTokens(user, web != null))
+                .put("max_tokens", reformulate ? ChatbotVoice.MAX_TOKENS_IDEES
+                        : maxReplyTokens(user, web != null))
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
                 .put("cache_prompt", true)
                 .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
@@ -277,8 +313,31 @@ public final class LocalServerChatBackend implements ChatBackend {
                 + ", souvenirs=" + (memories != null)
                 + " · " + LocalLlmServer.describeTimings(server.lastTimings));
         String out = PegasePrompt.sanitizeForDisplay(full).trim();
+        if (cb != null) {
+            out = ChatbotVoice.cleanEmojis(out);
+            // Garde-fou : un nombre ou un nom propre de l'idée a disparu → l'idée brute.
+            // Garde-fou inverse : un nom propre ou un nombre qui ne vient de nulle part = inventé.
+            if (reformulate && !out.equals(cb.ideas.get(0))) {
+                StringBuilder provided = new StringBuilder(user).append('\n')
+                        .append(String.join("\n", cb.ideas)).append('\n')
+                        .append(String.join("\n", cb.facts)).append('\n')
+                        .append(UserProfileStore.getInstance(app).getUserName());
+                for (Turn t : lastTurns(history, 6)) if (t.text != null) provided.append('\n').append(t.text);
+                if (ChatbotVoice.addedEssentials(out, provided.toString())) {
+                    Log.i(TAG, "chatbot : fait ajouté par l'E2B, idée servie telle quelle");
+                    out = cb.ideas.get(0);
+                }
+            }
+            bot.rememberSpoken(out);
+        }
         if (out.isEmpty()) throw new IllegalStateException("réponse vide");
         return out;
+    }
+
+    /** Message ordinaire tapé ou dicté (pas de document joint, pas de consigne interne). */
+    static boolean chatbotEligible(String user) {
+        return user != null && !user.isEmpty() && user.length() <= 300 && !user.startsWith("[")
+                && !DOCUMENT_ATTACHED.matcher(user).find();
     }
 
     static final int WEB_NO = 0, WEB_YES = 1, WEB_ASK = 2;
@@ -312,6 +371,7 @@ public final class LocalServerChatBackend implements ChatBackend {
 
     /** Précharge la consigne de discussion dans son slot (ouverture du chat, hors UI). */
     public static void prewarm(Context ctx) {
+        ChatbotStore.of(ctx).get();   // banque + empreintes (≈1-7 s la 1re fois)
         try {
             LocalLlmServer server = LocalLlmServer.get(ctx);
             if (!server.isAvailable() || !server.ensureStarted()) return;

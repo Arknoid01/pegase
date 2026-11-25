@@ -27,19 +27,27 @@ public final class MultilingualEmbedder implements AutoCloseable {
     private final OrtEnvironment env;
     private final OrtSession session;
     private final UnigramTokenizer tokenizer;
+    /** MiniLM attend token_type_ids, mpnet (XLM-R) non. */
+    private final boolean wantsTypes;
 
-    private MultilingualEmbedder(OrtEnvironment env, OrtSession session, UnigramTokenizer tok) {
+    private MultilingualEmbedder(OrtEnvironment env, OrtSession session, UnigramTokenizer tok) throws Exception {
         this.env = env;
         this.session = session;
         this.tokenizer = tok;
+        this.wantsTypes = session.getInputNames().contains("token_type_ids");
     }
 
     /** {@code dir} contient model_optimized.onnx et tokenizer.json. */
     public static MultilingualEmbedder open(File dir) throws Exception {
+        return open(dir, MODEL_FILE);
+    }
+
+    /** Autre modèle du même vocabulaire (ex. mpnet int8 : {@code model_int8.onnx}). */
+    public static MultilingualEmbedder open(File dir, String modelFile) throws Exception {
         OrtEnvironment env = OrtEnvironment.getEnvironment();
         OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
         opts.setIntraOpNumThreads(4);
-        OrtSession s = env.createSession(new File(dir, MODEL_FILE).getAbsolutePath(), opts);
+        OrtSession s = env.createSession(new File(dir, modelFile).getAbsolutePath(), opts);
         UnigramTokenizer t = UnigramTokenizer.loadCached(new File(dir, TOKENIZER_FILE));
         return new MultilingualEmbedder(env, s, t);
     }
@@ -53,7 +61,7 @@ public final class MultilingualEmbedder implements AutoCloseable {
         return tokenizer;
     }
 
-    /** Vecteurs L2-normalisés (384), par lots de 16 phrases rembourrées à la plus longue. */
+    /** Vecteurs L2-normalisés (384 MiniLM, 768 mpnet), par lots de 16 phrases rembourrées à la plus longue. */
     public synchronized float[][] embed(List<String> texts) throws Exception {
         float[][] out = new float[texts.size()][];
         final int lot = 16;
@@ -81,7 +89,7 @@ public final class MultilingualEmbedder implements AutoCloseable {
                 Map<String, OnnxTensor> inputs = new HashMap<>();
                 inputs.put("input_ids", tIds);
                 inputs.put("attention_mask", tMask);
-                inputs.put("token_type_ids", tTypes);
+                if (wantsTypes) inputs.put("token_type_ids", tTypes);
                 try (OrtSession.Result res = session.run(inputs)) {
                     float[][][] hidden = (float[][][]) res.get(0).getValue();
                     for (int r = 0; r < enc.length; r++) {
