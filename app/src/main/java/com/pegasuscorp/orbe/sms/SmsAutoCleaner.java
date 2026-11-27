@@ -31,7 +31,42 @@ public final class SmsAutoCleaner {
     public static void maybeSweepAsync(Context ctx) {
         if (ctx == null) return;
         Context app = ctx.getApplicationContext();
+        // Modèle local : le tri occupe Gemma ~1 min et ferait attendre une discussion.
+        // On le garde pour quand l'écran s'éteint (choix de Yannick, 2026-11-27).
+        if (LocalLlmServer.isLocalOnly(app) && screenOn(app)) {
+            Log.i(TAG, "écran allumé, tri reporté à l'extinction");
+            return;
+        }
         new Thread(() -> maybeSweep(app), "sms-auto-clean").start();
+    }
+
+    private static boolean screenOn(Context ctx) {
+        android.os.PowerManager pm = (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+        return pm == null || pm.isInteractive();
+    }
+
+    private static volatile boolean screenOffRegistered = false;
+
+    /** Lance le tri (s'il est dû) à chaque extinction de l'écran. */
+    public static synchronized void registerScreenOff(Context ctx) {
+        if (ctx == null || screenOffRegistered) return;
+        Context app = ctx.getApplicationContext();
+        try {
+            android.content.BroadcastReceiver r = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(Context c, android.content.Intent i) {
+                    maybeSweepAsync(app);
+                }
+            };
+            android.content.IntentFilter f = new android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                app.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                app.registerReceiver(r, f);
+            }
+            screenOffRegistered = true;
+        } catch (Exception e) {
+            Log.w(TAG, "écoute écran éteint impossible", e);
+        }
     }
 
     /** @return nombre de conversations supprimées (0 si rien à faire / cooldown). */

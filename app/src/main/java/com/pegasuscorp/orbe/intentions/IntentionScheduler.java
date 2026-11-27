@@ -22,6 +22,7 @@ public final class IntentionScheduler {
         if (ctx == null) return;
         Context app = ctx.getApplicationContext();
         IntentionEventReceiver.register(app);
+        com.pegasuscorp.orbe.sms.SmsAutoCleaner.registerScreenOff(app);
         scheduleTick(app);
         if (!com.pegasuscorp.orbe.session.HomeLoadPolicy.deferLocationAtBoot(app)) {
             try {
