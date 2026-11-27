@@ -20,15 +20,65 @@ public final class ChatbotVoice {
     /** Température de la reformulation (zone moyenne) : basse, pour garder le sens. */
     public static final double TEMP_IDEES = 0.3;
     public static final int MAX_TOKENS_IDEES = 120;
+    /** Réponse libre (zone faible) : même personnalité courte, un peu plus de place. */
+    public static final double TEMP_LIBRE = 0.7;
+    public static final int MAX_TOKENS_LIBRE = 160;
+    /** Demande de travail (liste, idées, conseil) : 160 jetons coupaient la 3e idée (« 3. Optim »). */
+    public static final int MAX_TOKENS_TACHE = 450;
+
+    /** Consigne ajoutée avant une demande de travail (zone faible, {@code Decision.task}). */
+    public static String taskPrompt() {
+        return "[C'est une demande précise, pas une discussion : réponds à la demande elle-même, "
+                + "concrètement. Respecte exactement le nombre, le format et les limites demandés. "
+                + "Pas de salutation ni de compliment au début, pas de phrase sur toi-même. "
+                + "Ici tu peux dépasser 3 phrases si la demande l'exige.]\n";
+    }
+
+    /** « ne me pose aucune question », « sans question »… (texte libre, minuscules ou non). */
+    static final Pattern NO_QUESTION = Pattern.compile(
+            "(ne|n')\\s*(me\\s+)?pose\\s+(aucune|pas\\s+de|plus\\s+de)\\s+questions?"
+                    + "|sans\\s+(me\\s+)?poser\\s+de\\s+questions?|sans\\s+question|aucune\\s+question",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    public static boolean forbidsQuestions(String user) {
+        return user != null && NO_QUESTION.matcher(user).find();
+    }
+
+    /** Retire les phrases interrogatives finales (« Qu'en penses-tu ? ») ; garde le reste. */
+    public static String stripTrailingQuestions(String out) {
+        String s = out.trim();
+        while (s.endsWith("?")) {
+            int cut = -1;
+            for (int i = s.length() - 2; i >= 0; i--) {
+                char c = s.charAt(i);
+                if (c == '.' || c == '!' || c == '?' || c == '\n' || c == '…') { cut = i + 1; break; }
+            }
+            if (cut <= 0) return out.trim();   // tout le texte est une question : on n'y touche pas
+            s = s.substring(0, cut).trim();
+        }
+        return s;
+    }
+
+    /** « Salut Yannick ! » / « Hey ! » en tête d'une réponse de travail. */
+    private static final Pattern SALUTATION = Pattern.compile(
+            "^(salut|coucou|hello|hey|bonjour)\\b[^.!?\\n]{0,30}[!.]\\s*", Pattern.CASE_INSENSITIVE);
+
+    public static String stripGreeting(String out) {
+        String s = SALUTATION.matcher(out).replaceFirst("");
+        return s.isEmpty() ? out : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
 
     /** Personnalité courte de la reformulation (voice.py, validée sur PC le 2026-11-25). */
     public static String persona(String prenom) {
         return "Tu es Pégase, l'assistant de " + prenom + " sur son téléphone. Tu le tutoies.\n"
+                + prenom + " est un homme : accorde au masculin (prêt, content, fier).\n"
                 + "Ton ton : complice, chaleureux, une pointe d'humour taquin, jamais méchant.\n"
                 + "Règles :\n"
                 + "- Réponds en 1 à 3 phrases courtes, comme un SMS.\n"
                 + "- N'invente jamais de souvenirs ni de vécu : tu es une IA, tu n'as pas de passé.\n"
                 + "- Ne cite un fait sur " + prenom + " que s'il est fourni et qu'il a un rapport avec son message.\n"
+                + "- Ne promets aucune action (noter, rappeler, chercher) : tu ne fais que discuter.\n"
+                + "- Ne devine pas ce que pensent ou ressentent les autres (sa famille, ses proches).\n"
                 + "- Tu peux finir par une question de relance, ou par une petite chute drôle et bienveillante.\n"
                 + "- Émojis : au plus un, 😂 ou 😅, seulement si ça colle.";
     }
@@ -38,9 +88,10 @@ public final class ChatbotVoice {
         StringBuilder sb = new StringBuilder();
         sb.append("Message de ").append(prenom).append(" : « ").append(message).append(" »\n\n");
         sb.append("Idée de réponse à reformuler :\n");
-        for (String i : d.ideas) sb.append("- ").append(i).append('\n');
-        String faits = factsLine(d.facts);
-        if (!faits.isEmpty()) sb.append(faits);
+        // Une seule idée : avec les suivantes, l'E2B mélangeait (banc téléphone 2026-11-25).
+        if (!d.ideas.isEmpty()) sb.append("- ").append(d.ideas.get(0)).append('\n');
+        // Pas de faits des fiches ici : l'idée contient déjà ce qu'il faut dire, et l'E2B
+        // recrachait les faits hors sujet (prénoms des proches, détails des animaux… banc 2026-11-25).
         sb.append("Reformule cette idée avec ton ton, en gardant son sens et ses informations.\n");
         sb.append("N'ajoute AUCUN fait nouveau. 1 à 3 phrases courtes.");
         return sb.toString();

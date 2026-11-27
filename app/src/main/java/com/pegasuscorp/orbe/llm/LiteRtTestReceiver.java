@@ -22,6 +22,8 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
     static final String ROUTES_FILE = "/data/local/tmp/litert/routes.tsv";
     static final String ACTION_SET = "com.pegasuscorp.orbe.LITERT_SET";
     static final String ACTION_CHAT = "com.pegasuscorp.orbe.LITERT_CHAT";
+    static final String ACTION_HALLU = "com.pegasuscorp.orbe.CHATBOT_HALLU";
+    static final String HALLU_FILE = "/data/local/tmp/litert/hallu_cases.txt";
     static final String CASES_FILE = "/data/local/tmp/litert/cases_fixed.tsv";
     /** Emplacement de test du modèle (poussé avec adb, lisible par l'app en debug). */
     static final String TEST_MODEL = "/data/local/tmp/litert/gemma-4-E2B-it.litertlm";
@@ -69,6 +71,12 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
             }, "litert-chat").start();
             return;
         }
+        if (ACTION_HALLU.equals(intent.getAction())) {
+            final Context app = ctx.getApplicationContext();
+            final int n = intent.getIntExtra("n", 3);
+            new Thread(() -> runHallu(app, n), "chatbot-hallu").start();
+            return;
+        }
         if (ACTION_ROUTES.equals(intent.getAction())) {
             final Context app = ctx.getApplicationContext();
             new Thread(() -> runRoutesFile(app), "litert-routes").start();
@@ -87,16 +95,22 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
         final String model = intent.getStringExtra("model") != null
                 ? intent.getStringExtra("model") : TEST_MODEL;
         final int max = intent.getIntExtra("max", 256);
+        final String backend = intent.getStringExtra("backend") != null
+                ? intent.getStringExtra("backend") : "gpu";
         final android.content.Context app = ctx.getApplicationContext();
-        new Thread(() -> run(app, model, system, prompt, max), "litert-test").start();
+        new Thread(() -> run(app, model, system, prompt, max, backend), "litert-test").start();
     }
 
     static void run(Context ctx, String model, String system, String prompt, int max) {
+        run(ctx, model, system, prompt, max, "gpu");
+    }
+
+    static void run(Context ctx, String model, String system, String prompt, int max, String backend) {
         try {
             long t0 = System.currentTimeMillis();
             java.io.File cache = new java.io.File(ctx.getCacheDir(), "litert");
             cache.mkdirs();
-            long h = LiteRtNative.nativeLoad(model, cache.getAbsolutePath(), "gpu");
+            long h = LiteRtNative.nativeLoad(model, cache.getAbsolutePath(), backend);
             if (h == 0) {
                 Log.e(TAG, "ECHEC chargement : " + LiteRtNative.lastError());
                 return;
@@ -230,6 +244,46 @@ public final class LiteRtTestReceiver extends BroadcastReceiver {
             Log.i(TAG, "ROUTES FIN");
         } catch (Throwable t) {
             Log.e(TAG, "ERREUR routes", t);
+        }
+    }
+
+    /**
+     * Banc des faits inventés : chaque phrase de {@link #HALLU_FILE} passe n fois par le vrai
+     * chemin de discussion (chatbot puis E2B). Une ligne JSON par réponse, tag PegaseHallu.
+     */
+    static void runHallu(Context ctx, int n) {
+        try {
+            com.pegasuscorp.orbe.chat.LocalServerChatBackend b =
+                    new com.pegasuscorp.orbe.chat.LocalServerChatBackend(ctx);
+            java.util.List<String> lines = java.nio.file.Files.readAllLines(
+                    java.nio.file.Paths.get(HALLU_FILE), java.nio.charset.StandardCharsets.UTF_8);
+            int i = 0;
+            for (String phrase : lines) {
+                if (phrase.trim().isEmpty()) continue;
+                i++;
+                for (int k = 0; k < n; k++) {
+                    JSONObject o = new JSONObject().put("i", i).put("k", k).put("phrase", phrase);
+                    long t0 = System.currentTimeMillis();
+                    try {
+                        String out = b.benchReply(phrase);
+                        o.put("out", out).put("ms", System.currentTimeMillis() - t0);
+                    } catch (Throwable t) {
+                        o.put("err", String.valueOf(t));
+                    }
+                    com.pegasuscorp.orbe.chatbot.ChatbotEngine.Decision d = b.benchDecisionForTest();
+                    if (d != null) {
+                        o.put("zone", d.zone).put("source", d.source).put("score", d.score)
+                                .put("ideas", new org.json.JSONArray(d.ideas))
+                                .put("facts", new org.json.JSONArray(d.facts))
+                                .put("reply", d.reply);
+                    }
+                    o.put("raw", b.benchRawForTest()).put("guard", b.benchGuardForTest());
+                    Log.i("PegaseHallu", "HALLU " + o);
+                }
+            }
+            Log.i("PegaseHallu", "HALLU FIN");
+        } catch (Throwable t) {
+            Log.e("PegaseHallu", "HALLU ERREUR", t);
         }
     }
 }

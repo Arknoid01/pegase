@@ -70,4 +70,22 @@ public class FrenchDateTimeParserTest {
         assertEquals(LocalDate.of(2026, 12, 3), dt.toLocalDate());
         assertEquals(9, dt.getHour());
     }
+
+    /** Le routeur envoie « 2026-11-30T10:30:00 » : le T passait en minuscule → 9h (2026-11-26). */
+    @Test
+    public void parsesIsoWithTSeparator() {
+        long ms = FrenchDateTimeParser.parseToEpochMs("2026-11-30T10:30:00");
+        LocalDateTime dt = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), PARIS);
+        assertEquals(30, dt.getDayOfMonth());
+        assertEquals(10, dt.getHour());
+        assertEquals(30, dt.getMinute());
+    }
+
+    @Test
+    public void agendaReadsWhenFromUtterance() {
+        assertEquals("demain 10 h", AgendaTool.whenFromUtterance(
+                "Ajoute un rappel dans mon agenda pour demain à 10 h : vérifier les mises à jour "
+                        + "de Fableris.", "vérifier les mises à jour de Fableris"));
+        assertEquals("", AgendaTool.whenFromUtterance("Ajoute acheter 3 pommes", "acheter 3 pommes"));
+    }
 }

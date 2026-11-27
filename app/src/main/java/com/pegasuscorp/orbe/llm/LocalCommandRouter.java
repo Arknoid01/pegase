@@ -59,6 +59,7 @@ public final class LocalCommandRouter {
                     + "sms non|whatsapp non|messages non"},
             {"wikipedia", "\\bwikipedia\\b|c'est quoi|qu'est-ce que c'est|qu'est ce que c'est|"
                     + "definition de|définition de"},
+            {"batterie", "batterie|niveau de charge|qui consomme|consomme le plus|consomment le plus"},
             {"news", "actualite|actualités|actualite|les infos|fil info|titres du jour|news du jour"},
     };
     private static final Pattern REPEAT = Pattern.compile(
@@ -114,6 +115,18 @@ public final class LocalCommandRouter {
                     + "\\b(non lus?|pas lu)\\b.*\\b(sms|message|whatsapp|messagerie)\\b|"
                     + "qui m'a ecrit|qui ma ecrit");
 
+    /** Batterie DU TÉLÉPHONE (app Jauge) — pas celle d'un portable à acheter ni d'une voiture. */
+    private static final Pattern Q_BATTERY = Pattern.compile(
+            "\\b(batterie|niveau de charge)\\b");
+    private static final Pattern Q_BATTERY_NOT = Pattern.compile(
+            "\\b(voiture|ordi|ordinateur|pc|laptop|portable pour|acheter|velo|trottinette|autonomie)\\b");
+    /** Question de raisonnement qui MENTIONNE la batterie (« est-ce forcément lié ? trois explications… »,
+     *  journal 2026-11-26 : répondait « Batterie à 95 pour cent. ») : on laisse le modèle répondre. */
+    private static final Pattern Q_BATTERY_REASONING = Pattern.compile(
+            "explications? possibles|hypotheses?|forcement lie|distingue|comment verifier|trois explications");
+    private static final Pattern Q_BATTERY_CONSO = Pattern.compile(
+            "consomm|vide|bouffe|mange|applis?|applications?|\\bapps?\\b");
+
     /** Décision immédiate sans modèle, ou null. {@code latencyMs} = 0. */
     public static Decision quickParse(String userText) {
         if (userText == null) return null;
@@ -148,6 +161,14 @@ public final class LocalCommandRouter {
                 if (h > 23 || mi > 59 || !leftover.isEmpty()) return null;
                 a.put("hour", h).put("minute", mi);
                 return decision("alarm", a);
+            }
+            if (Q_BATTERY.matcher(fk).find() && !Q_BATTERY_NOT.matcher(fk).find()
+                    && !Q_BATTERY_REASONING.matcher(fk).find() && fk.split("\\s+").length <= 22) {
+                boolean conso = Q_BATTERY_CONSO.matcher(fk).find();
+                boolean level = !conso || fk.matches(".*\\b(combien|reste|niveau|pourcentage|%)\\b.*");
+                // « combien il reste ET quelles applis » : les deux mesures en un seul appel
+                return decision("batterie", new JSONObject().put("action",
+                        level && conso ? "etat_conso" : level ? "etat" : "conso"));
             }
             if (Q_MSG_UNREAD.matcher(fk).find()) {
                 JSONObject a = new JSONObject().put("action", "unread");
@@ -260,7 +281,7 @@ public final class LocalCommandRouter {
         if (out.contains("sms") || out.contains("call")) out.add("contacts");
         boolean keepForQuestion = out.contains("weather") || out.contains("wikipedia")
                 || out.contains("news") || out.contains("messageries")
-                || out.contains("brief") || out.contains("f1");
+                || out.contains("brief") || out.contains("f1") || out.contains("batterie");
         // Question de culture → cloud discussion, sauf si un outil local pertinent est déjà routé
         if (f.matches("^(qui|pourquoi|comment|combien|c'est quoi|explique).*") && !keepForQuestion) {
             out.clear();
@@ -339,6 +360,10 @@ public final class LocalCommandRouter {
                 "SMS / WhatsApp / Messenger ; unread par défaut",
                 new String[]{"mes SMS non lus", "messageries unread service=\"sms\""},
                 new String[]{"qui m'a écrit", "messageries unread"}));
+        SPECS.put("batterie", new Spec(new String[]{"etat", "conso", "recharges"}, new String[]{},
+                "batterie du téléphone (app Jauge) ; etat = niveau et temps restant ; conso = apps qui la vident",
+                new String[]{"il me reste combien de batterie ?", "batterie etat"},
+                new String[]{"quelles applis vident ma batterie", "batterie conso"}));
         SPECS.put("wikipedia", new Spec(new String[]{}, new String[]{"query", "lang"},
                 "Wikipedia ; query = sujet demandé",
                 new String[]{"c'est quoi la photosynthèse", "wikipedia query=\"photosynthèse\""}));

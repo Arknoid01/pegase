@@ -3,6 +3,7 @@ package com.pegasuscorp.orbe.llm;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import org.json.JSONObject;
 import org.junit.Test;
@@ -45,5 +46,28 @@ public class LocalCommandRouterGuardTest {
         LocalCommandRouter.dropCopiedValues((String) p[0], a, "faut que je sois debout tôt demain, genre 6h30");
         assertEquals(6, a.getInt("hour"));
         assertEquals(30, a.getInt("minute"));
+    }
+
+    /** Journal 2026-11-26 : « combien de batterie… quelles applications consomment » → Jauge. */
+    @Test public void batterie_du_telephone_va_a_jauge() throws Exception {
+        LocalCommandRouter.Decision d = LocalCommandRouter.quickParse("Peux-tu me dire exactement "
+                + "combien de batterie il reste sur mon téléphone et quelles applications consomment le plus ?");
+        assertTrue(d != null && d.toolIds.size() == 1 && d.toolIds.get(0).equals("batterie"));
+        assertEquals("etat_conso", d.params.get(0).getString("action"));
+        assertEquals("etat", LocalCommandRouter.quickParse("il me reste combien de batterie ?")
+                .params.get(0).getString("action"));
+        assertTrue(LocalCommandRouter.quickParse("Je voudrais un ordinateur portable avec une bonne batterie") == null
+                || !LocalCommandRouter.quickParse("Je voudrais un ordinateur portable avec une bonne batterie")
+                        .toolIds.contains("batterie"));
+    }
+
+    /** Journal 2026-11-26 15:06 : question de raisonnement qui mentionne la batterie → pas l'outil. */
+    @Test public void raisonnement_sur_la_batterie_va_au_modele() {
+        assertNull(LocalCommandRouter.quickParse("Mon téléphone a redémarré deux fois aujourd'hui. Depuis, sa "
+                + "batterie semble descendre plus rapidement. Est-ce forcément lié ? Donne-moi trois explications "
+                + "possibles, distingue les faits des hypothèses et indique comment vérifier chacune."));
+        // « pourquoi ma batterie se vide » reste pour Jauge (les applis qui la vident sont la réponse)
+        assertEquals("batterie", LocalCommandRouter.quickParse("pourquoi ma batterie se vide aussi vite ?")
+                .toolIds.get(0));
     }
 }

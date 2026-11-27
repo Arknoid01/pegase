@@ -47,4 +47,5 @@ public class LocalCommandRouterRouteTest {
                         + "qui m'a ecrit|qui ma ecrit");
         assertTrue("\"" + fk + "\"", unread.matcher(fk).find());
     }
+
 }

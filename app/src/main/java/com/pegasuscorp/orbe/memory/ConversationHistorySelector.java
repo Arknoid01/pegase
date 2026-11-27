@@ -12,7 +12,7 @@ import java.util.Locale;
 /** Sélectionne l'historique envoyé au LLM : récent + pertinence, pas tout le buffer. */
 public final class ConversationHistorySelector {
 
-    public static final int RECENT_TURN_LIMIT = 6;
+    public static final int RECENT_TURN_LIMIT = 10;
     private static final int MAX_EXTRA_RELEVANT = 2;
     private static final int MIN_WORD_LEN = 4;
 

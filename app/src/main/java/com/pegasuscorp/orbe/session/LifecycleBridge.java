@@ -167,6 +167,7 @@ public final class LifecycleBridge {
     }
 
     public void onResume() {
+        com.pegasuscorp.orbe.llm.ProfilePauser.resumeIfPausedByUs(host.activity());
         if (useLazyBootstrap()) {
             bootstrap.onResume();
             return;

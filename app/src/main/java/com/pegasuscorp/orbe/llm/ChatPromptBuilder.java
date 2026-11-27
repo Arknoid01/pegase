@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.pegasuscorp.orbe.chat.ChatBackend;
 import com.pegasuscorp.orbe.contextstore.AttachedContextInjector;
+import com.pegasuscorp.orbe.memory.ActiveContext;
 import com.pegasuscorp.orbe.memory.ConversationHistorySelector;
 import com.pegasuscorp.orbe.memory.MemoryPromptBuilder;
 
@@ -22,6 +23,8 @@ public final class ChatPromptBuilder {
                                                      String userMessage) {
         List<ChatMessage> messages = new ArrayList<>();
         String system = MemoryPromptBuilder.buildFullSystem(context, userMessage);
+        String actif = ActiveContext.fromHistory(history);
+        if (!actif.isEmpty()) system = system + "\n\n" + actif;
         messages.add(new ChatMessage(ChatMessage.ROLE_SYSTEM, system));
         List<ChatBackend.Turn> promptHistory = ConversationHistorySelector.selectForPrompt(
                 context, history, userMessage);

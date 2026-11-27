@@ -8,6 +8,7 @@ import android.util.Log;
 import com.pegasuscorp.orbe.chatbot.ChatbotEngine;
 import com.pegasuscorp.orbe.chatbot.ChatbotStore;
 import com.pegasuscorp.orbe.chatbot.ChatbotVoice;
+import com.pegasuscorp.orbe.chatbot.Normalizer;
 import com.pegasuscorp.orbe.llm.LocalLlmServer;
 import com.pegasuscorp.orbe.llm.PegasePrompt;
 import com.pegasuscorp.orbe.memory.UserProfileStore;
@@ -157,7 +158,9 @@ public final class LocalServerChatBackend implements ChatBackend {
         String out = r.getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").optString("content", "").trim();
         Log.i(TAG, "tâche de fond " + (System.currentTimeMillis() - t0) + " ms, "
-                + (prompt != null ? prompt.length() : 0) + " car.");
+                + (prompt != null ? prompt.length() : 0) + " car. ["
+                + (prompt == null ? "" : prompt.substring(0, Math.min(60, prompt.length()))
+                        .replace('\n', ' ')) + "…]");
         if (out.isEmpty()) throw new IllegalStateException("réponse vide");
         return out;
     }
@@ -171,6 +174,23 @@ public final class LocalServerChatBackend implements ChatBackend {
         return prompt.substring(0, head) + "\n[…]\n" + prompt.substring(prompt.length() - tail);
     }
 
+    /** Banc (debug) : décision du chatbot et garde-fou du dernier appel de reply(). */
+    volatile ChatbotEngine.Decision benchDecision;
+    volatile String benchRaw;
+    volatile boolean benchGuard;
+
+    public ChatbotEngine.Decision benchDecisionForTest() { return benchDecision; }
+    public String benchRawForTest() { return benchRaw; }
+    public boolean benchGuardForTest() { return benchGuard; }
+
+    /** Banc des faits inventés (debug) : même chemin qu'un message tapé, historique vide. */
+    public String benchReply(String user) throws Exception {
+        benchDecision = null; benchRaw = null; benchGuard = false;
+        ChatbotEngine bot = ChatbotStore.of(app).get();
+        if (bot != null) bot.resetConversation();
+        return reply(new java.util.ArrayList<>(), user, null);
+    }
+
     private String reply(List<Turn> history, String userMessage, OnReply callback) throws Exception {
         String user = userMessage != null ? userMessage.trim() : "";
         // Chatbot hybride d'abord (règles + banque par sens + fiches, ≈15 ms) : une réponse
@@ -181,6 +201,7 @@ public final class LocalServerChatBackend implements ChatBackend {
             bot = ChatbotStore.of(app).get();
             if (bot != null) {
                 cb = bot.decide(user);
+                benchDecision = cb;
                 Log.i(TAG, "chatbot " + cb + (cb.ideas.isEmpty() ? "" : " idées=" + cb.ideas.size()));
                 if ("forte".equals(cb.zone) && !cb.reply.isEmpty()) {
                     lastWebQuery = null;
@@ -203,12 +224,19 @@ public final class LocalServerChatBackend implements ChatBackend {
         String lastAssistant = lastAssistantText(history);
 
         final boolean reformulate = cb != null && "moyenne".equals(cb.zone) && !cb.ideas.isEmpty();
+        // Réponse libre derrière le chatbot (zone faible) : personnalité courte, sans le bloc
+        // souvenirs ni la consigne « 4 à 6 phrases ». Le banc du 2026-11-25 montrait 60 %
+        // d'inventions avec le grand prompt (« je me souviens de ton chien… », Fableris partout).
+        final boolean shortVoice = cb != null;
+        // Demande de travail (« propose-moi trois choses… ») : l'E2B la traite avec de la place.
+        final boolean task = cb != null && !reformulate && cb.task;
 
         String web = null;
         int need = reformulate ? WEB_NO : webNeed(user);
         String query;
         String question = user;
-        if (need == WEB_ASK && lastWebQuery != null && FOLLOW_UP.matcher(user).find()) {
+        if (need != WEB_YES && lastWebQuery != null && QUESTION.matcher(user).find()
+                && FOLLOW_UP.matcher(user).find()) {
             // « des explications à ça ? » juste après une recherche : même sujet, nouvel angle.
             // Le moteur cherche avec la QUESTION : elle doit porter le sujet, pas « ça ».
             query = lastWebQuery + " — " + user;
@@ -221,17 +249,29 @@ public final class LocalServerChatBackend implements ChatBackend {
         lastWebQuery = web != null ? query : null;
         // Politesse courte (bonjour, merci…) : on repart de zéro, sans souvenirs ni vieux sujet
         boolean social = isShortSocial(user);
-        String memories = social || reformulate ? null : memoriesFor(user);
-        boolean emotional = !reformulate && looksEmotionalTurn(user);
+        // Question sur votre passé commun (« où on en était », « notre dernière décision ») :
+        // seuls les souvenirs font foi. Sans souvenir, réponse honnête SANS l'E2B, qui sinon
+        // invente des décisions plausibles (Fableris, journal 2026-11-26).
+        final boolean pastQ = ASKS_PAST.matcher(Normalizer.stripAccents(user.toLowerCase(java.util.Locale.FRENCH).replace('’', '\''))).find();
+        String memories = social || (reformulate && !pastQ)
+                || (shortVoice && !pastQ && !ASKS_MEMORY.matcher(user).find())
+                ? null : memoriesFor(user);
+        if (pastQ && memories == null && web == null) {
+            Log.i(TAG, "passé commun sans souvenir : réponse honnête sans E2B");
+            String honest = NO_TRACE_REPLIES[(int) (System.nanoTime() % NO_TRACE_REPLIES.length)];
+            if (bot != null) bot.rememberSpoken(honest);
+            return honest;
+        }
+        boolean emotional = !shortVoice && looksEmotionalTurn(user);
 
         JSONArray msgs = new JSONArray();
         // Reformulation : prompt court et 3 échanges (le grand prompt faisait broder l'E2B :
         // faits ajoutés, 4-6 phrases). LiteRT repart d'une conversation neuve à chaque appel,
         // changer de système ne coûte rien.
-        msgs.put(new JSONObject().put("role", "system").put("content", reformulate
+        msgs.put(new JSONObject().put("role", "system").put("content", shortVoice
                 ? ChatbotVoice.persona(UserProfileStore.getInstance(app).getUserName())
                 : systemPrompt()));
-        List<Turn> recent = reformulate ? lastTurns(history, 6)
+        List<Turn> recent = shortVoice ? lastTurns(history, 6)
                 : social ? lastTurns(history, 2) : recentTurns(history);
         StringBuilder pendingSystem = new StringBuilder();
         String lastRole = "system";
@@ -263,6 +303,12 @@ public final class LocalServerChatBackend implements ChatBackend {
                     .append(", à utiliser seulement si c'est vraiment pertinent pour ce message : ")
                     .append(memories).append("]\n");
         }
+        if (pastQ) {
+            u.append("[Question sur ce que vous avez dit ou décidé avant : réponds UNIQUEMENT avec ce ")
+                    .append("qui est écrit dans les souvenirs ci-dessus. Pour tout le reste, dis ")
+                    .append("franchement que tu n'en as pas de trace. N'invente aucune décision, étape, ")
+                    .append("contrainte ni date, et n'écris jamais de texte entre crochets.]\n");
+        }
         if (emotional && web == null) {
             u.append("[Tour personnel ou émotionnel : prends ton temps, 4 à 6 phrases, ")
                     .append("réagis à ce qu'il vient de dire, relance avec une question courte ")
@@ -278,6 +324,7 @@ public final class LocalServerChatBackend implements ChatBackend {
         if (cb != null && !reformulate && web == null) {
             u.append(ChatbotVoice.factsLine(cb.facts));     // zone faible : faits des fiches
         }
+        if (task) u.append(ChatbotVoice.taskPrompt());
         user = fitUserMessage(user, estimatePromptChars(msgs, u, memories, web));
         if (reformulate) {
             u.append(ChatbotVoice.ideasPrompt(
@@ -295,9 +342,12 @@ public final class LocalServerChatBackend implements ChatBackend {
         JSONObject body = new JSONObject()
                 .put("messages", msgs)
                 .put("temperature", reformulate ? ChatbotVoice.TEMP_IDEES
-                        : web != null ? 0.4 : (emotional ? 0.78 : 0.7))
+                        : web != null ? 0.4 : shortVoice ? ChatbotVoice.TEMP_LIBRE
+                        : (emotional ? 0.78 : 0.7))
                 .put("top_p", 0.9)
                 .put("max_tokens", reformulate ? ChatbotVoice.MAX_TOKENS_IDEES
+                        : task ? ChatbotVoice.MAX_TOKENS_TACHE
+                        : shortVoice && web == null ? ChatbotVoice.MAX_TOKENS_LIBRE
                         : maxReplyTokens(user, web != null))
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
                 .put("cache_prompt", true)
@@ -313,8 +363,19 @@ public final class LocalServerChatBackend implements ChatBackend {
                 + ", souvenirs=" + (memories != null)
                 + " · " + LocalLlmServer.describeTimings(server.lastTimings));
         String out = PegasePrompt.sanitizeForDisplay(full).trim();
+        benchRaw = out;
+        // Gabarit recopié (« On avait décidé de [résumer brièvement l'étape précédente] ») :
+        // les phrases à trous partent ; s'il ne reste rien, réponse honnête.
+        String filled = stripPlaceholders(out);
+        if (!filled.equals(out)) {
+            Log.i(TAG, "gabarit à crochets retiré de la réponse");
+            out = filled.isEmpty() ? NO_TRACE_REPLIES[0] : filled;
+        }
         if (cb != null) {
             out = ChatbotVoice.cleanEmojis(out);
+            if (task) out = ChatbotVoice.stripGreeting(out);
+            // « Ne me pose aucune question » : l'E2B finit quand même par « Qu'en penses-tu ? ».
+            if (ChatbotVoice.forbidsQuestions(user)) out = ChatbotVoice.stripTrailingQuestions(out);
             // Garde-fou : un nombre ou un nom propre de l'idée a disparu → l'idée brute.
             // Garde-fou inverse : un nom propre ou un nombre qui ne vient de nulle part = inventé.
             if (reformulate && !out.equals(cb.ideas.get(0))) {
@@ -325,6 +386,7 @@ public final class LocalServerChatBackend implements ChatBackend {
                 for (Turn t : lastTurns(history, 6)) if (t.text != null) provided.append('\n').append(t.text);
                 if (ChatbotVoice.addedEssentials(out, provided.toString())) {
                     Log.i(TAG, "chatbot : fait ajouté par l'E2B, idée servie telle quelle");
+                    benchGuard = true;
                     out = cb.ideas.get(0);
                 }
             }
@@ -334,11 +396,44 @@ public final class LocalServerChatBackend implements ChatBackend {
         return out;
     }
 
+    /** Passé commun : décisions, étapes, « où on en était » (texte sans accents, minuscules). */
+    static final Pattern ASKS_PAST = Pattern.compile(
+            "\\b((on|nous) (avait|avions) (decide|parle|discute|dit|prevu|choisi|convenu)"
+                    + "|ou (on|nous) en (etait|etions)|la ou (on|nous) (s'etait|s'etions|etait) arretes?"
+                    + "|(notre|nos|la) dernieres? decisions?|les decisions qu'on|ce qu'on avait (dit|decide|prevu)"
+                    + "|notre historique|dans notre historique|dans tes souvenirs|consulte tes souvenirs"
+                    + "|dont (on|nous) (avait|avons|avions) parle|tu te souviens (de ce qu|qu'on|quand on)"
+                    + "|on reprend notre projet)");
+
+    static final String[] NO_TRACE_REPLIES = {
+            "Honnêtement, je n'ai aucune trace de ça dans mes souvenirs. Tu me redis où on en était ? Je le retiens ensuite.",
+            "Je ne retrouve rien là-dessus dans ce que j'ai gardé, et je préfère ne pas inventer. Tu me rafraîchis la mémoire ?",
+    };
+
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\[[^\\]\\n]*\\p{L}{3,}[^\\]\\n]*\\]");
+
+    /** Retire les phrases qui contiennent un trou de gabarit « [mentionner la prochaine étape] ». */
+    static String stripPlaceholders(String text) {
+        if (text == null || !PLACEHOLDER.matcher(text).find()) return text == null ? "" : text;
+        StringBuilder sb = new StringBuilder();
+        for (String sentence : text.split("(?<=[.!?…])\\s+")) {
+            if (PLACEHOLDER.matcher(sentence).find()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(sentence);
+        }
+        return sb.toString().trim();
+    }
+
     /** Message ordinaire tapé ou dicté (pas de document joint, pas de consigne interne). */
     static boolean chatbotEligible(String user) {
         return user != null && !user.isEmpty() && user.length() <= 300 && !user.startsWith("[")
                 && !DOCUMENT_ATTACHED.matcher(user).find();
     }
+
+    /** Il parle de ses souvenirs : on garde le bloc souvenirs même derrière le chatbot. */
+    static final Pattern ASKS_MEMORY = Pattern.compile(
+            "\\b(souviens|rappelles?|t'avais dit|je t'ai dit|on avait|tu sais (que|si|ce que)|"
+                    + "qu'est-ce que tu sais)\\b", Pattern.CASE_INSENSITIVE);
 
     static final int WEB_NO = 0, WEB_YES = 1, WEB_ASK = 2;
     /** Requête de la dernière recherche réussie (relances « et pourquoi ? »). */
@@ -360,13 +455,42 @@ public final class LocalServerChatBackend implements ChatBackend {
                     + "il y a|y a-t-il)\\b",
             Pattern.CASE_INSENSITIVE);
 
-    /** Oui (fait frais évident) / non (pas une question, petite phrase) / à décider par le modèle. */
+    /** « cherche… », « sur internet » : demande explicite. */
+    private static final Pattern WEB_EXPLICIT = Pattern.compile(
+            "\\b(cherche|recherche|regarde sur|sur (le )?(web|net|internet)|google|v[ée]rifie en ligne)",
+            Pattern.CASE_INSENSITIVE);
+    /** Indices de fait récent / qui change. */
+    private static final Pattern WEB_FRESH = Pattern.compile(
+            "\\b(aujourd'hui|hier|avant-hier|ce matin|cette semaine|ce week-?end|en ce moment|"
+                    + "actuellement|actuel(le)?s?|r[ée]cemment|derni[eè]re?s?|nouveaux?|nouvelles?|"
+                    + "cette ann[ée]e|20[2-3][0-9]|maintenant|toujours en vie|est mort|d[ée]c[ée]d[ée])\\b",
+            Pattern.CASE_INSENSITIVE);
+    /** Question sur moi, toi ou nous : pas de web (avis, humeur, projets perso). */
+    private static final Pattern WEB_PERSONAL = Pattern.compile(
+            "\\b(je|j'|tu|t'|toi|moi|me|m'|mon|ma|mes|ton|ta|tes|on|nous|notre|nos|votre|vos)\\b",
+            Pattern.CASE_INSENSITIVE);
+    /** « tu sais / tu connais… » : demande de savoir malgré le « tu ». */
+    private static final Pattern WEB_KNOW = Pattern.compile(
+            "\\b(tu sais|tu connais|dis-moi|t'as vu|tu as vu|tu as entendu)\\b", Pattern.CASE_INSENSITIVE);
+    /** Questions de fait précis (personne, date, lieu, nombre). */
+    private static final Pattern WEB_FACT = Pattern.compile(
+            "^(qui|quand|o[uù]|combien|quel|quelle|quels|quelles)\\b|\\b(qui est|qui a|c'est qui|quand est|o[uù] est)\\b",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Décision web par règles, sans appel au modèle (≈10 s sur CPU) : oui pour les faits frais,
+     * précis ou demandés ; non pour les avis, l'humeur, les explications générales.
+     * (2026-11-27 : remplace la décision par Gemma, WEB_ASK n'est plus renvoyé.)
+     */
     static int webNeed(String user) {
         String u = user == null ? "" : user.trim();
         if (u.length() <= 3 || SMALL_TALK.matcher(u).matches()) return WEB_NO;
-        if (WEB_SURE.matcher(u).find()) return WEB_YES;
+        if (WEB_EXPLICIT.matcher(u).find() || WEB_SURE.matcher(u).find()) return WEB_YES;
         if (!QUESTION.matcher(u).find()) return WEB_NO;      // affirmation, émotion, opinion
-        return WEB_ASK;
+        boolean personal = WEB_PERSONAL.matcher(u).find() && !WEB_KNOW.matcher(u).find();
+        if (personal) return WEB_NO;                         // « tu penses quoi… », « je devrais… »
+        if (WEB_FRESH.matcher(u).find() || WEB_FACT.matcher(u).find()) return WEB_YES;
+        return WEB_NO;                                       // « pourquoi le ciel est bleu ? » : le modèle explique
     }
 
     /** Précharge la consigne de discussion dans son slot (ouverture du chat, hors UI). */
@@ -414,7 +538,12 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .append("demande si tu te souviens de quelque chose qui n'y est pas, dis honnêtement ")
                 .append("que tu ne sais pas et propose qu'il te le dise. Tu ne peux pas agir (réveil, message, brief, "
                 + "sms, F1…) dans cette réponse : ne dis JAMAIS « c'est fait » ou « je l'ai noté » pour une action ; ")
-                .append("propose plutôt une commande claire (« mets un réveil à 7h », « brief du matin », …).\n");
+                .append("propose plutôt une commande claire (« mets un réveil à 7h », « brief du matin », …). ")
+                // Règles du harnais de tests (cadrage Orbe, 2026-11-24)
+                .append("Une question courte reçoit une réponse courte, sans pivoter vers un autre sujet. ")
+                .append("Pas de flatterie (« excellente question », « super pertinent »), et pas de « n'hésite pas », ")
+                .append("« il est important de noter », « en tant qu'assistant ». ")
+                .append("Une question de culture générale se répond directement, sans détour.\n");
         List<String> projects = p.getProjectsList();
         if (projects != null && !projects.isEmpty()) {
             sb.append("Ses projets : ").append(String.join(", ",

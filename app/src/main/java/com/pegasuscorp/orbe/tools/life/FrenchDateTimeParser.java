@@ -18,8 +18,9 @@ public final class FrenchDateTimeParser {
 
     private static final ZoneId PARIS = ZoneId.of("Europe/Paris");
 
+    // « t » minuscule : parseToEpochMs met tout en minuscules (2026-11-30T10:30 → 9h, 2026-11-26)
     private static final Pattern ISO = Pattern.compile(
-            "(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{1,2})[:hH](\\d{2})?)?");
+            "(\\d{4})-(\\d{2})-(\\d{2})(?:[ tT](\\d{1,2})[:hH](\\d{2})?)?");
     private static final Pattern RELATIVE = Pattern.compile(
             "(?i)dans\\s+(\\d+)\\s*(heure|heures|h|minute|minutes|min)");
     private static final Pattern TIME = Pattern.compile(

@@ -94,10 +94,52 @@ public final class EphemeralMemoryFilter {
         String t = content.trim();
         if (t.length() < 8) return false;
         if (isNoise(t)) return false;
+        if (isRequestOrQuestion(t)) return false;
         String f = fold(t);
+        if (OPINION_THINK.matcher(f).find() && !EXPLICIT_MEMORY_ASK.matcher(f).find()) return false;
         // Intention (radical) = rappel / report — ancre temporelle seule = non
         // (évite « météo pour demain »). Temps + intention couvert par l'intention.
         return INTENT_STEM.matcher(f).find();
+    }
+
+    /** Ordre explicite de retenir ou de rappeler : seul cas où une demande devient souvenir. */
+    private static final Pattern EXPLICIT_MEMORY_ASK = Pattern.compile(
+            "(^|[^a-z])(rappelle[- ]?moi|rappelez[- ]?moi|me rappeler (de|d'|que)"
+                    + "|fai[st][- ]?moi penser|me faire penser|retiens( bien)? (que|qu')"
+                    + "|note (que|qu')|n'oublie pas (de|d'|que|qu'))",
+            Pattern.CASE_INSENSITIVE);
+
+    /** « je pensais sortir », « tu en penses quoi » : avis, pas rappel. */
+    private static final Pattern OPINION_THINK = Pattern.compile(
+            "(^|[^a-z])(je pensais|je pense que|j'y pensais|tu en penses|qu'en penses|tu penses)([^a-z]|$)",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Demande adressée à Pégase, test ou constat sur la conversation : jamais un fait. */
+    private static final Pattern REQUEST = Pattern.compile(
+            // Impératif en tête de phrase (« Explique-moi… », « Calcule le total… »)
+            "(^|[.!:;\\n]\\s*)(explique|donne|propose|reponds|calcule|aide|dis|resume|identifie"
+                    + "|analyse|distingue|liste|montre|cherche|consulte|retrouve|verifie|corrige"
+                    + "|reorganise|organise|presente|ajoute|programme|prepare|imagine|ecris)\\b"
+                    // Partout : adresse directe à Pégase, test, consigne, constat sur l'échange
+                    + "|(^|[^a-z])(peux[- ]tu|tu peux|pourrais[- ]tu|tu pourrais|est[- ]ce que tu"
+                    + "|tu te souviens|tu sais que|je crois que|je t'avais dit|tu viens de"
+                    + "|je pensais|tu en penses|qu'en penses"
+                    + "|ne valide pas|ne cree rien|ne modifie|ne fais (aucune|pas)|ne complete"
+                    + "|n'invente|n'utilise pas|sans inventer"
+                    + "|aucun rappel|aucune (decision|information|action)|n'a ete mentionne)",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Phrase de message brut (question, consigne, test) plutôt qu'un fait sur l'utilisateur. */
+    public static boolean isRequestOrQuestion(String content) {
+        if (content == null) return true;
+        String t = content.trim();
+        String f = fold(t);
+        boolean explicit = EXPLICIT_MEMORY_ASK.matcher(f).find();
+        if (t.length() > (explicit ? 200 : 160)) return true;   // message entier recopié
+        if (t.endsWith("…")) return true;                          // message coupé par clip()
+        if (explicit) return false;
+        if (t.indexOf('?') >= 0) return true;
+        return REQUEST.matcher(f).find();
     }
 
     /** Exposé pour tests / diag : ancre temporelle sans intention. */
@@ -112,7 +154,44 @@ public final class EphemeralMemoryFilter {
         if (content == null) return false;
         String t = content.trim();
         if (t.length() < 6) return false;
-        return !isNoise(t);
+        return !isNoise(t) && !isAgentActionMemory(t) && !isRequestOrQuestion(t);
+    }
+
+    /** Actions de l'agent, états d'interface, données de test : jamais des souvenirs durables. */
+    private static final Pattern AGENT_ACTION = Pattern.compile(
+            "(^|[^a-z])("
+                    + "(pegase|pegasse|pegasus)\\s+(a|ont|avait|va|vient)\\s+\\w+"
+                    + "|(pegase|pegasse|pegasus)\\s+(ouvre|lance|clique|envoie|confirme|indique)"
+                    + "|(a|ont|avait)\\s+(ouvert|execute|lance|lancee|envoye|clique|confirme|indique|constate|repondu|decide|fourni|programme)\\b"
+                    + "|lancement\\s+de\\s+l|ouverture\\s+de\\s+l|ouvre\\s+l|ouvert\\s+l"
+                    + "|veut\\s+(ouvrir|cliquer|lancer)|demande\\s+d.ouverture"
+                    + "|ne\\s+rien\\s+faire|pas\\s+d.ouverture|deja\\s+(lance|ouvert|en\\s+cours|en\\s+marche)"
+                    + "|\\bclic\\b|identifiant\\s+de\\s+la\\s+vue|id\\s+de\\s+la\\s+vue"
+                    + "|deverrouill\\w*|\\bminuteur\\b"
+                    + "|\\btest\\b|validation|smoke_[a-z0-9_]*"
+                    + ")([^a-z]|$)",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Vrai si le texte décrit une action ou un état de l'agent ou de l'interface, pas un fait sur l'utilisateur. */
+    public static boolean isAgentActionMemory(String content) {
+        if (content == null) return true;
+        String t = content.trim();
+        if (t.isEmpty()) return true;
+        // Sorties JSON brutes du résumeur (« {"fact": … } ») : jamais des souvenirs propres.
+        if (t.startsWith("{") || t.startsWith("[")) return true;
+        return AGENT_ACTION.matcher(fold(t)).find();
+    }
+
+    /** Secrets (codes, mots de passe, numéros de carte) : jamais stockés en mémoire. */
+    private static final Pattern SECRET = Pattern.compile(
+            "(mot de passe|code pin|code de (ma |la |mon )?carte|numero de carte|iban"
+                    + "|(code|pin)\\W{0,30}\\d{4,}|\\d{4}\\s?\\d{4}\\s?\\d{4}\\s?\\d{4})",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Vrai si le texte contient un secret : il ne doit pas entrer dans la mémoire permanente. */
+    public static boolean isSensitiveMemory(String content) {
+        if (content == null) return false;
+        return SECRET.matcher(fold(content.trim())).find();
     }
 
     /**

@@ -446,8 +446,12 @@ public final class IntentDetector {
                 || f.contains("comment tu tamelio")) {
             return true;
         }
-        if (f.contains("analyse") && (f.contains("trace") || f.contains("correction")
-                || f.contains("probleme") || f.contains("anomalie"))) {
+        // « Analyse la situation, identifie ce qui pose problème » dans un énoncé (journal 2026-11-26)
+        // partait dans le diag (« je ne note rien dans le bureau ») : il faut que ça parle de Pégase.
+        boolean soi = f.contains(" tes ") || f.startsWith("tes ") || f.contains(" ton ") || f.contains(" toi")
+                || f.contains("pegase") || f.contains("orbe") || f.contains("trace");
+        if (f.split(" ").length <= 25 && soi && f.contains("analyse") && (f.contains("trace")
+                || f.contains("correction") || f.contains("probleme") || f.contains("anomalie"))) {
             return true;
         }
         return f.contains("genere") && f.contains("correction");

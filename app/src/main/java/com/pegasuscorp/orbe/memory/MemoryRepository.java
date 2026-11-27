@@ -372,7 +372,9 @@ public class MemoryRepository implements MemoryStore {
 
     public void addPermanentMemory(MemoryEntry entry) {
         if (entry == null) return;
-        if (EphemeralMemoryFilter.isNoise(entry.content)) {
+        if (EphemeralMemoryFilter.isNoise(entry.content)
+                || EphemeralMemoryFilter.isAgentActionMemory(entry.content)
+                || EphemeralMemoryFilter.isSensitiveMemory(entry.content)) {
             Log.d(TAG, "Souvenir éphemère ignoré: " + entry.content);
             return;
         }

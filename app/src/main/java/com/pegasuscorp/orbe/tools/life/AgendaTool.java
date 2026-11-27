@@ -115,6 +115,11 @@ public final class AgendaTool implements Tool {
         if (startRaw.isEmpty()) {
             startRaw = (params.optString("date", "") + " " + params.optString("time", "")).trim();
         }
+        if (startRaw.isEmpty()) {
+            // Le routeur a perdu la date : on la relit dans la phrase de Yannick
+            // (ajoutée par PegaseSession), sans le titre pour ne pas lire ses chiffres.
+            startRaw = whenFromUtterance(params.optString("utterance", ""), title);
+        }
 
         String due = LocalDate.now(PARIS).toString();
         long reminderAt = 0;
@@ -216,6 +221,26 @@ public final class AgendaTool implements Tool {
         return dt.getMinute() == 0
                 ? dt.getHour() + "h"
                 : dt.format(DateTimeFormatter.ofPattern("H'h'mm", Locale.FRENCH));
+    }
+
+    private static final java.util.regex.Pattern WHEN_WORDS = java.util.regex.Pattern.compile(
+            "(?iu)\\b(aujourd'hui|demain|après-demain|apres-demain|ce soir|ce matin|cet après-midi"
+            + "|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|dans \\d+ (minutes?|heures?)"
+            + "|\\d{1,2}(er)? (janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout"
+            + "|septembre|octobre|novembre|décembre|decembre)|\\d{1,2} ?h ?\\d{0,2}|midi|minuit)\\b");
+
+    /** Les seuls mots de date/heure de la phrase (« demain à 10 h »), ou "" s'il n'y en a pas. */
+    static String whenFromUtterance(String utterance, String title) {
+        if (utterance == null || utterance.trim().isEmpty()) return "";
+        String u = utterance;
+        if (title != null && !title.isEmpty()) {
+            int i = u.toLowerCase(Locale.FRENCH).indexOf(title.toLowerCase(Locale.FRENCH));
+            if (i >= 0) u = u.substring(0, i) + " " + u.substring(i + title.length());
+        }
+        java.util.regex.Matcher m = WHEN_WORDS.matcher(u);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) sb.append(m.group()).append(' ');
+        return sb.toString().trim();
     }
 
     private static boolean hasTime(String raw) {

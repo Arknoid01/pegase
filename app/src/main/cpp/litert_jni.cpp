@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <chrono>
 #include <mutex>
 #include <string>
@@ -50,6 +51,7 @@ struct Api {
     void* lib = nullptr;
     f_settings_create settings_create = nullptr;
     f_set_int set_max_tokens = nullptr;
+    f_set_int set_prefill_chunk = nullptr;  // optionnel
     f_set_str set_cache = nullptr;
     f_del settings_delete = nullptr;
     f_create engine_create = nullptr;
@@ -306,12 +308,36 @@ Java_com_pegasuscorp_orbe_llm_LiteRtNative_nativeLoad(JNIEnv* env, jclass, jstri
     if (!ensure_api()) return 0;
     std::string m = jstr(env, model), cache = jstr(env, cacheDir), be = jstr(env, backend);
     log_model_defaults(m);
+    // Options de test dans le nom du moteur : « gpu;tokens=2048;chunk=128 ».
+    int tokens = 4096, chunk = 0;
+    {
+        size_t p = be.find(';');
+        std::string opts = p == std::string::npos ? "" : be.substr(p + 1);
+        if (p != std::string::npos) be = be.substr(0, p);
+        size_t i = 0;
+        while (i < opts.size()) {
+            size_t j = opts.find(';', i); if (j == std::string::npos) j = opts.size();
+            std::string kv = opts.substr(i, j - i); size_t e = kv.find('=');
+            if (e != std::string::npos) {
+                std::string k = kv.substr(0, e); int v = atoi(kv.c_str() + e + 1);
+                if (k == "tokens" && v > 0) tokens = v;
+                if (k == "chunk" && v > 0) chunk = v;
+            }
+            i = j + 1;
+        }
+    }
     void* settings = nullptr;
     if (g_api.settings_create(m.c_str(), be.c_str(), nullptr, nullptr, &settings) != 0) {
         g_last_error = "settings_create a échoué";
         return 0;
     }
-    g_api.set_max_tokens(settings, 4096);
+    g_api.set_max_tokens(settings, tokens);
+    if (chunk > 0) {
+        if (!g_api.set_prefill_chunk)
+            g_api.set_prefill_chunk = (f_set_int) dlsym(g_api.lib, "litert_lm_engine_settings_set_prefill_chunk_size");
+        if (g_api.set_prefill_chunk) LLOGI("prefill_chunk_size=%d → %d", chunk, g_api.set_prefill_chunk(settings, chunk));
+    }
+    LLOGI("réglages : moteur=%s max_num_tokens=%d chunk=%d", be.c_str(), tokens, chunk);
     if (!cache.empty()) g_api.set_cache(settings, cache.c_str());
     void* engine = nullptr;
     int st = g_api.engine_create(settings, &engine);

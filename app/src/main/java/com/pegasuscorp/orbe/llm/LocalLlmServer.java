@@ -40,7 +40,10 @@ public final class LocalLlmServer {
     /** Ancien modèle (Qwen3.5-2B), supprimé une fois Gemma en place (−1,3 Go). */
     static final String LEGACY_MODEL_FILE = "Qwen3.5-2B-Q4_K_M.gguf";
     private static final int PORT = 18092;
-    private static final long IDLE_STOP_MS = 10L * 60 * 1000;
+    /** 3 min (2026-11-27, avant 10) : le modèle fine-tuné bloque ≈1,9 Go de mémoire GPU que
+     *  Android ne peut pas récupérer → applis tuées en arrière-plan tant qu'il reste chargé.
+     *  Coût : rechargement ≈7-13 s au message suivant après une pause. */
+    private static final long IDLE_STOP_MS = 3L * 60 * 1000;
     private static final long START_TIMEOUT_MS = 60_000;
     /** Slots des groupes d'outils du routeur (0–9). */
     public static final int SLOT_COUNT = 10;
@@ -258,16 +261,52 @@ public final class LocalLlmServer {
         return isLitert(app);
     }
 
-    /** Charge le modèle LiteRT une fois (GPU). Bloquant. */
+    private static final String KEY_LITERT_BACKEND = "litert_backend";
+    /** Vrai tant que le modèle LiteRT est en mémoire (lu par ProfilePauser). */
+    static volatile boolean modelLoaded = false;
+
+    public static boolean isModelLoaded() {
+        return modelLoaded;
+    }
+
+    /**
+     * Moteur LiteRT : « cpu » par défaut depuis 2026-11-27. Sur GPU, Android recopie les poids
+     * dans la mémoire graphique (~1,3 Go non récupérable → applis tuées en arrière-plan) ;
+     * sur CPU, le fichier est lu en mmap (pages récupérables) et seuls ~350 Mo restent fixes.
+     * Mesuré sur le Nothing : chargement 0,5 s (GPU 5-7 s), réponse courte aussi rapide.
+     */
+    public static String litertBackend(Context ctx) {
+        String b = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_LITERT_BACKEND, "cpu");
+        return "gpu".equals(b) ? "gpu" : "cpu";
+    }
+
+    public static void setLitertBackend(Context ctx, String backend) {
+        ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_LITERT_BACKEND, "gpu".equals(backend) ? "gpu" : "cpu").apply();
+    }
+
+    /** Charge le modèle LiteRT une fois (CPU par défaut, GPU en secours). Bloquant. */
     private synchronized boolean litertReady() {
         if (litertHandle != 0) return true;
         if (!isAvailable()) return false;
         java.io.File cache = new java.io.File(app.getCacheDir(), "litert");
         cache.mkdirs();
-        litertHandle = LiteRtNative.nativeLoad(
-                new File(ModelStore.modelsDir(app), LITERT_MODEL_FILE).getAbsolutePath(),
-                cache.getAbsolutePath(), "gpu");
+        String model = new File(ModelStore.modelsDir(app), LITERT_MODEL_FILE).getAbsolutePath();
+        String backend = litertBackend(app);
+        long t0 = System.currentTimeMillis();
+        ProfilePauser.pauseForModel(app);
+        com.pegasuscorp.orbe.chatbot.ChatbotStore.releaseForLlm();
+        litertHandle = LiteRtNative.nativeLoad(model, cache.getAbsolutePath(), backend);
+        if (litertHandle == 0 && "cpu".equals(backend)) {
+            Log.w(TAG, "LiteRT CPU : " + LiteRtNative.lastError() + " → essai GPU");
+            backend = "gpu";
+            litertHandle = LiteRtNative.nativeLoad(model, cache.getAbsolutePath(), backend);
+        }
         if (litertHandle == 0) Log.e(TAG, "LiteRT : " + LiteRtNative.lastError());
+        modelLoaded = litertHandle != 0;
+        if (litertHandle == 0) ProfilePauser.resumeIfPausedByUs(app);
+        else Log.i(TAG, "LiteRT chargé sur " + backend + " en " + (System.currentTimeMillis() - t0) + " ms");
         return litertHandle != 0;
     }
 
@@ -658,6 +697,8 @@ public final class LocalLlmServer {
         if (litertHandle != 0) {
             LiteRtNative.nativeUnload(litertHandle);
             litertHandle = 0;
+            modelLoaded = false;
+            ProfilePauser.resumeIfPausedByUs(app);
         }
     }
 

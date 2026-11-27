@@ -119,8 +119,19 @@ public final class ChatbotStore {
             Log.i(TAG, "modèle d'empreintes chargé en " + (System.currentTimeMillis() - t0) + " ms");
         }
         if (release != null) release.cancel(false);
-        release = timer.schedule(this::releaseModel, IDLE_MS, TimeUnit.MILLISECONDS);
-        return embedder.embed(texts);
+        float[][] out = embedder.embed(texts);
+        // Gemma déjà en mémoire : mpnet (~200-250 Mo) libéré tout de suite pour ne pas
+        // coexister avec la génération (rechargé au message suivant, ≈1-2 s).
+        if (com.pegasuscorp.orbe.llm.LocalLlmServer.isModelLoaded()) releaseModel();
+        else release = timer.schedule(this::releaseModel, IDLE_MS, TimeUnit.MILLISECONDS);
+        return out;
+    }
+
+    /** Appelé quand Gemma se charge : libère mpnet s'il est en mémoire. */
+    public static void releaseForLlm() {
+        ChatbotStore s;
+        synchronized (ChatbotStore.class) { s = instance; }
+        if (s != null) s.releaseModel();
     }
 
     private synchronized void releaseModel() {
@@ -130,7 +141,7 @@ public final class ChatbotStore {
         } catch (Exception ignored) {
         }
         embedder = null;
-        Log.i(TAG, "modèle d'empreintes libéré (inactif)");
+        Log.i(TAG, "modèle d'empreintes libéré");
     }
 
     // ------------------------------------------------------------ fichiers

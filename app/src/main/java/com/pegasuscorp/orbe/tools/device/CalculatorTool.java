@@ -80,6 +80,10 @@ public final class CalculatorTool implements Tool {
         }
 
         String speak = result.speak != null ? forTts(result.speak.trim()) : "";
+        // L'assistant de calcul vient de la caisse : il met des € partout. Sans argent dans la
+        // demande (« 17 × 24 »), pas d'euros dans la réponse (« Ça fait 408 € », 2026-11-26).
+        final boolean money = MONEY.matcher(input).find();
+        if (!money) speak = stripEuro(speak);
         if (speak.isEmpty()) {
             cb.onError("Calcul sans résultat.");
             return;
@@ -89,10 +93,18 @@ public final class CalculatorTool implements Tool {
         context.append("Résultat oral : ").append(speak);
         for (String line : result.allDisplayLines()) {
             if (line != null && !line.isEmpty()) {
-                context.append('\n').append(forTts(line));
+                context.append('\n').append(money ? forTts(line) : stripEuro(forTts(line)));
             }
         }
         cb.onSuccess(ToolResult.text(speak, context.toString()));
+    }
+
+    private static final java.util.regex.Pattern MONEY = java.util.regex.Pattern.compile(
+            "(?iu)(€|\\beuros?\\b|\\bprix\\b|\\bmarge|\\bca\\b|chiffre d'affaires|budget|co[uû]t"
+                    + "|\\bttc\\b|\\bht\\b|\\btva\\b|tarif|facture|salaire|\\bpay)");
+
+    static String stripEuro(String text) {
+        return text == null ? "" : text.replaceAll("\\s*€", "").replaceAll("(?i)\\s+euros?\\b", "");
     }
 
     private static boolean isBareQuestionMark(String input) {

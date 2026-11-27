@@ -41,6 +41,26 @@ public final class ChatbotEngine {
     static final float T_SANS_ANCRE = 0.90f;
     static final float BONUS_FICHE = 0.08f;
     static final float ECART_IDEE = 0.03f;
+    /** Message long (> {@link #LONG_WORDS} mots) : la banque de petites phrases ne colle que de loin. */
+    static final float T_MOYENNE_LONG = 0.75f;
+    static final int LONG_WORDS = 25;
+    /**
+     * Demande de travail (« propose-moi trois choses », « donne-moi exactement… », « pour chaque
+     * idée », « qu'est-ce que tu me conseilles ») : la banque de conversation répondait à côté
+     * (« dernier Noël », « qu'est-ce qui te frustre ? » — journal du 2026-11-26). Seule une
+     * entrée très proche (forte) peut encore répondre ; sinon l'E2B traite la demande.
+     */
+    static final Pattern TACHE = Pattern.compile(
+            "\\b(propose[sz]?(-moi)?|donne(-moi| moi)|raconte[sz]?(-moi| moi)?|invente[sz]?|conseille[sz]?|recommande[sz]?|suggere[sz]?"
+                    + "|explique(-moi| moi)?|liste[sz]?(-moi)?|resume[sz]?(-moi)?|redige[sz]?|ecris(-moi| moi)"
+                    + "|compare[sz]?|detaille[sz]?|aide(-moi| moi) a|exactement|pour chaque|etape par etape"
+                    + "|(deux|trois|quatre|cinq|six|sept|huit|neuf|dix|\\d+) (idees|choses|pistes|conseils"
+                    + "|etapes|exemples|options|questions|points|facons|manieres|solutions|raisons))\\b");
+
+    /** Demande de travail plutôt que conversation (clé normalisée, sans accents). */
+    static boolean isTask(String key) {
+        return TACHE.matcher(key).find();
+    }
 
     static final Set<String> MOTS_VIDES = new HashSet<>(Arrays.asList((
             "je tu il elle on nous vous ils elles me te se moi toi lui leur mon ma mes ton ta tes son sa ses "
@@ -51,6 +71,20 @@ public final class ChatbotEngine {
                     + "quel quelle quels quelles aujourd hui demain soir matin jour hier").split(" ")));
     private static final Pattern MOT = Pattern.compile("[a-z0-9]+");
     private static final Pattern SLOT = Pattern.compile("\\{(\\w+)\\}");
+    /** Au-delà, ce n'est plus une petite phrase de conversation : pas de règle toute faite. */
+    static final int RULE_MAX_WORDS = 14;
+    /** Il corrige ou nie (« corrige mon anniversaire », « ce n'est pas… ») : pas de réponse figée. */
+    private static final Pattern CORRECTION = Pattern.compile(
+            "\\b(corrige|corriger|rectifie|modifie|modifier|change|changer|remplace|en fait"
+                    + "|je t'avais dit|n'est pas|c'est pas|ce n'est pas|aucun|aucune|ne \\w+ pas"
+                    + "|n'utilise|ne fais|sans parler)\\b");
+
+    private static int motCount(String key) {
+        int n = 0;
+        Matcher m = MOT.matcher(key);
+        while (m.find()) n++;
+        return n;
+    }
     private static final Pattern EMOJI = Pattern.compile("[\\x{1F300}-\\x{1FAFF}]");
     private static final Map<String, Integer> NOMBRES = new HashMap<>();
 
@@ -63,6 +97,8 @@ public final class ChatbotEngine {
         public final String zone;     // forte | moyenne | faible
         public final String source;   // regle:<id> | banque:<id> | aucune
         public String reply = "";
+        /** Demande de travail (« propose-moi trois… ») : l'E2B doit la traiter, pas bavarder. */
+        public boolean task;
         public List<String> ideas = new ArrayList<>();
         public List<String> facts = new ArrayList<>();
         public List<String> steps = new ArrayList<>();
@@ -253,6 +289,7 @@ public final class ChatbotEngine {
         Decision d;
         try {
             d = decideInner(nm);
+            d.task = isTask(nm.key);
         } catch (Exception e) {
             d = new Decision("faible", "aucune");
         }
@@ -267,6 +304,12 @@ public final class ChatbotEngine {
         return d;
     }
 
+    /** Oublie la conversation en cours (banc de test : chaque phrase repart de zéro). */
+    public synchronized void resetConversation() {
+        lastReply = "";
+        served.clear();
+    }
+
     /** La réponse finale réellement dite (E2B ou idée), pour les suivis « la suite ? ». */
     public synchronized void rememberSpoken(String text) {
         if (text != null && !text.isEmpty()) lastReply = text;
@@ -279,8 +322,11 @@ public final class ChatbotEngine {
         for (Fiches.Entite e : entities) facts.addAll(e.facts());
         Fiches.Entite first = entities.isEmpty() ? null : entities.get(0);
 
-        // 1. Règles d'intention.
-        for (Intent it : intents) {
+        // 1. Règles d'intention : seulement sur un message court et sans correction. Sur une
+        // longue consigne, « mes projets » ou « mon anniversaire » apparaissent au détour d'une
+        // phrase (« n'utilise aucun de mes projets », « corrige mon anniversaire ») — 2026-11-26.
+        boolean rulesOk = motCount(key) <= RULE_MAX_WORDS && !CORRECTION.matcher(key).find();
+        for (Intent it : rulesOk ? intents : Collections.<Intent>emptyList()) {
             for (Pattern p : it.patterns) {
                 Matcher m = p.matcher(key);
                 if (!m.find()) continue;
@@ -346,10 +392,15 @@ public final class ChatbotEngine {
                 return d;
             }
         }
-        if (bs >= T_MOYENNE) {
+        // Demande de travail : pas d'idée de conversation à reformuler. Message long : seuil relevé.
+        // Message très court (« je suis prêt », « vas-y ») : sans le fil, la banque se trompe
+        // (« je suis prêt » → trop_de_projets 0,90, journal 2026-11-26) → zone libre avec l'historique.
+        float tMoy = isTask(key) || motCount(key) <= 3 ? Float.MAX_VALUE
+                : motCount(key) > LONG_WORDS ? T_MOYENNE_LONG : T_MOYENNE;
+        if (bs >= tMoy) {
             Decision d = new Decision("moyenne", "banque:" + be.id);
             for (Map.Entry<Integer, Float> h : hits.entrySet()) {
-                if (h.getValue() >= T_MOYENNE && h.getValue() >= bs - ECART_IDEE && d.ideas.size() < 2) {
+                if (h.getValue() >= tMoy && h.getValue() >= bs - ECART_IDEE && d.ideas.size() < 2) {
                     String txt = fill(pick(entries.get(h.getKey()).responses), sl);
                     if (txt != null) d.ideas.add(laughCode(txt));
                 }
@@ -362,7 +413,8 @@ public final class ChatbotEngine {
         }
         Decision d = new Decision("faible", "aucune");
         d.facts = facts;
-        steps.add("Je réfléchis…");
+        if (bs >= T_MOYENNE) steps.remove(0);   // « Je reconnais… » écarté par le seuil relevé
+        steps.add(isTask(key) ? "Je réfléchis à ta demande…" : "Je réfléchis…");
         d.steps = steps;
         d.score = bs;
         return d;

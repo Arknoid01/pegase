@@ -37,7 +37,7 @@ public final class JaugeTool implements Tool {
 
     @Override
     public String description() {
-        return "batterie(action:\"etat\"|\"conso\"|\"recharges\"|\"telephone\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\", "
+        return "batterie(action:\"etat\"|\"conso\"|\"etat_conso\"|\"recharges\"|\"telephone\"|\"longue_journee_on\"|\"longue_journee_off\"|\"ouvrir\", "
                 + "sujet?:\"reveils\"|\"signal\"|\"taches\"|\"temperatures\"|\"chargeur\"|\"donnees\"|\"ecran\"|"
                 + "\"notifications\"|\"vie_privee\"|\"stockage\"|\"memoire\") — "
                 + "batterie détaillée (app Jauge). etat=niveau, rythme %/h, temps restant, usure ; "
@@ -90,6 +90,28 @@ public final class JaugeTool implements Tool {
         final String method;
         final String arg;
         final String consigne;
+        if (action.equals("etat_conso")) {
+            // « combien il reste ET quelles applis consomment » : les deux mesures en un appel
+            Context app = ctx.getApplicationContext();
+            Handler main = new Handler(Looper.getMainLooper());
+            new Thread(() -> {
+                String etat = query(app, "etat", null);
+                String conso = query(app, "conso", null);
+                main.post(() -> {
+                    if (etat == null && conso == null) {
+                        cb.onError("Jauge ne répond pas.");
+                        return;
+                    }
+                    String shown = (etat != null ? firstLine(etat) : "")
+                            + (conso != null ? (etat != null ? "\n" : "") + firstLine(conso) : "");
+                    cb.onSuccess(ToolResult.text(shown, "Consigne de réponse : donne le niveau et le "
+                            + "temps restant, puis ce qui vide la batterie en commençant par le plus gros "
+                            + "consommateur, en 3 phrases maximum.\n"
+                            + (etat != null ? etat + "\n" : "") + (conso != null ? conso : "")));
+                });
+            }, "jauge-tool").start();
+            return;
+        }
         if (action.startsWith("rech") || action.contains("cycle")) {
             method = "recharges";
             arg = null;

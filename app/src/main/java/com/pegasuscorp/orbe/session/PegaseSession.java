@@ -1407,6 +1407,27 @@ public class PegaseSession {
                 : (conv != null ? conv.getLastUserText() : null);
         safeParams = EmptyToolParams.seedUtteranceIfEmpty(toolId.trim(), safeParams, seedText);
 
+        // Consigne négative (« ne crée rien pour le moment ») : elle bloque toute écriture,
+        // même si le routeur a reconnu une intention d'agir (journal 2026-11-26).
+        if (com.pegasuscorp.orbe.tools.NegativeInstruction.forbidsAction(seedText)
+                && com.pegasuscorp.orbe.tools.NegativeInstruction.isWriteCall(toolId, safeParams)) {
+            finishTool(conv, toolId, System.currentTimeMillis(),
+                    ToolResult.text(com.pegasuscorp.orbe.tools.NegativeInstruction
+                            .dryRunReply(toolId.trim(), safeParams)),
+                    null, false, obs);
+            return;
+        }
+        // Agenda sans date ni heure : l'outil relit la phrase de Yannick (« demain à 10 h »
+        // perdu par le routeur → rangé à aujourd'hui sans heure).
+        if ("agenda".equalsIgnoreCase(toolId.trim()) && seedText != null
+                && safeParams.optString("start", "").trim().isEmpty()
+                && safeParams.optString("date", "").trim().isEmpty()
+                && safeParams.optString("time", "").trim().isEmpty()) {
+            try {
+                safeParams = new JSONObject(safeParams.toString()).put("utterance", seedText);
+            } catch (Exception ignored) { }
+        }
+
         // Fallback 120b/Qwen : notepad(add) avec vocabulaire diag = invention probable
         if (shouldBlockNotepadDiagFallback(appContext, toolId, safeParams)) {
             String text = safeParams.optString("text", "").trim();
