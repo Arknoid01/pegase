@@ -121,10 +121,43 @@ public final class ChatbotStore {
         if (release != null) release.cancel(false);
         float[][] out = embedder.embed(texts);
         // Gemma déjà en mémoire : mpnet (~200-250 Mo) libéré tout de suite pour ne pas
-        // coexister avec la génération (rechargé au message suivant, ≈1-2 s).
-        if (com.pegasuscorp.orbe.llm.LocalLlmServer.isModelLoaded()) releaseModel();
+        // coexister avec la génération (rechargé au message suivant, ≈1-2 s) — sauf pendant
+        // une recherche web, qui l'appelle plusieurs fois de suite.
+        if (com.pegasuscorp.orbe.llm.LocalLlmServer.isModelLoaded() && holds.get() == 0) releaseModel();
         else release = timer.schedule(this::releaseModel, IDLE_MS, TimeUnit.MILLISECONDS);
         return out;
+    }
+
+    private final java.util.concurrent.atomic.AtomicInteger holds = new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * Empreintes mpnet partagées (recherche privée) : une seule instance du modèle pour le
+     * chatbot et la recherche. Entourer une série d'appels de {@link #hold()} / {@link #unhold()}.
+     */
+    public float[][] embedTexts(List<String> texts) throws Exception {
+        return embed(texts);
+    }
+
+    public void hold() {
+        holds.incrementAndGet();
+    }
+
+    public void unhold() {
+        if (holds.decrementAndGet() <= 0) {
+            holds.set(0);
+            synchronized (this) {
+                if (release != null) release.cancel(false);
+                if (com.pegasuscorp.orbe.llm.LocalLlmServer.isModelLoaded()) releaseModel();
+                else release = timer.schedule(this::releaseModel, IDLE_MS, TimeUnit.MILLISECONDS);
+            }
+        }
+    }
+
+    /** mpnet présent (modèle + tokenizer). */
+    public static boolean modelInstalled(Context ctx) {
+        File d = modelDir(ctx);
+        return new File(d, MODEL_FILE).length() > 100_000_000L
+                && new File(d, com.pegasuscorp.orbe.search.MultilingualEmbedder.TOKENIZER_FILE).length() > 10_000_000L;
     }
 
     /** Appelé quand Gemma se charge : libère mpnet s'il est en mémoire. */

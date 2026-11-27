@@ -1,8 +1,6 @@
 package com.pegasuscorp.orbe.search;
 
 import android.content.Context;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
 import com.pegasuscorp.orbe.chat.ApiKeyStore;
@@ -10,19 +8,17 @@ import com.pegasuscorp.orbe.chat.ApiKeyStore;
 import java.io.File;
 
 /**
- * Côté Android du moteur de recherche privé : modèle d'embeddings (≈250 Mo, téléchargé en
- * Wi-Fi depuis Hugging Face), chargé à la demande et libéré après 3 min sans recherche
- * (la RAM du téléphone est partagée avec Qwen).
+ * Côté Android du moteur de recherche privé. Empreintes : mpnet int8, la MÊME instance que le
+ * chatbot (ChatbotStore) — depuis 2026-11-27, à la place de MiniLM (banc figé phone-v3 :
+ * 77,6 % contre 75,3 %, mêmes seuils ; un seul modèle en mémoire au lieu de deux).
  */
 public final class MoteurPrive {
 
     private static final String TAG = "MoteurPrive";
-    public static final String DOSSIER = "minilm-multi";
-    private static final long INACTIF_MS = 3 * 60_000L;
+    public static final String DOSSIER = com.pegasuscorp.orbe.chatbot.ChatbotStore.MODEL_DIR;
+    private static final String HF_MPNET =
+            "https://huggingface.co/Xenova/paraphrase-multilingual-mpnet-base-v2/resolve/main/";
 
-    private static MultilingualEmbedder embedder;
-    private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final Runnable LIBERER = MoteurPrive::liberer;
 
     private MoteurPrive() {}
 
@@ -34,7 +30,7 @@ public final class MoteurPrive {
     }
 
     public static boolean modeleInstalle(Context ctx) {
-        return MultilingualEmbedder.isInstalled(dossierModele(ctx));
+        return com.pegasuscorp.orbe.chatbot.ChatbotStore.modelInstalled(ctx);
     }
 
     /** Prêt = modèle présent + clé Brave (sans Brave, le web Bing est trop pauvre : Tavily reste). */
@@ -48,16 +44,17 @@ public final class MoteurPrive {
             Context app = ctx.getApplicationContext();
             android.app.DownloadManager dm = (android.app.DownloadManager)
                     app.getSystemService(Context.DOWNLOAD_SERVICE);
-            for (String f : new String[]{MultilingualEmbedder.TOKENIZER_FILE, MultilingualEmbedder.MODEL_FILE}) {
+            String modele = com.pegasuscorp.orbe.chatbot.ChatbotStore.MODEL_FILE;
+            for (String f : new String[]{MultilingualEmbedder.TOKENIZER_FILE, modele}) {
                 File cible = new File(dossierModele(app), f);
                 if (cible.isFile()) {
                     //noinspection ResultOfMethodCallIgnored
                     cible.delete();   // reste d'un essai interrompu
                 }
                 android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(
-                        android.net.Uri.parse(MultilingualEmbedder.HF_BASE + f))
+                        android.net.Uri.parse(HF_MPNET + (f.equals(modele) ? "onnx/" : "") + f))
                         .setTitle("Recherche privée Pégase — " + f)
-                        .setDescription("Modèle de compréhension des pages (≈250 Mo au total)")
+                        .setDescription("Modèle de compréhension des pages (≈300 Mo au total)")
                         .setNotificationVisibility(
                                 android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                         .setDestinationInExternalFilesDir(app, "models", DOSSIER + "/" + f)
@@ -71,27 +68,6 @@ public final class MoteurPrive {
         }
     }
 
-    private static synchronized MultilingualEmbedder embedder(Context ctx) throws Exception {
-        MAIN.removeCallbacks(LIBERER);
-        if (embedder == null) {
-            long t = System.currentTimeMillis();
-            embedder = MultilingualEmbedder.open(dossierModele(ctx));
-            Log.i(TAG, "modèle chargé en " + (System.currentTimeMillis() - t) + " ms");
-        }
-        MAIN.postDelayed(LIBERER, INACTIF_MS);
-        return embedder;
-    }
-
-    private static synchronized void liberer() {
-        if (embedder == null) return;
-        try {
-            embedder.close();
-        } catch (Exception ignored) {
-        }
-        embedder = null;
-        Log.i(TAG, "modèle libéré (inactif)");
-    }
-
     /** Recherche complète, BLOQUANTE (fil de fond). */
     public static Dossier chercher(Context ctx, String question) throws Exception {
         MoteurRecherche.Reglages r = new MoteurRecherche.Reglages();
@@ -101,10 +77,12 @@ public final class MoteurPrive {
             r.nPages = ReglagesRecherche.PAGES_4G;
             r.maxOctetsPage = ReglagesRecherche.OCTETS_4G;
         }
-        final MultilingualEmbedder e = embedder(ctx);
+        final com.pegasuscorp.orbe.chatbot.ChatbotStore store =
+                com.pegasuscorp.orbe.chatbot.ChatbotStore.of(ctx);
+        store.hold();
         try {
             long t0 = System.currentTimeMillis();
-            Dossier d = new MoteurRecherche(r, e::embed).chercher(question);
+            Dossier d = new MoteurRecherche(r, store::embedTexts).chercher(question);
             // Pas la question dans le journal système : seulement les mesures
             Log.i(TAG, "recherche " + (System.currentTimeMillis() - t0) + " ms, web=" + d.sourceWeb
                     + ", pages=" + d.pagesLues + "/" + r.nPages + ", " + (d.octetsPages / 1024) + " Ko"
@@ -113,8 +91,7 @@ public final class MoteurPrive {
                     + (d.refus != null ? ", REFUS (trop personnel)" : d.abstention ? ", abstention" : ""));
             return d;
         } finally {
-            MAIN.removeCallbacks(LIBERER);
-            MAIN.postDelayed(LIBERER, INACTIF_MS);
+            store.unhold();
         }
     }
 }
