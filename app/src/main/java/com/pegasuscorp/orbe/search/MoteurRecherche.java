@@ -55,7 +55,54 @@ public final class MoteurRecherche {
         Collecte col = collecter(question);
         Dossier d = Assemblage.assembler(col, vecteurs);
         Extraction.extractive(d, Extraction.phrasesCles(d, vecteurs));
+        presentationWikipedia(d, col);
         return d;
+    }
+
+    private static final Pattern QUI_EST = Pattern.compile(
+            "\\b(qui est|qui [ée]tait|c'est qui|qui c'est)\\b", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * « Qui est X ? » : la présentation de Wikipédia passe en tête (2 premières phrases), sinon
+     * le modèle répond avec une phrase d'article people (« passionné, sensible et plein
+     * d'élégance… », 2026-11-27). Seulement si le titre de l'article reprend un mot du nom demandé.
+     */
+    static void presentationWikipedia(Dossier d, Collecte col) {
+        if (d == null || col == null || col.pages.isEmpty() || d.refus != null) return;
+        String q = col.question == null ? "" : col.question;
+        if (!QUI_EST.matcher(q).find()) return;
+        Collecte.Page w = col.pages.get(0);
+        if (w.url == null || !w.url.contains("wikipedia.org") || w.texte == null) return;
+        if (!titreCorrespond(w.titre, q)) return;
+        String intro = premieresPhrases(w.texte, 2);
+        if (intro.length() < 40) return;
+        Dossier.Passage p = new Dossier.Passage(intro, "fr.wikipedia.org", w.url);
+        d.passages.removeIf(x -> x.url != null && x.url.equals(w.url));
+        d.passages.add(0, p);
+        // La « réponse extraite » est lue en premier par le modèle : pour « qui est », c'est la
+        // définition de Wikipédia qui doit y être, pas la phrase la plus proche de la question.
+        d.reponse = premieresPhrases(w.texte, 1);
+        d.abstention = false;
+    }
+
+    static boolean titreCorrespond(String titre, String question) {
+        if (titre == null) return false;
+        java.util.Set<String> q = TexteFr.tokenSet(question);
+        for (String mot : TexteFr.tokens(titre.replaceAll("\\(.*?\\)", " "))) {
+            if (mot.length() >= 4 && q.contains(mot)) return true;
+        }
+        return false;
+    }
+
+    static String premieresPhrases(String texte, int n) {
+        String t = texte.replaceAll("\\s+", " ").trim();
+        int fin = 0;
+        for (int k = 0; k < n; k++) {
+            int i = t.indexOf(". ", fin);
+            if (i < 0) return t.length() > 400 ? t.substring(0, 400).trim() : t;
+            fin = i + 1;
+        }
+        return t.substring(0, fin).trim();
     }
 
     // ---------- collecte ----------
@@ -98,15 +145,36 @@ public final class MoteurRecherche {
 
         // Web + Wikipédia + Actu en parallèle
         List<Future<List<SourcesWeb.Resultat>>> webF = new ArrayList<>();
+        Future<SourcesWeb.BraveReponse> braveF = null;
         if (brave) {
-            webF.add(POOL.submit(() -> SourcesWeb.brave(envoyee, reglages.cleBrave, 10)));
+            braveF = POOL.submit(() -> SourcesWeb.braveAvecCorrection(envoyee, reglages.cleBrave, 10));
         } else {
             for (String q : reformulees) webF.add(POOL.submit(() -> SourcesWeb.bingWeb(q, 10)));
         }
         Future<List<SourcesWeb.Resultat>> wikiF = POOL.submit(() -> SourcesWeb.wiki(sansCadre, 2));
+        // (remplacé plus bas si Brave corrige l'orthographe)
         Future<List<SourcesWeb.Resultat>> actuF = POOL.submit(() -> SourcesWeb.actu(sansCadre, 6));
 
         List<List<SourcesWeb.Resultat>> listes = new ArrayList<>();
+        if (braveF != null) {
+            SourcesWeb.BraveReponse br = attendre(braveF, 11_000);
+            if (br != null) {
+                listes.add(br.resultats);
+                // Faute de frappe corrigée par Brave (« qui est charcle leclerc ») : on garde la
+                // version corrigée pour Wikipédia et pour l'extraction (sinon « charcle »,
+                // absent des pages, fait abstenir le moteur).
+                String c = br.corrigee.trim();
+                if (!c.isEmpty() && !c.equalsIgnoreCase(envoyee.trim())) {
+                    if (col.questionOriginale == null) col.questionOriginale = question;
+                    col.corrigee = c;
+                    col.question = c;
+                    List<String> refo = requetesTelephone(c);
+                    String sc = refo.get(refo.size() - 1);
+                    wikiF.cancel(true);
+                    wikiF = POOL.submit(() -> SourcesWeb.wiki(sc, 2));
+                }
+            }
+        }
         for (Future<List<SourcesWeb.Resultat>> f : webF) {
             List<SourcesWeb.Resultat> l = attendre(f, 11_000);
             if (l != null) listes.add(l);

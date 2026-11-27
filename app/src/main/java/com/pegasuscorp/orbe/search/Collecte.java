@@ -24,6 +24,8 @@ public final class Collecte {
     public final List<String> retire = new ArrayList<>();
     public final List<Page> pages = new ArrayList<>();
     public String questionOriginale;
+    /** Requête corrigée par Brave (faute de frappe), sinon vide. */
+    public String corrigee = "";
     public String proposition;
     public String sourceWeb = "";
     /** Dossier déjà fait sans le web (refus de confidentialité, calcul local). */

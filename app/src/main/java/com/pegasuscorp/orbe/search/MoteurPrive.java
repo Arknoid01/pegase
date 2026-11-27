@@ -89,6 +89,8 @@ public final class MoteurPrive {
                     + (r.nPages == ReglagesRecherche.PAGES_4G ? " (4G)" : " (Wi-Fi)")
                     + (d.retire.isEmpty() ? "" : ", retiré : " + d.retire.size())
                     + (d.refus != null ? ", REFUS (trop personnel)" : d.abstention ? ", abstention" : ""));
+            Log.i(TAG, "passage 1 : " + (d.passages.isEmpty() ? "aucun" : d.passages.get(0).site)
+                    + ", réponse extraite " + d.reponse.length() + " car.");
             return d;
         } finally {
             store.unhold();

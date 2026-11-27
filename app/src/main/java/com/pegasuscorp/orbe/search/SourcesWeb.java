@@ -75,8 +75,23 @@ public final class SourcesWeb {
 
     // ---------- Brave ----------
 
+    /** Résultats Brave + requête corrigée par Brave (« charcle » → « charles »), sinon vide. */
+    public static final class BraveReponse {
+        public final List<Resultat> resultats;
+        public final String corrigee;
+
+        BraveReponse(List<Resultat> resultats, String corrigee) {
+            this.resultats = resultats;
+            this.corrigee = corrigee == null ? "" : corrigee;
+        }
+    }
+
     /** Web général. La question telle quelle (Brave comprend le langage naturel) : 1 requête = 1 crédit. */
     public static List<Resultat> brave(String question, String cle, int n) throws Exception {
+        return braveAvecCorrection(question, cle, n).resultats;
+    }
+
+    public static BraveReponse braveAvecCorrection(String question, String cle, int n) throws Exception {
         Map<String, String> h = new TreeMap<>();
         h.put("Accept", "application/json");
         h.put("X-Subscription-Token", cle);
@@ -95,9 +110,11 @@ public final class SourcesWeb {
         }
         JSONObject j = new JSONObject(corps);
         List<Resultat> out = new ArrayList<>();
+        JSONObject qj = j.optJSONObject("query");
+        String corrigee = qj != null ? qj.optString("altered", "") : "";
         JSONObject web = j.optJSONObject("web");
         JSONArray res = web != null ? web.optJSONArray("results") : null;
-        if (res == null) return out;
+        if (res == null) return new BraveReponse(out, corrigee);
         for (int i = 0; i < res.length() && out.size() < n; i++) {
             JSONObject it = res.getJSONObject(i);
             String u = it.optString("url");
@@ -112,17 +129,23 @@ public final class SourcesWeb {
             out.add(new Resultat(u, LecteurPages.nettoyer(it.optString("title")), ex.toString().trim(),
                     age.length() >= 10 ? age.substring(0, 10) : "", "brave"));
         }
-        return out;
+        return new BraveReponse(out, corrigee);
     }
 
     // ---------- Wikipédia ----------
+
+    static final String WIKI_UA = "PegaseOrbe/1.0 (assistant personnel Android ; usage privé)";
 
     /** Recherche + extraits d'intro en un seul appel (texte brut, rien à télécharger). */
     public static List<Resultat> wiki(String requete, int n) throws Exception {
         String url = "https://fr.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch="
                 + enc(requete) + "&gsrlimit=" + n
                 + "&prop=extracts%7Cinfo&exintro=1&explaintext=1&inprop=url&redirects=1";
-        JSONObject q = new JSONObject(get(url, null, 8_000)).optJSONObject("query");
+        // API Wikimedia : identifiant d'appli honnête (règle Wikimedia) — avec l'identifiant de
+        // navigateur, le client Java recevait HTTP 429 et Wikipédia manquait (2026-11-27).
+        Map<String, String> h = new TreeMap<>();
+        h.put("User-Agent", WIKI_UA);
+        JSONObject q = new JSONObject(get(url, h, 8_000)).optJSONObject("query");
         List<Resultat> out = new ArrayList<>();
         if (q == null || q.optJSONObject("pages") == null) return out;
         JSONObject pages = q.getJSONObject("pages");
