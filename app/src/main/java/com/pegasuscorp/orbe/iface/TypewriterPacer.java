@@ -52,6 +52,11 @@ public final class TypewriterPacer {
         return finalText && shown >= target.length();
     }
 
+    /** Rien encore affiché : on remet le compteur à zéro (attente de la fin de la réflexion). */
+    public void holdStart() {
+        if (shown == 0) carry = 0f;
+    }
+
     /** Rattrape tout d'un coup (nouveau message envoyé, onglet quitté). */
     public void flush() {
         shown = target.length();

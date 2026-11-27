@@ -38,6 +38,18 @@ public class LocalServerChatBackendWebTest {
         assertEquals(LocalServerChatBackend.WEB_YES, n("tu sais qui a gagné hier ?"));
         assertEquals(LocalServerChatBackend.WEB_YES, n("il s'est passé quoi en Ukraine cette semaine ?"));
         assertEquals(LocalServerChatBackend.WEB_YES, n("cherche les horaires de la déchetterie"));
+        assertEquals(LocalServerChatBackend.WEB_YES, n("Tu peux me dire qui est charcle leclerc ?"));
+        assertEquals(LocalServerChatBackend.WEB_YES, n("peux-tu me dire quand sort Hollow Knight Silksong ?"));
+    }
+
+    @Test public void reponseCoupee_rameneeALaDernierePhrase() {
+        assertEquals("Il était une fois un machin. Il brillait fort.",
+                LocalServerChatBackend.trimUnfinished("Il était une fois un machin. Il brillait fort. Les ombres n'étaient plus sombres, mais"));
+        assertEquals("Salut ! Ça va ?", LocalServerChatBackend.trimUnfinished("Salut ! Ça va ?"));
+        assertEquals("Bravo 😂", LocalServerChatBackend.trimUnfinished("Bravo 😂"));
+        // Trop court après coupe : on garde tel quel
+        assertEquals("Oui. Et puis il est parti loin dans la forêt sans jamais revenir",
+                LocalServerChatBackend.trimUnfinished("Oui. Et puis il est parti loin dans la forêt sans jamais revenir"));
     }
 
     @Test public void jamaisDeDecisionParLeModele() {

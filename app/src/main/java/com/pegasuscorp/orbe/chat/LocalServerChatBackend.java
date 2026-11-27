@@ -197,12 +197,29 @@ public final class LocalServerChatBackend implements ChatBackend {
         // connue sort tout de suite, une idée est reformulée par l'E2B (plan-chatbot-hybride.md).
         ChatbotEngine bot = null;
         ChatbotEngine.Decision cb = null;
+        String finalStep = null;   // « Je prépare ma réponse… » : affiché juste avant l'écriture
+        boolean factualBypass = false;   // banque écartée pour une question factuelle
         if (chatbotEligible(user)) {
             bot = ChatbotStore.of(app).get();
             if (bot != null) {
                 cb = bot.decide(user);
                 benchDecision = cb;
                 Log.i(TAG, "chatbot " + cb + (cb.ideas.isEmpty() ? "" : " idées=" + cb.ideas.size()));
+                // Question factuelle (« qui est… », actu, prix…) : le web passe avant la banque.
+                // (2026-11-27 : « qui est charcle leclerc ? » → banque « blague » à 0,70.)
+                if (!"faible".equals(cb.zone) && webNeed(user) == WEB_YES && cb.score < 0.9f) {
+                    Log.i(TAG, "chatbot ignoré : question factuelle, recherche web");
+                    cb = null;
+                    benchDecision = null;
+                    factualBypass = true;
+                }
+            }
+            if (cb != null) {
+                // Vraies étapes du chatbot vers la ligne « réflexion » de la discussion.
+                for (String st : cb.steps) {
+                    if (st.startsWith("Je prépare") || st.startsWith("Je réfléchis")) finalStep = st;
+                    else com.pegasuscorp.orbe.ui.ThinkingSteps.post(st);
+                }
                 if ("forte".equals(cb.zone) && !cb.reply.isEmpty()) {
                     lastWebQuery = null;
                     return cb.reply;
@@ -227,7 +244,9 @@ public final class LocalServerChatBackend implements ChatBackend {
         // Réponse libre derrière le chatbot (zone faible) : personnalité courte, sans le bloc
         // souvenirs ni la consigne « 4 à 6 phrases ». Le banc du 2026-11-25 montrait 60 %
         // d'inventions avec le grand prompt (« je me souviens de ton chien… », Fableris partout).
-        final boolean shortVoice = cb != null;
+        // Question factuelle sortie de la banque : même prompt court (sans souvenirs) — le grand
+        // prompt + souvenirs faisait 35 s sur CPU pour « qui est Charles Leclerc ? ».
+        final boolean shortVoice = cb != null || factualBypass;
         // Demande de travail (« propose-moi trois choses… ») : l'E2B la traite avec de la place.
         final boolean task = cb != null && !reformulate && cb.task;
 
@@ -245,7 +264,13 @@ public final class LocalServerChatBackend implements ChatBackend {
             query = need == WEB_YES ? user
                     : need == WEB_ASK ? webQuery(server, user, lastAssistant) : null;
         }
-        if (query != null) web = runSearch(query, question);
+        if (query != null) {
+            com.pegasuscorp.orbe.ui.ThinkingSteps.post("Je cherche sur le web…");
+            web = runSearch(query, question);
+            com.pegasuscorp.orbe.ui.ThinkingSteps.post(web != null
+                    ? "J'ai trouvé des sources, je les lis"
+                    : "Rien de fiable en ligne, je réponds avec ce que je sais");
+        }
         lastWebQuery = web != null ? query : null;
         // Politesse courte (bonjour, merci…) : on repart de zéro, sans souvenirs ni vieux sujet
         boolean social = isShortSocial(user);
@@ -256,6 +281,7 @@ public final class LocalServerChatBackend implements ChatBackend {
         String memories = social || (reformulate && !pastQ)
                 || (shortVoice && !pastQ && !ASKS_MEMORY.matcher(user).find())
                 ? null : memoriesFor(user);
+        if (memories != null) com.pegasuscorp.orbe.ui.ThinkingSteps.post("Je fouille dans mes souvenirs");
         if (pastQ && memories == null && web == null) {
             Log.i(TAG, "passé commun sans souvenir : réponse honnête sans E2B");
             String honest = NO_TRACE_REPLIES[(int) (System.nanoTime() % NO_TRACE_REPLIES.length)];
@@ -352,6 +378,11 @@ public final class LocalServerChatBackend implements ChatBackend {
                 .put("id_slot", LocalLlmServer.CHAT_SLOT)
                 .put("cache_prompt", true)
                 .put("chat_template_kwargs", new JSONObject().put("enable_thinking", false));
+        if (server.usesLitert() && !LocalLlmServer.isModelLoaded()) {
+            com.pegasuscorp.orbe.ui.ThinkingSteps.post("Je réveille mon modèle…");
+        }
+        com.pegasuscorp.orbe.ui.ThinkingSteps.post(finalStep != null ? finalStep
+                : web != null ? "Je rédige à partir des sources…" : "Je prépare ma réponse…");
         long t0 = System.currentTimeMillis();
         String full = server.chatStream(body, REPLY_TIMEOUT_MS, acc -> {
             if (callback instanceof StreamOnReply) {
@@ -362,7 +393,7 @@ public final class LocalServerChatBackend implements ChatBackend {
         Log.i(TAG, "réponse " + (System.currentTimeMillis() - t0) + " ms, web=" + (web != null)
                 + ", souvenirs=" + (memories != null)
                 + " · " + LocalLlmServer.describeTimings(server.lastTimings));
-        String out = PegasePrompt.sanitizeForDisplay(full).trim();
+        String out = trimUnfinished(PegasePrompt.sanitizeForDisplay(full).trim());
         benchRaw = out;
         // Gabarit recopié (« On avait décidé de [résumer brièvement l'étape précédente] ») :
         // les phrases à trous partent ; s'il ne reste rien, réponse honnête.
@@ -455,6 +486,31 @@ public final class LocalServerChatBackend implements ChatBackend {
                     + "il y a|y a-t-il)\\b",
             Pattern.CASE_INSENSITIVE);
 
+    /**
+     * Réponse coupée par la limite de longueur (« …n'étaient plus sombres, mais ») : on la ramène
+     * à sa dernière phrase complète, si elle garde au moins la moitié du texte.
+     */
+    static String trimUnfinished(String text) {
+        if (text == null) return "";
+        String t = text.trim();
+        if (t.isEmpty() || t.matches("(?s).*[.!?…»\")\\]]\\s*$")
+                || Character.getType(t.codePointBefore(t.length())) == Character.OTHER_SYMBOL
+                || Character.isSurrogate(t.charAt(t.length() - 1))) {
+            return t;   // fini proprement (ponctuation ou émoji)
+        }
+        int cut = -1;
+        for (int i = t.length() - 1; i > 0; i--) {
+            char c = t.charAt(i);
+            if ((c == '.' || c == '!' || c == '?' || c == '…')
+                    && (i + 1 == t.length() || Character.isWhitespace(t.charAt(i + 1)))) {
+                cut = i + 1;
+                break;
+            }
+        }
+        if (cut < 0 || cut < t.length() / 2) return t;
+        return t.substring(0, cut).trim();
+    }
+
     /** « cherche… », « sur internet » : demande explicite. */
     private static final Pattern WEB_EXPLICIT = Pattern.compile(
             "\\b(cherche|recherche|regarde sur|sur (le )?(web|net|internet)|google|v[ée]rifie en ligne)",
@@ -471,10 +527,12 @@ public final class LocalServerChatBackend implements ChatBackend {
             Pattern.CASE_INSENSITIVE);
     /** « tu sais / tu connais… » : demande de savoir malgré le « tu ». */
     private static final Pattern WEB_KNOW = Pattern.compile(
-            "\\b(tu sais|tu connais|dis-moi|t'as vu|tu as vu|tu as entendu)\\b", Pattern.CASE_INSENSITIVE);
+            "\\b(tu sais|sais-tu|tu connais|connais-tu|dis-moi|tu peux me dire|peux-tu me dire|"
+                    + "tu pourrais me dire|tu me dis|t'as vu|tu as vu|tu as entendu)\\b", Pattern.CASE_INSENSITIVE);
     /** Questions de fait précis (personne, date, lieu, nombre). */
     private static final Pattern WEB_FACT = Pattern.compile(
-            "^(qui|quand|o[uù]|combien|quel|quelle|quels|quelles)\\b|\\b(qui est|qui a|c'est qui|quand est|o[uù] est)\\b",
+            "^(qui|quand|o[uù]|combien|quel|quelle|quels|quelles)\\b|\\b(qui est|qui a|c'est qui|quand est|quand sort|quand a lieu|o[uù] est)\\b"
+                    + "|\\b(me dire|savoir|sais-tu|tu sais)\\s+(qui|quand|o[uù]|combien|quel|quelle)\\b",
             Pattern.CASE_INSENSITIVE);
 
     /**

@@ -323,6 +323,7 @@ public class DiscussionFragment extends Fragment {
         super.onResume();
         applyDiscussionTabMode(true);
         ensureTurnsListener();
+        com.pegasuscorp.orbe.ui.ThinkingSteps.setListener(stepListener);
         refreshConversationIfNeeded();
         deliverPendingChatPhrase();
     }
@@ -336,6 +337,7 @@ public class DiscussionFragment extends Fragment {
 
     @Override
     public void onPause() {
+        com.pegasuscorp.orbe.ui.ThinkingSteps.clearListener(stepListener);
         applyDiscussionTabMode(false);
         // Ne pas retirer le listener ici — sinon addTurn n'actualise plus la liste.
         super.onPause();
@@ -445,6 +447,14 @@ public class DiscussionFragment extends Fragment {
     /** Texte de la réponse en cours d'écriture (streaming), affiché en fin de fil. */
     private String livePartialText = "";
 
+    /** Vraies étapes de réflexion (chatbot, web, souvenirs, modèle) → ligne de réflexion. */
+    private final com.pegasuscorp.orbe.ui.ThinkingSteps.Listener stepListener = step -> runOnUi(() -> {
+        if (!isAdded() || thinkingView == null) return;
+        if (host != null && !host.isDiscussionTabVisible()) return;
+        PegaseWakeController.setAssistantThinking(true);
+        thinkingView.onStep(step);
+    });
+
     /** Écriture à cadence régulière de la réponse (morceaux du modèle ou bloc entier). */
     private final TypewriterPacer pacer = new TypewriterPacer();
     private final android.os.Handler paceHandler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -456,7 +466,13 @@ public class DiscussionFragment extends Fragment {
                     || (host != null && !host.isDiscussionTabVisible())) {
                 // Onglet quitté : on montre tout, sans animation.
                 pacer.flush();
+            } else if (livePartialText.isEmpty() && thinkingView != null
+                    && !thinkingView.readyForAnswer()) {
+                // On laisse lire la dernière étape de réflexion avant d'écrire.
+                pacer.tick(System.nanoTime());
+                pacer.holdStart();
             } else if (pacer.tick(System.nanoTime())) {
+                if (livePartialText.isEmpty() && thinkingView != null) thinkingView.onComplete();
                 livePartialText = pacer.shown();
                 if (!conversationAdapter.updateLive(livePartialText)) refreshConversationIfNeeded();
                 scrollConversationToEnd();

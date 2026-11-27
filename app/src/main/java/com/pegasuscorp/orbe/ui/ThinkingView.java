@@ -44,6 +44,74 @@ public class ThinkingView extends LinearLayout {
     private Runnable pulseLoop;
     private Runnable errorHide;
 
+    // ---- Étapes réelles (chatbot, web, souvenirs, modèle) ----
+    /** Durée minimale d'affichage d'une étape, pour qu'elle soit lisible. */
+    static final long STEP_MIN_MS = 900;
+    /** Sans nouvelle étape pendant ce temps : « je peaufine… », puis « encore un instant… ». */
+    static final long SLOW_AFTER_MS = 7000;
+    private static final String[] SLOW_STEPS = {"Je peaufine…", "Encore un instant…"};
+    private final java.util.ArrayDeque<String> stepQueue = new java.util.ArrayDeque<>();
+    private long stepShownAt = 0L;
+    private boolean stepMode = false;
+    private int slowIndex = 0;
+    private final Runnable stepPump = this::pumpSteps;
+    private final Runnable slowStep = new Runnable() {
+        @Override public void run() {
+            if (completing || !stepMode || slowIndex >= SLOW_STEPS.length) return;
+            showStepText(SLOW_STEPS[slowIndex++]);
+            main.postDelayed(this, SLOW_AFTER_MS);
+        }
+    };
+
+    /**
+     * Vrai si la réponse peut commencer à s'écrire : plus d'étape en attente et la dernière
+     * affichée assez longtemps pour être lue (UI seulement).
+     */
+    public boolean readyForAnswer() {
+        if (!stepMode || completing) return true;
+        return stepQueue.isEmpty()
+                && android.os.SystemClock.uptimeMillis() - stepShownAt >= STEP_MIN_MS;
+    }
+
+    /** Nouvelle étape réelle (depuis n'importe quel fil). */
+    public void onStep(String step) {
+        runUi(() -> {
+            if (completing || step == null || step.isEmpty()) return;
+            cancelErrorHide();
+            stepQueue.add(step);
+            pumpSteps();
+        });
+    }
+
+    private void pumpSteps() {
+        main.removeCallbacks(stepPump);
+        if (completing || stepQueue.isEmpty()) return;
+        long wait = stepShownAt + STEP_MIN_MS - android.os.SystemClock.uptimeMillis();
+        if (stepMode && wait > 0) {
+            main.postDelayed(stepPump, wait);
+            return;
+        }
+        showStepText(stepQueue.poll());
+        slowIndex = 0;
+        main.removeCallbacks(slowStep);
+        main.postDelayed(slowStep, SLOW_AFTER_MS);
+        if (!stepQueue.isEmpty()) main.postDelayed(stepPump, STEP_MIN_MS);
+    }
+
+    private void showStepText(String text) {
+        stepMode = true;
+        stepShownAt = android.os.SystemClock.uptimeMillis();
+        stopPulse();
+        showFadeIn();
+        if (thinkingText == null) return;
+        thinkingText.setTextColor(CYAN);
+        thinkingText.setAlpha(0.35f);
+        thinkingText.setText("⟳  " + text);
+        thinkingText.animate().cancel();
+        thinkingText.animate().alpha(1f).setDuration(180).start();
+        if (spinner != null) spinner.setVisibility(VISIBLE);
+    }
+
     public ThinkingView(Context context) {
         super(context);
         init(context);
@@ -94,6 +162,12 @@ public class ThinkingView extends LinearLayout {
     /** Réinitialise pour un nouveau tour. */
     public void reset() {
         cancelPending();
+        main.removeCallbacks(stepPump);
+        main.removeCallbacks(slowStep);
+        stepQueue.clear();
+        stepMode = false;
+        slowIndex = 0;
+        stepShownAt = 0L;
         tools.clear();
         llmPhase = false;
         completing = false;
@@ -160,6 +234,7 @@ public class ThinkingView extends LinearLayout {
         runUi(() -> {
             if (completing) return;
             cancelErrorHide();
+            if (stepMode) return;   // les vraies étapes priment sur « Pégase réfléchit… »
             llmPhase = true;
             showFadeIn();
             renderLlmLine();
@@ -178,6 +253,9 @@ public class ThinkingView extends LinearLayout {
             completing = true;
             stopPulse();
             cancelErrorHide();
+            main.removeCallbacks(stepPump);
+            main.removeCallbacks(slowStep);
+            stepQueue.clear();
             if (!tools.isEmpty() && thinkingText != null) {
                 thinkingText.setTextColor(MUTED);
                 thinkingText.setText(buildToolsLine(true) + " · LLM ✅");
