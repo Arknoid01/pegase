@@ -7,7 +7,10 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
+import com.pegasuscorp.orbe.llm.LocalLlmServer;
+
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Ménage tout seul : scan → LLM → suppression uniquement des verdicts « spam ».
@@ -18,6 +21,10 @@ public final class SmsAutoCleaner {
     private static final String TAG = "SmsAutoClean";
     static final long COOLDOWN_MS = 6L * 60 * 60 * 1000;
     static final long RETRY_MS = 30L * 60 * 1000;
+    /** Modèle local : chaque essai occupe le GPU ~1 min, on espace davantage. */
+    static final long RETRY_LOCAL_MS = 2L * 60 * 60 * 1000;
+    /** Un seul tri à la fois : chaque retour à l'accueil relançait un tri pendant le précédent. */
+    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
 
     private SmsAutoCleaner() {}
 
@@ -36,6 +43,18 @@ public final class SmsAutoCleaner {
     }
 
     public static int sweep(Context ctx) {
+        if (!RUNNING.compareAndSet(false, true)) {
+            Log.i(TAG, "tri déjà en cours, ignoré");
+            return 0;
+        }
+        try {
+            return sweepLocked(ctx);
+        } finally {
+            RUNNING.set(false);
+        }
+    }
+
+    private static int sweepLocked(Context ctx) {
         if (!SmsInbox.isAutoCleanEnabled(ctx)) return 0;
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -56,13 +75,16 @@ public final class SmsAutoCleaner {
             SmsInbox.markAutoSweepDone(ctx);
             return 0;
         }
+        long retryMs = LocalLlmServer.isLocalOnly(ctx) ? RETRY_LOCAL_MS : RETRY_MS;
+        // Posé AVANT l'appel : si l'appli meurt pendant le tri, pas de relance immédiate.
+        SmsInbox.markAutoSweepRetry(ctx, COOLDOWN_MS, retryMs);
         boolean classified = SmsSpamLlm.classify(ctx, found);
         List<Long> ids = SmsSpamRules.sureSpamThreadIds(found);
         // Tri raté (réseau, réponse illisible) : réessayer au prochain passage, pas dans 6 h.
         if (classified) {
             SmsInbox.markAutoSweepDone(ctx);
         } else {
-            SmsInbox.markAutoSweepRetry(ctx, COOLDOWN_MS, RETRY_MS);
+            SmsInbox.markAutoSweepRetry(ctx, COOLDOWN_MS, retryMs);
         }
         if (ids.isEmpty()) {
             Log.i(TAG, "aucun spam sûr parmi " + found.size());

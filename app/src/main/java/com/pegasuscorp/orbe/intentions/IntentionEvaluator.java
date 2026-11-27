@@ -32,6 +32,10 @@ import com.pegasuscorp.orbe.intentions.rules.WorkWifiRule;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Orchestre snapshot → règles → policy → notifier. Met à jour last_seen après éval.
@@ -47,14 +51,47 @@ public final class IntentionEvaluator {
 
     private static final IntentionRule BRIEF_RULE = new BriefReadyRule();
 
+    /** Les vérifications F1 font du réseau (OpenF1, RSS) : jamais sur le fil principal. */
+    private static final ExecutorService F1_EXEC = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "intentions-f1");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final AtomicBoolean F1_RUNNING = new AtomicBoolean(false);
+    private static final AtomicLong F1_LAST_MS = new AtomicLong(0);
+    /** BATTERY_CHANGED arrive à chaque variation : pas plus d'une vérification réseau toutes les 2 min. */
+    static final long F1_MIN_INTERVAL_MS = 2L * 60 * 1000;
+
     private IntentionEvaluator() {}
 
     /** Prefetch terminé avec succès. */
     public static void onBriefReady(Context ctx) {
         evaluate(ctx, true);
-        checkF1Debrief(ctx);
-        checkF1News(ctx);
-        checkF1Live(ctx);
+        checkF1Async(ctx, true);
+    }
+
+    /** Lance débrief + actus + live F1 sur un fil de fond (un seul passage à la fois). */
+    static void checkF1Async(Context ctx, boolean force) {
+        if (ctx == null) return;
+        long now = System.currentTimeMillis();
+        if (!force && now - F1_LAST_MS.get() < F1_MIN_INTERVAL_MS) return;
+        if (!F1_RUNNING.compareAndSet(false, true)) return;
+        F1_LAST_MS.set(now);
+        Context app = ctx.getApplicationContext();
+        try {
+            F1_EXEC.execute(() -> {
+                try {
+                    checkF1Debrief(app);
+                    checkF1News(app);
+                    checkF1Live(app);
+                } finally {
+                    F1_RUNNING.set(false);
+                }
+            });
+        } catch (Exception e) {
+            F1_RUNNING.set(false);
+            Log.w(TAG, "checkF1Async", e);
+        }
     }
 
     /** Tick capteurs (~90 min) — re-check F1 si la fiche a changé. */
@@ -64,9 +101,7 @@ public final class IntentionEvaluator {
         try {
             com.pegasuscorp.orbe.intentions.location.LocationSituationTracker.evaluate(ctx);
         } catch (Exception ignored) {}
-        checkF1Debrief(ctx);
-        checkF1News(ctx);
-        checkF1Live(ctx);
+        checkF1Async(ctx, false);
     }
 
     /**

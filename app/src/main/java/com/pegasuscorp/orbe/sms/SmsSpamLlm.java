@@ -27,6 +27,8 @@ public final class SmsSpamLlm {
     static final int BATCH = 40;
     /** gpt-oss raisonne avant de répondre : 12 s ne suffisaient pas toujours pour 40 SMS. */
     static final long TIMEOUT_S = 60;
+    /** Gemma local sur le Nothing : 45-61 s pour un lot → 60 s faisait échouer le tri. */
+    static final long TIMEOUT_LOCAL_S = 180;
     /** Place pour ~40 verdicts JSON + le raisonnement du modèle (500 tronquait la liste). */
     static final int MAX_TOKENS = 4000;
 
@@ -71,7 +73,9 @@ public final class SmsSpamLlm {
                     }
                 }, options()));
         try {
-            if (!done.await(TIMEOUT_S, TimeUnit.SECONDS)) {
+            long timeout = com.pegasuscorp.orbe.llm.LocalLlmServer.isLocalOnly(ctx)
+                    ? TIMEOUT_LOCAL_S : TIMEOUT_S;
+            if (!done.await(timeout, TimeUnit.SECONDS)) {
                 Log.w(TAG, "LLM trop lent");
                 return false;
             }
