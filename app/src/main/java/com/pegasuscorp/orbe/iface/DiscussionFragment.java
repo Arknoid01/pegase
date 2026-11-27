@@ -343,6 +343,8 @@ public class DiscussionFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
+        paceHandler.removeCallbacks(paceTick);
+        paceRunning = false;
         if (visualStateListener != null) {
             PegaseVisualStateHub.removeListener(visualStateListener);
             visualStateListener = null;
@@ -443,12 +445,67 @@ public class DiscussionFragment extends Fragment {
     /** Texte de la réponse en cours d'écriture (streaming), affiché en fin de fil. */
     private String livePartialText = "";
 
+    /** Écriture à cadence régulière de la réponse (morceaux du modèle ou bloc entier). */
+    private final TypewriterPacer pacer = new TypewriterPacer();
+    private final android.os.Handler paceHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean paceRunning = false;
+    private final Runnable paceTick = new Runnable() {
+        @Override public void run() {
+            paceRunning = false;
+            if (!isAdded() || conversationAdapter == null
+                    || (host != null && !host.isDiscussionTabVisible())) {
+                // Onglet quitté : on montre tout, sans animation.
+                pacer.flush();
+            } else if (pacer.tick(System.nanoTime())) {
+                livePartialText = pacer.shown();
+                if (!conversationAdapter.updateLive(livePartialText)) refreshConversationIfNeeded();
+                scrollConversationToEnd();
+            }
+            if (pacer.isDone()) {
+                finishPacedReply();
+                return;
+            }
+            if (pacer.shown().length() < pacer.target().length() || !pacer.isFinal()) schedulePace();
+        }
+    };
+
+    private void schedulePace() {
+        if (paceRunning) return;
+        paceRunning = true;
+        paceHandler.postDelayed(paceTick, 16);
+    }
+
+    /** Réponse finale entièrement écrite : on remet le fil normal (message enregistré). */
+    private void finishPacedReply() {
+        pacer.reset();
+        livePartialText = "";
+        lastConversationText = "";
+        refreshConversationIfNeeded();
+        PegaseWakeController.setAssistantThinking(false);
+        if (thinkingView != null && isAdded()) thinkingView.onComplete();
+        finishTextChatReply();
+    }
+
     /** Ajoute la réponse en cours d'écriture comme message de Pégase (vide = rien). */
     private List<PegaseInterfaceData.ChatMessageUi> withLivePartial(
             List<PegaseInterfaceData.ChatMessageUi> messages) {
-        if (livePartialText == null || livePartialText.isEmpty()) return messages;
+        boolean pacingFinal = pacer.isFinal() && pacer.isActive();
+        if (!pacingFinal && (livePartialText == null || livePartialText.isEmpty())) return messages;
         List<PegaseInterfaceData.ChatMessageUi> out = new ArrayList<>(messages);
-        out.add(new PegaseInterfaceData.ChatMessageUi(false, "Pégase", livePartialText, ""));
+        // Réponse déjà enregistrée mais pas encore entièrement écrite : on cache la version
+        // complète et on garde la bulle en cours d'écriture.
+        if (pacingFinal && !out.isEmpty()) {
+            PegaseInterfaceData.ChatMessageUi last = out.get(out.size() - 1);
+            String t = pacer.target().trim();
+            if (!last.fromUser && last.text != null && !t.isEmpty()
+                    && (last.text.trim().equals(t) || last.text.trim().startsWith(t)
+                        || t.startsWith(last.text.trim()))) {
+                out.remove(out.size() - 1);
+            }
+        }
+        String live = pacingFinal ? pacer.shown() : livePartialText;
+        if (live == null || live.isEmpty()) return out;
+        out.add(new PegaseInterfaceData.ChatMessageUi(false, "Pégase", live, ""));
         return out;
     }
 
@@ -1143,6 +1200,13 @@ public class DiscussionFragment extends Fragment {
 
     private void sendTextChatMessage() {
         if (chatInput == null || viewModel == null) return;
+        // Réponse terminée mais encore en train de s'écrire : on la finit d'un coup, puis on envoie.
+        if (pacer.isFinal() && pacer.isActive()) {
+            paceHandler.removeCallbacks(paceTick);
+            paceRunning = false;
+            pacer.flush();
+            finishPacedReply();
+        }
         if (viewModel.isChatSending()) {
             handleSendWhileBusy();
             return;
@@ -1192,6 +1256,13 @@ public class DiscussionFragment extends Fragment {
         if (host != null) host.updateSubtitle();
 
         // addTurn est synchrone dans send() — rafraîchir après pour voir la bulle user.
+        // Réponse précédente encore en cours d'écriture : on l'affiche en entier tout de suite.
+        if (pacer.isActive()) {
+            paceHandler.removeCallbacks(paceTick);
+            paceRunning = false;
+            pacer.reset();
+            livePartialText = "";
+        }
         PegaseSession.get(ctx).send(text, textSessionObserver());
         lastConversationText = "";
         refreshConversationIfNeeded();
@@ -1233,25 +1304,31 @@ public class DiscussionFragment extends Fragment {
                 runOnUi(() -> {
                     if (!isAdded() || conversationAdapter == null) return;
                     if (host != null && !host.isDiscussionTabVisible()) return;
-                    livePartialText = accumulated == null ? "" : accumulated;
-                    // léger : ne reconstruit que le message en cours ; complet seulement au 1er morceau
-                    if (!conversationAdapter.updateLive(livePartialText)) {
-                        refreshConversationIfNeeded();
-                    }
-                    scrollConversationToEnd();
+                    // Pas d'affichage direct : le régulateur écrit à cadence fixe.
+                    pacer.setTarget(accumulated == null ? "" : accumulated);
+                    schedulePace();
                 });
             }
 
             @Override
             public void onReply(String reply, boolean toolFired) {
                 runOnUi(() -> {
-                    livePartialText = "";
-                    lastConversationText = "";
-                    refreshConversationIfNeeded();
-                    if (toolFired) return;
-                    PegaseWakeController.setAssistantThinking(false);
-                    if (thinkingView != null && isAdded()) thinkingView.onComplete();
-                    finishTextChatReply();
+                    boolean visible = isAdded() && conversationAdapter != null
+                            && (host == null || host.isDiscussionTabVisible());
+                    if (toolFired || !visible || reply == null || reply.trim().isEmpty()) {
+                        pacer.reset();
+                        livePartialText = "";
+                        lastConversationText = "";
+                        refreshConversationIfNeeded();
+                        if (toolFired) return;
+                        PegaseWakeController.setAssistantThinking(false);
+                        if (thinkingView != null && isAdded()) thinkingView.onComplete();
+                        finishTextChatReply();
+                        return;
+                    }
+                    // Même cadence pour une réponse instantanée (banque, outil) que pour le flux.
+                    pacer.markFinal(reply);
+                    schedulePace();
                 });
             }
 
